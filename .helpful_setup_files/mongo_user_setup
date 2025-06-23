@@ -1,0 +1,11 @@
+use ai_platform;
+// Create the application user with readWrite privileges on dev_ai_platform
+db.createUser({
+  user: "ai_rw_user",
+  pwd: "Th1s1sth3B3stP@ssw0rd",
+  roles: [
+    { role: "readWrite", db: "ai_platform" }
+  ]
+});
+// Verify the user was created:
+db.getUsers();

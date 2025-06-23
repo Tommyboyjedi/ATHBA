@@ -1,0 +1,45 @@
+/* Apply to editor wrapper */
+.spec-editor-container {
+  background-color: #ffffff;
+  color: #1a202c;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.25rem;
+  padding: 0;
+}
+
+/* Quill content area */
+.spec-editor-container .ql-container {
+  border: none;
+  background-color: #ffffff;
+  color: #1a202c;
+}
+
+.spec-editor-container .ql-editor {
+  background-color: #ffffff;
+  color: #1a202c;
+  min-height: 300px;
+}
+
+/* Quill toolbar (if used) */
+.spec-editor-container .ql-toolbar {
+  background-color: #f7fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* DARK MODE OVERRIDES */
+.dark .spec-editor-container {
+  background-color: #1a202c;
+  color: #f7fafc;
+  border-color: #4a5568;
+}
+
+.dark .spec-editor-container .ql-container,
+.dark .spec-editor-container .ql-editor {
+  background-color: #2d3748;
+  color: #f7fafc;
+}
+
+.dark .spec-editor-container .ql-toolbar {
+  background-color: #2d3748;
+  border-color: #4a5568;
+}

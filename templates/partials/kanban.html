@@ -1,0 +1,35 @@
+<!-- partials/kanban.html -->
+<div class="kanban-wrapper">
+  <div class="kanban-header">
+    <h2 class="kanban-title">Kanban Board</h2>
+    <div class="space-x-2">
+      <button
+        hx-get="/api/kanban/edit/"
+        hx-target="#kanban-board"
+        hx-swap="outerHTML"
+        class="kanban-edit-button"
+      >
+        Edit Board
+      </button>
+    </div>
+  </div>
+
+  <div id="kanban-board" class="kanban-board">
+    {% for column in column_list %}
+      <div class="kanban-column">
+        <h3 class="kanban-column-title">{{ column }}</h3>
+        <div class="kanban-ticket-list">
+          {% for ticket in tickets %}
+            {% if ticket.column == column %}
+              <div class="kanban-card">
+                <div class="kanban-title">{{ ticket.title }}</div>
+                <div class="kanban-meta">{{ ticket.label }}</div>
+                <div class="kanban-meta">ETA: {{ ticket.eta }}</div>
+              </div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>

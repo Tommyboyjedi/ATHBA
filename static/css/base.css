@@ -1,0 +1,77 @@
+
+/* base.css – Global dark mode defaults and utility styles */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 100, 100, 0.5);
+  border-radius: 4px;
+}
+
+body {
+  background-color: #ffffff;
+  color: #000000;
+}
+.dark body {
+  background-color: #1a202c;
+  color: #f7fafc;
+}
+
+.card, .panel, .box {
+  background-color: #ffffff;
+  color: #000000;
+}
+.dark .card, .dark .panel, .dark .box {
+  background-color: #2d3748;
+  color: #e2e8f0;
+}
+
+.main-shell {
+  background-color: #ffffff;
+  color: #1a202c;
+}
+.dark .main-shell {
+  background-color: #1a202c;
+  color: #f7fafc;
+}
+
+
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.label-high { background-color: #feb2b2; }
+.label-mid { background-color: #f6ad55; }
+.label-low { background-color: #faf089; }
+.label-bug { background-color: #a0aec0; }
+.label-blocker { background-color: #c53030; }
+.label-innovate { background-color: #ffffff; color: #000000; }
+
+.fixed-height {
+  height: calc(100vh - 4rem);
+}
+
+textarea,
+input[type="text"],
+input[type="email"],
+input[type="password"] {
+  background-color: #ffffff;
+  color: #1a202c;
+  border: 1px solid #ccc;
+}
+
+.dark textarea,
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"] {
+  background-color: #2d3748;
+  color: #f7fafc;
+  border-color: #4a5568;
+}

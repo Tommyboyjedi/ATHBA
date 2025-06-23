@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Django
+*.sqlite3
+/media/
+
+# Env & IDE
+.env
+.vscode/
+.idea/
+.ai_models/
+staticfiles/
+static/admin/
+static/ninja/
+
+core/migrations/
+# Poetry
+poetry.lock
+
+# Byte-compiled
+*.egg-info/

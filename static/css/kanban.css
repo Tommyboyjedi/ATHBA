@@ -1,0 +1,81 @@
+.kanban-wrapper {
+  padding: 1rem;
+}
+
+.kanban-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.kanban-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.kanban-edit-button {
+  padding: 0.5rem 1rem;
+  background-color: #ecc94b;
+  color: #1a202c;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1rem;
+}
+
+.kanban-column {
+  background-color: #f7fafc;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.kanban-column-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #1a202c;
+}
+
+.kanban-ticket-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kanban-card {
+  background-color: #e2e8f0;
+  color: #1a202c;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  font-size: 0.875rem;
+}
+
+.kanban-meta {
+  font-size: 0.75rem;
+  color: #4a5568;
+}
+
+/* Dark mode overrides */
+.dark .kanban-column {
+  background-color: #2d3748;
+}
+
+.dark .kanban-column-title {
+  color: #f7fafc;
+}
+
+.dark .kanban-card {
+  background-color: #4a5568;
+  color: #f7fafc;
+}
+
+.dark .kanban-meta {
+  color: #cbd5e0;
+}

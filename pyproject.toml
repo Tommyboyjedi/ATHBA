@@ -1,0 +1,37 @@
+[tool.poetry]
+name = "commercial-agentic-ai"
+version = "0.1.0"
+description = "Complete TDD Devops Software Development Agentic AI Team"
+authors = ["Tom Pearce"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+django = "<5.2"
+django-ninja = "^1.4.1"
+pymongo = "^4.12.1"
+ollama = "^0.4.8"
+django-environ = "^0.12.0"
+psycopg2 = "^2.9.10"
+llama-stack = "^0.2.4"
+llama-stack-client = "^0.2.4"
+starlette = "^0.46.2"
+uvicorn = "^0.34.2"
+autoevals = "^0.0.127"
+llama-cpp-python = "^0.3.8"
+requests = "^2.32.3"
+django-cors-headers = "^4.7.0"
+motor = "^3.7.0"
+fastapi = "^0.115.12"
+psutil = "^7.0.0"
+sse-starlette = "^2.3.5"
+
+[[tool.poetry.source]]
+name = "cloudsmith"
+url = "https://dl.cloudsmith.io/basic/aldi-sued/599-buying_admin_devops-i/python/simple/"
+priority = "primary"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

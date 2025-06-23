@@ -1,0 +1,64 @@
+/* overview.css – Improved light contrast and full-section coverage */
+
+/* Full container */
+.overview-container {
+  padding: 1rem;
+  min-height: 100%;
+  background-color: #f7fafc;  /* soft section background */
+  color: #1a202c;
+}
+
+/* Section title */
+.overview-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Individual ticket/card */
+.project-card {
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  background-color: #e2e8f0; /* gray-200 */
+  color: #1a202c;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: background-color 0.2s;
+}
+
+.project-card:hover {
+  background-color: #cbd5e0; /* gray-300 */
+}
+
+/* Dark mode overrides */
+.dark .overview-container {
+  background-color: #1a202c;
+  color: #f7fafc;
+}
+
+.dark .project-card {
+  background-color: #2d3748;
+  color: #f7fafc;
+}
+
+.dark .project-card:hover {
+  background-color: #4a5568;
+}
+
+/* Close button */
+.project-close-button {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  margin-left: 0.25rem;
+  background-color: #f56565;
+  color: white;
+}
+
+/* Empty message */
+.project-empty {
+  font-size: 0.875rem;
+  color: #718096;
+}
+.dark .project-empty {
+  color: #a0aec0;
+}

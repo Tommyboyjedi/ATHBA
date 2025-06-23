@@ -1,0 +1,51 @@
+
+/* nav.css – Styles for the top navigation bar */
+
+.nav-bar {
+  height: 4rem;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  background-color: #ffffff;
+  color: #1a202c; /* ⬅️ add this */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.dark .nav-bar {
+  background-color: #2d3748;
+  color: #f7fafc;
+}
+
+
+.nav-select {
+  font-size: 0.875rem;
+  padding: 0.25rem;
+  border-radius: 0.25rem;
+  background-color: #ffffff;
+  color: #1a202c;
+  border: 1px solid #cbd5e0;
+}
+.dark .nav-select {
+  background-color: #4a5568;
+  color: #f7fafc;
+  border-color: #718096;
+}
+
+.nav-button {
+  font-size: 0.875rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+
+.nav-link {
+  font-size: 0.875rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  transition: background-color 0.2s;
+}
+.nav-link:hover {
+  background-color: #edf2f7;
+}
+.dark .nav-link:hover {
+  background-color: #4a5568;
+}

@@ -1,0 +1,18 @@
+<!-- partials/code_list.html -->
+<div class="p-4">
+  <h2 class="text-lg font-semibold mb-2">Code Files</h2>
+  <ul class="space-y-1">
+    {% for filename in files %}
+      <li>
+        <button
+          hx-get="/api/ui/code/view/{{ filename }}/"
+          hx-target="#code-panel"
+          hx-swap="innerHTML"
+          class="text-blue-600 hover:underline"
+        >
+          {{ filename }}
+        </button>
+      </li>
+    {% endfor %}
+  </ul>
+</div>

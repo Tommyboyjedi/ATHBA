@@ -1,0 +1,7 @@
+POST http://localhost:8000/api/llm/
+Content-Type: application/json
+
+{
+  "prompt": "Tell me a very long story about DevOps agents.",
+  "max_tokens": 512
+}

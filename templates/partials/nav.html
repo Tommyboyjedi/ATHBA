@@ -1,0 +1,26 @@
+{% load static %}
+<nav class="nav-bar">
+  <form method="post" action="/api/projects/switch/" class="flex items-center space-x-2">
+    {% csrf_token %}
+    <select name="project_id" class="nav-select">
+      {% for p in projects %}
+        <option value="{{ p.id }}" {% if p.id == project_id %}selected{% endif %}>
+          {{ p.name }}
+        </option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="nav-button bg-green-500 text-white">Switch</button>
+  </form>
+
+  <div class="flex-1 text-center space-x-4 text-sm">
+    <button hx-get="/api/ui/overview/" hx-target="#main-panel" hx-swap="innerHTML" class="nav-link">Overview</button>
+    <button hx-get="/api/ui/spec/" hx-target="#main-panel" hx-swap="innerHTML" class="nav-link">Spec</button>
+    <button hx-get="/api/ui/dashboard/" hx-target="#main-panel" hx-swap="innerHTML" class="nav-link">Dashboard</button>
+    <button hx-get="/api/ui/kanban/" hx-target="#main-panel" hx-swap="innerHTML" class="nav-link">Kanban</button>
+    <button hx-get="/api/ui/code" hx-target="#main-panel" hx-swap="innerHTML" class="nav-link">Code</button>
+  </div>
+
+  <button onclick="document.documentElement.classList.toggle('dark')" class="nav-button bg-yellow-500 text-gray-900 dark:text-white">
+    Toggle Theme
+  </button>
+</nav>

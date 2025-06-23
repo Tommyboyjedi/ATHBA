@@ -1,0 +1,25 @@
+<!-- partials/overview.html -->
+{% load static %}
+<div class="overview-container">
+  <h2 class="overview-title">Global Overview</h2>
+  <div class="grid grid-cols-3 gap-2 text-sm">
+    {% for p in projects %}
+      <div class="project-card cursor-pointer">
+        <div class="font-semibold">{{ p.name }}</div>
+        <div>Open: {{ p.open_tasks }}</div>
+        <div>Done: {{ p.done_tasks }}</div>
+        <button
+          hx-post="/api/projects/{{ p.id }}/deactivate/"
+          hx-target="#main-panel"
+          hx-swap="innerHTML"
+          class="project-close-button"
+        >
+          Close
+        </button>
+      </div>
+    {% empty %}
+      <div class="project-empty">No projects found.</div>
+    {% endfor %}
+  </div>
+</div>
+

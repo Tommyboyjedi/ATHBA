@@ -1,0 +1,58 @@
+{% load static %}
+<div class="dashboard-grid">
+  <!-- Metrics -->
+  <div class="metric-box">
+    <div class="metric-label">Next Milestone</div>
+    <div>{{ next_milestone }}</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Open Tasks</div>
+    <div>{{ open_tasks }}</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Active Branches</div>
+    <div>{{ active_branches }}</div>
+  </div>
+  <div class="metric-box">
+    <div class="metric-label">Test Pass Rate</div>
+    <div>{{ test_pass_rate }}%</div>
+  </div>
+
+  <!-- Ticket Activity Section -->
+  <section class="ticket-activity">
+    <h3 class="ticket-header">Ticket Activity</h3>
+    <button
+      hx-get="/api/ui/dashboard/activity/"
+      hx-target="#activity-table"
+      hx-swap="innerHTML"
+      class="ticket-refresh-button"
+    >
+      Refresh
+    </button>
+
+    <div id="activity-table" class="ticket-table-container">
+      <table class="ticket-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Agent</th>
+            <th>Action</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in activity_logs %}
+            <tr>
+              <td>{{ log.timestamp|date:"Y-m-d H:i:s" }}</td>
+              <td>{{ log.agent }}</td>
+              <td>{{ log.action }}</td>
+              <td class="font-mono text-xs">{{ log.details|safe }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="text-center text-gray-400 py-2">No activity yet</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

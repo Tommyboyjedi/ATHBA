@@ -1,0 +1,61 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" x-data="{ darkMode: true }" :class="darkMode ? 'dark' : ''">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>AI Dev Platform</title>
+
+        <!-- tailwind first -->
+        <script defer src="https://cdn.tailwindcss.com"></script>
+        <script src="https://unpkg.com/htmx.org@1.9.2"></script>
+        <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
+        <script src="https://unpkg.com/htmx.org/dist/ext/events.js"></script>
+        <script>
+          htmx.config.extensions = {
+            sse: {
+              events: {
+                chat: true
+              }
+            }
+          };
+        </script>
+
+        <!-- SortableJS before Alpine -->
+        <script defer src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+          <!-- now load your JS modules: -->
+        <!-- Alpine last -->
+        <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+        <script src="{% static 'js/base.js' %}" defer></script>
+
+            <!-- CSS Files -->
+        <link rel="stylesheet" href="{% static 'css/base.css' %}">
+        <link rel="stylesheet" href="{% static 'css/nav.css' %}">
+        <link rel="stylesheet" href="{% static 'css/chat.css' %}">
+        <link rel="stylesheet" href="{% static 'css/overview.css' %}">
+        <link rel="stylesheet" href="{% static 'css/dashboard.css' %}">
+        <link rel="stylesheet" href="{% static 'css/kanban.css' %}">
+        <link rel="stylesheet" href="{% static 'css/spec_editor.css' %}">
+
+      <meta name="csrf-token" content="{{ csrf_token }}">
+</head>
+    <body class="transition-colors duration-300" :class="darkMode ? 'bg-gray-900 text-gray-100' : 'bg-gray-100 text-gray-800'">
+        <header id="project-nav"
+            hx-get="/api/ui/nav/"
+            hx-trigger="chat-response from:body"
+            hx-swap="outerHTML">
+                {% include 'partials/nav.html' %}
+        </header>
+        <template id="htmx-oob-anchor"></template>
+      <div class="flex h-screen" style="height:calc(100vh - 4rem)">
+        <aside class="w-full md:w-1/3 h-full border-r overflow-auto bg-white text-black dark:bg-gray-900 dark:text-white dark:border-gray-700">
+          {% include 'partials/chat.html' %}
+        </aside>
+        <main id="main-panel" hx-get="/api/ui/overview/" hx-trigger="chat-response from:body" hx-swap="innerHTML">
+            <div id="main-panel" hx-get="/api/ui/overview" hx-trigger="load" hx-target="#main-panel" hx-swap="innerHTML">
+              Loading overview…
+            </div>
+        </main>
+      </div>
+    </body>
+</html>

@@ -1,0 +1,5 @@
+llama serve --model meta-llama/Llama3.2-3B-Instruct-int4-qlora-eo8 --host 0.0.0.0 --port 11434
+
+llama stack build --template ollama --image-type conda --image-name my-llamastack --run
+
+

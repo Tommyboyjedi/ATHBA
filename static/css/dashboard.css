@@ -1,0 +1,80 @@
+/* dashboard.css – Styles for dashboard view */
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.metric-box {
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  background-color: #e2e8f0;
+  color: #1a202c;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.metric-label {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.dark .metric-box {
+  background-color: #2d3748;
+  color: #f7fafc;
+}
+
+/* Ticket Activity Section */
+.ticket-activity {
+  grid-column: span 2;
+  margin-top: 1.5rem;
+}
+
+.ticket-header {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.ticket-refresh-button {
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  background-color: #4299e1;
+  color: white;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.ticket-table-container {
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.5rem;
+}
+
+.ticket-table {
+  width: 100%;
+  text-align: left;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+
+.ticket-table thead {
+  background-color: #f7fafc;
+  color: #1a202c;
+}
+
+.ticket-table th,
+.ticket-table td {
+  padding: 0.25rem 0.5rem;
+}
+
+.ticket-table tr:not(:first-child) {
+  border-top: 1px solid #e2e8f0;
+}
+
+.dark .ticket-table thead {
+  background-color: #2d3748;
+  color: #f7fafc;
+}

@@ -1,0 +1,22 @@
+<!-- partials/code.html -->
+{% load static %}
+<div id="code-panel">
+  <div class="flex justify-between items-center mb-1">
+    <h2 class="font-semibold text-sm">Code Interaction</h2>
+
+    <button
+      hx-get="/api/ui/code/edit"
+      hx-target="#code-panel"
+      hx-swap="outerHTML"
+      class="px-2 py-1 rounded text-sm bg-blue-600 text-white"
+    >
+      Edit
+    </button>
+  </div>
+
+  <pre class="w-full h-40 p-2 rounded shadow font-mono text-sm bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-100 border border-gray-300 dark:border-gray-700">
+{{ code_text }}
+  </pre>
+
+  <p class="text-xs italic mt-1">Review mode: Agents active.</p>
+</div>

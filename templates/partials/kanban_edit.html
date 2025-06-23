@@ -1,0 +1,31 @@
+<!-- partials/kanban_edit.html -->
+<div id="kanban-board" class="grid grid-cols-5 gap-4">
+  {% for column in columns %}
+    <div class="bg-gray-100 dark:bg-gray-800 p-2 rounded shadow">
+      <h3 class="text-sm font-semibold mb-2">{{ column }}</h3>
+      <div class="space-y-2 min-h-[50px]">
+        {% for ticket in tickets %}
+          {% if ticket.column == column %}
+            <form hx-post="/api/kanban/update/{{ ticket.id }}/"
+                  hx-target="#kanban-board"
+                  hx-swap="outerHTML"
+                  class="p-2 rounded bg-white dark:bg-gray-700 shadow text-sm space-y-1"
+            >
+              <input type="text" name="title" value="{{ ticket.title }}" class="w-full text-sm rounded border px-1" />
+              <select name="label" class="text-xs w-full">
+                {% for option in ["High", "Mid", "Low", "Bug", "Blocker", "Innovate"] %}
+                  <option value="{{ option }}" {% if ticket.label == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="eta" value="{{ ticket.eta }}" class="w-full text-xs" />
+              <input type="hidden" name="column" value="{{ column }}" />
+              <div class="text-right">
+                <button type="submit" class="text-xs px-2 py-1 bg-green-600 text-white rounded">Save</button>
+              </div>
+            </form>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
