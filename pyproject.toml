@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "commercial-agentic-ai"
+name = "athba"
 version = "0.1.0"
 description = "Complete TDD Devops Software Development Agentic AI Team"
 authors = ["Tom Pearce"]
@@ -26,10 +26,11 @@ fastapi = "^0.115.12"
 psutil = "^7.0.0"
 sse-starlette = "^2.3.5"
 
-[[tool.poetry.source]]
-name = "cloudsmith"
-url = "https://dl.cloudsmith.io/basic/aldi-sued/599-buying_admin_devops-i/python/simple/"
-priority = "primary"
+#[[tool.poetry.source]]
+#name = "cloudsmith"
+#url = "https://dl.cloudsmith.io/basic/aldi-sued/599-buying_admin_devops-i/python/simple/"
+#priority = "primary"
+aiohttp = "^3.12.13"
 
 
 [build-system]

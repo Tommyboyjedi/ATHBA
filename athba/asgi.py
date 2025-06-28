@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # 2. Configure Django
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "commercial_agentic_ai.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "athba.settings")
 import django
 django.setup()
 

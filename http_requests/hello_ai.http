@@ -1,4 +1,4 @@
-POST http://localhost:8000/api/llm/
+POST http://localhost:8010/api/llm/
 Content-Type: application/json
 
 {

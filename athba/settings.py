@@ -13,7 +13,7 @@ env = environ.Env(
 environ.Env.read_env(os.path.join(BASE_DIR, ".env"))
 
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://localhost:8010"
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 DEBUG = env("DEBUG")
 if DEBUG:
@@ -33,7 +33,7 @@ DATABASES = {
 }
 
 
-ASGI_APPLICATION = "commercial_agentic_ai.asgi.application"
+ASGI_APPLICATION = "athba.asgi.application"
 # Mongo URI available for your code
 MONGO_DB = os.getenv('DJANGO_MONGO', 'mongodb://localhost:27017')
 
@@ -76,7 +76,11 @@ TEMPLATES = [
         },
     },
 ]
-SESSION_ENGINE = "django.contrib.sessions.backends.db"
+# Session configuration for Starlette compatibility
+SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_AGE = 60 * 60  # 60 minutes
 SESSION_SAVE_EVERY_REQUEST = True  # resets expiry with each request
 

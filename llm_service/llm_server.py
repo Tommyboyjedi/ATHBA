@@ -90,7 +90,7 @@ def clean_llm_response(raw: str) -> str:
 
 
 # API Routes
-@app.post("/infer")
+@app.post("/llm/infer")
 def infer(req: LLMRequest):
     try:
         path = str(registry.get_model(req.agent, req.tier))
@@ -128,7 +128,7 @@ def infer(req: LLMRequest):
     }
 
 
-@app.get("/status")
+@app.get("/llm/status")
 def status():
     now = time.time()
     return [
@@ -141,7 +141,7 @@ def status():
     ]
 
 
-@app.post("/unload")
+@app.post("/llm/unload")
 def unload(model_path: str):
     if model_path in loaded_models:
         del loaded_models[model_path]
@@ -151,7 +151,7 @@ def unload(model_path: str):
     raise HTTPException(status_code=404, detail="Model not found")
 
 
-@app.get("/rd/status")
+@app.get("/llm/rd/status")
 def rd_status():
     return {
         "mem": psutil.virtual_memory().percent,
