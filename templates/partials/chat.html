@@ -38,18 +38,49 @@
 
 </div>
 <script>
+  function escapeHtml(unsafe) {
+    return unsafe
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
   document.addEventListener('DOMContentLoaded', (event) => {
-    console.log('DOM fully loaded. Initializing HTMX chat processing.');
     const chatStream = document.getElementById('chat-stream');
+    const chatForm = document.getElementById('chat-form');
+    const messageInput = chatForm.querySelector('input[name="message"]');
+
     if (chatStream) {
-      console.log('Found chat-stream element. Processing...');
+      // Initialize HTMX SSE
       htmx.process(chatStream);
       chatStream.addEventListener('htmx:sseError', function(evt) {
         console.error('HTMX SSE Error:', evt.detail.error);
       });
-      console.log('SSE event listener for errors attached.');
     } else {
       console.error('Could not find #chat-stream element.');
+    }
+
+    if (chatForm) {
+      chatForm.addEventListener('htmx:beforeRequest', function(evt) {
+        const messageContent = evt.detail.requestConfig.parameters.message;
+        if (!messageContent || messageContent.trim() === '') return;
+
+        // Create and append the user's message optimistically
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message message-human';
+        messageDiv.innerHTML = `<strong>user:</strong> ${escapeHtml(messageContent)}`;
+        chatStream.appendChild(messageDiv);
+
+        // Scroll to the bottom
+        chatStream.scrollTop = chatStream.scrollHeight;
+
+        // Reset the form immediately
+        chatForm.reset();
+        // Re-focus the input
+        messageInput.focus();
+      });
     }
   });
 </script>

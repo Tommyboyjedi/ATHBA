@@ -14,10 +14,10 @@ class ChatService:
         self.repo = ConversationRepo()
 
     async def handle_user_message(self, session_key: str, user_input: str):
-        # 1. Save and immediately stream the user's message
+        # 1. Save the user's message (but don't stream it back)
         user_msg = ChatMessage(sender="user", content=user_input).with_session_key(session_key)
         await self.repo.append_message(user_msg)
-        await self._stream(session_key, user_msg)
+        # The user's message is now rendered client-side optimistically.
 
         # 2. Run the agent and stream its responses
         agent = AgentGenerator().get_agent(session_key)
