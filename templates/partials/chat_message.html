@@ -1,5 +1,3 @@
-<div hx-swap-oob="beforeend:#chat-stream">
-  <div class="message message-system">
-    <strong>{{ msg.sender }}:</strong> {{ msg.content }}
-  </div>
+<div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %}">
+  <strong>{{ msg.sender }}:</strong> {{ msg.content }}
 </div>

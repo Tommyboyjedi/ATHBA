@@ -1,4 +1,5 @@
 import json
+import logging
 from django.template.loader import render_to_string
 from core.agents.agent_generator import AgentGenerator
 from core.dataclasses.chat_message import ChatMessage
@@ -6,42 +7,32 @@ from core.datastore.repos.conversation_repo import ConversationRepo
 from core.sse.chat_stream_handler import chat_stream_subscribers
 from django.utils.html import escape
 
+log = logging.getLogger(__name__)
+
 class ChatService:
     def __init__(self):
         self.repo = ConversationRepo()
 
-    async def handle_user_message(self, session, user_input: str):
-        user_msg = ChatMessage(sender="user", content=user_input).with_session(session)
+    async def handle_user_message(self, session_key: str, user_input: str):
+        # 1. Save and immediately stream the user's message
+        user_msg = ChatMessage(sender="user", content=user_input).with_session_key(session_key)
         await self.repo.append_message(user_msg)
+        await self._stream(session_key, user_msg)
 
-        agent = AgentGenerator().get_agent(session)
+        # 2. Run the agent and stream its responses
+        agent = AgentGenerator().get_agent(session_key)
         responses = await agent.run(user_input)
 
         for msg in responses:
             if isinstance(msg, ChatMessage):
-                msg.with_session(session)
+                msg.with_session_key(session_key)
                 await self.repo.append_message(msg)
-                await self._stream(session.session_id, msg)
+                await self._stream(session_key, msg)
 
-    # async def _stream(self, session_id: str, message: ChatMessage):
-    #     if session_id in chat_stream_subscribers:
-    #         html = render_to_string("partials/chat_message.html", {"msg": message}).strip()
-    #         print("HTML OUTPUT TO STREAM:", repr(html))
-    #         print("HTML with replace:", html.replace("\n", ""))
-    #         await chat_stream_subscribers[session_id].put(html.replace("\n", ""))
-
-
-    async def _stream(self, session_id: str, message: ChatMessage):
-        if session_id in chat_stream_subscribers:
+    async def _stream(self, session_key: str, message: ChatMessage):
+        if session_key in chat_stream_subscribers:
             html = render_to_string("partials/chat_message.html", {"msg": message}).strip()
-            if not message.metadata == None:
-                html += """
-                <template hx-swap-oob="innerHTML:#main-panel">
-                  <div hx-get="/api/ui/overview/" hx-trigger="load" hx-target="#main-panel" hx-swap="innerHTML">Refreshing overview…</div>
-                </template>
-                """
-
-            await chat_stream_subscribers[session_id].put(html.replace("\n", ""))
-
-
-
+            # Ensure message is on a single line for SSE
+            await chat_stream_subscribers[session_key].put(html.replace("\n", ""))
+        else:
+            log.warning(f"STREAM: No SSE subscriber found for session_key: {session_key}")

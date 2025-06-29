@@ -5,7 +5,7 @@
     <h2 class="font-semibold">Chat – {{ project.name }}</h2>
   </div>
 
-  <div id="chat-stream" class="chat-stream" hx-ext="sse" sse-connect="/chat/stream/" sse-swap="chat" hx-swap="beforeend">
+  <div id="chat-stream" class="chat-stream" hx-ext="sse" sse-connect="/chat/stream/?session={{ request.session.session_key }}" sse-swap="chat" hx-swap="beforeend">
     {% for msg in chat_log %}
       <div class="message {% if msg.sender == 'human' %}message-human{% else %}message-system{% endif %}">
         <strong>{{ msg.sender }}:</strong> {{ msg.message }}
@@ -17,17 +17,10 @@
       hx-post="/api/chat/send"
       hx-target="#chat-form"
       hx-swap="none"
-      class="chat-form"
-      onsubmit="
-        const input = this.querySelector('input[name=message]');
-        const val = input.value.trim();
-        if (val) {
-          document.querySelector('#chat-stream').insertAdjacentHTML(
-            'beforeend',
-            `<div class='message message-human'><strong>You:</strong> ${val}</div>`
-          );
-        }
-      ">
+      hx-on::after-request="this.reset()"
+      class="chat-form">
+  {% csrf_token %}
+  <input type="hidden" name="session_key" value="{{ request.session.session_key }}">
   <input
       type="text"
       name="message"
@@ -35,6 +28,7 @@
       oninvalid="this.setCustomValidity('Type something!')"
       placeholder="Type a message…"
       class="chat-input"
+      autocomplete="off"
       required
     />
 
@@ -44,7 +38,18 @@
 
 </div>
 <script>
-  if (window.htmx) {
-    htmx.process(document.getElementById('chat-stream'));
-  }
+  document.addEventListener('DOMContentLoaded', (event) => {
+    console.log('DOM fully loaded. Initializing HTMX chat processing.');
+    const chatStream = document.getElementById('chat-stream');
+    if (chatStream) {
+      console.log('Found chat-stream element. Processing...');
+      htmx.process(chatStream);
+      chatStream.addEventListener('htmx:sseError', function(evt) {
+        console.error('HTMX SSE Error:', evt.detail.error);
+      });
+      console.log('SSE event listener for errors attached.');
+    } else {
+      console.error('Could not find #chat-stream element.');
+    }
+  });
 </script>
