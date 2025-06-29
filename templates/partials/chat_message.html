@@ -5,5 +5,5 @@
         hx-swap="outerHTML"
         hx-trigger="load"
      {% endif %}>
-  <strong>{{ msg.sender }}:</strong> {{ msg.content }}
+  <strong>{{ msg.sender }}:</strong> {{ msg.content|safe }}
 </div>

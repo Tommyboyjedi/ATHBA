@@ -14,14 +14,22 @@ class CreateProjectBehavior(AgentBehavior):
     async def run(self, agent: PmAgent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage]:
         if llm_response.intent in self.intent:
             await agent.log("Creating new project context for session.")
-            project_name = llm_response.entities.get("projectName")
+            project_name = llm_response.entities.get("project_name")
             if not project_name:
-                project_name = "New Project(" + uuid.uuid4().hex + ")"
+                project_name = llm_response.entities.get("projectName") or "New Project(" + uuid.uuid4().hex + ")"
             project = await ProjectsController().create_project(name=project_name)
-            await agent.set_project(project)
+
+            agent.request.session['pending_action'] = {
+                'type': 'activate_project',
+                'project_id': str(project.id),
+                'project_name': project.name,
+            }
+
+            content = f"I have created the project '{project.name}'. Would you like to make it the active project? (yes/no)"
+
             return [ChatMessage(
                     sender=agent.name,
-                    content="Certainly, I've created a new project for us to work in. Please provide me with more details.",
+                    content=content,
                     metadata={"refresh_overview": True}
                 )]
         else:

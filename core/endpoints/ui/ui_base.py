@@ -1,4 +1,3 @@
-
 from django.shortcuts import render, redirect
 
 from core.controllers.project_controller import ProjectsController
@@ -14,6 +13,5 @@ async def index(request):
 @router.post("/switch/")
 async def switch_project(request):
     project_id = request.POST.get("project_id")
-    request.session["current_project_id"] = project_id
+    request.session["project_id"] = project_id
     return redirect("/")
-

@@ -1,16 +1,17 @@
 {% load static %}
 <nav class="nav-bar">
-  <form method="post" action="/api/projects/switch/" class="flex items-center space-x-2">
-    {% csrf_token %}
-    <select name="project_id" class="nav-select">
-      {% for p in projects %}
-        <option value="{{ p.id }}" {% if p.id == project_id %}selected{% endif %}>
-          {{ p.name }}
-        </option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="nav-button bg-green-500 text-white">Switch</button>
-  </form>
+  <div id="project-selector">
+    <form hx-post="/api/projects/switch/" hx-trigger="change from:[name='project_id']" hx-target="body">
+      {% csrf_token %}
+      <select name="project_id" class="nav-select">
+        {% for p in projects %}
+          <option value="{{ p.id }}" {% if p.id|stringformat:"s" == project_id %}selected{% endif %}>
+            {{ p.name }}
+          </option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
 
   <div class="flex-1 text-center space-x-4 text-sm">
     <button hx-get="/api/ui/overview/" hx-target="#main-panel" hx-swap="innerHTML" class="nav-link">Overview</button>

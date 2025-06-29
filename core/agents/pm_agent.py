@@ -70,6 +70,7 @@ class PmAgent(IAgent):
     - rename_project: When user wants to rename the current project
     - edit_spec: When user wants to modify the specification
     - remind_approval: When user asks about or requests approval status
+    - confirm_action: When user confirms or denies a pending action (e.g., 'yes', 'no')
     - basic_reply: For general conversation that doesn't fit other intents
 
     Rules:
@@ -85,6 +86,22 @@ class PmAgent(IAgent):
       "intent": "create_project",
       "agents_routing": ["@Spec"],
       "entities": {{"project_name": "Customer Portal"}}
+    }}
+
+    User: "yes"
+    {{
+      "response": "Got it.",
+      "intent": "confirm_action",
+      "agents_routing": [],
+      "entities": {{"confirmation": "yes"}}
+    }}
+
+    User: "no, don't do that"
+    {{
+      "response": "OK, I won't.",
+      "intent": "confirm_action",
+      "agents_routing": [],
+      "entities": {{"confirmation": "no"}}
     }}
 
     User: "Update the login page spec"
