@@ -1,0 +1,546 @@
+= SPEC-001: Local AI-Driven Virtual Software Development System :sectnums: :toc:
+== Background
+The project aims to create a fully local, AI-powered software development environment that simulates the behaviors of a complete agile software team. It integrates multiple LLMs with varying reasoning capabilities and tightly orchestrated agent workflows (Resource Director, Project Manager, Architect, Developer / Tester Pairs (TDD)) within a Django-based backend. This platform is designed to support multiple concurrent projects using a GitOps pipeline, memory-persistent task context, and a TDD-driven development lifecycle. The system is highly modular, uses HTMX for front-end interactivity with minimal JS, and enforces human approval workflows for all critical architectural and integration-level decisions.
+== Requirements
+The system must fulfill the following functional and non-functional requirements, prioritized using the MoSCoW framework.
+=== Must Have
+* Full local execution with no cloud dependencies - assumes no internet access, only corporate network
+* AI agents representing core agile roles: PM, Architect, Developer, Tester, Resource Director
+* Human-readable, editable project specifications with version control
+* GitOps-style branching per task with protected main branch
+* Strict TDD development with Developer/Tester pairs (Following Uncle Bobs OOP TDD rules)
+* Memory model with short-, medium-, and long-term tiers stored in MongoDB
+* HTMX-driven frontend with Alpine.js used only minimally
+* REST API via Django Ninja with project/task scoping
+* Ticket management system with editable Kanban view
+* Explicit LLM model management with escalation logic
+* Approval workflows with structured escalation and chat interface
+* Multiple concurrent project support
+* Modular service architecture for agent behavior
+* Secure local authentication and role-based access
+
+=== Should Have
+* Live dashboard per project with metrics like test pass rate, timeline prediction, and agent throughput
+* Resource optimization logic by the Resource Director with project prioritization
+* Editable "Live Spec" panel with approvals
+* Alerts for model failures, resource contention, and approval needs (in chat)
+* Global overview page aggregating all project states
+* Streaming chat updates (basic message-level streaming implemented via SSE)
+
+=== Could Have
+* Integration with CI tools for visual build/test status
+* Offline-first frontend caching
+* Adaptive time estimates based on historic data
+
+=== Won't Have (Initially)
+* Mobile or tablet UI
+* Public or SaaS deployment model
+* Open contribution or multi-user real-time collaboration
+
+
+
+=== Ticket System and GitOps Workflow
+The ticketing system is the heart of the application. All agent activity - planning, coding, testing, reviewing - is scoped and tracked via tickets. A project can only progress through the lifecycle when tickets are created, moved, and completed in coordination with the Git and memory systems.
+==== Ticket-Driven Architecture
+* Tickets define all work to be done post-specification approval
+* No agent initiates actions outside the context of a ticket
+* All agent interactions, LLM prompts, and commits are traced back to a ticket_ID and functionality_ID
+* Tickets directly drive:
+o Chat references
+o Code branches
+o Test suites
+o Memory entries
+o Review workflows
+.tickets collection [source,json]
+{ _id: ObjectId, project_id: UUID, title: String, description: String, column: String, // 'backlog', 'todo', 'inprogress', 'review', 'done' severity: String, time_estimate: Number, assigned_pair: String, files_changed: [String], test_pass_rate: Number, created_at: ISODate, updated_at: ISODate }
+
+==== PM Agent
+
+**Responsibilities:**
+- Primary communication interface with the human user
+- Drives collaborative authoring of the project specification
+  - Interprets user inputs from chat
+  - Writes into the shared specification document (Live Spec Panel)
+  - Organizes and refines requirements with human feedback
+- Gathers final approval for specification
+- Triggers Architect engagement after approval
+- Monitors ticket states and project milestones
+- Facilitates approval workflows and human revalidations
+- Suspends/resumes project flow upon human edits
+
+**Interfaces:**
+- Chat UI (Human-Agent only): all human interaction and approvals happen here
+- Live Spec Panel: shared spec editor for PM and Human only
+- API endpoints:
+  - `/api/pm/spec-edit` ? handles edits to spec
+  - `/api/pm/approve-spec`
+  - `/api/pm/status`
+- Frontend: 
+  - Live Spec Panel (read/write)
+  - Approval bar (traffic light)
+  - Notifications and chat alerts
+
+**Approval Handling:**
+- All human approvals are expressed via **chat with the PM agent**
+- No separate UI approvals - PM infers intent (e.g., "go ahead", "looks good") using LLM-based classification
+- PM logs approval and notifies Architect to proceed
+- If Human modifies spec or Kanban post-approval:
+  - PM pauses project
+  - Sends updated state to Architect
+  - Triggers re-review
+
+**Agent Communication Channels:**
+- **Human-Agent Chat**: only PM, visible in Chat UI
+- **Agent-Agent Chat**: coordination channel between PM, Architect, Dev/Test, Resource Director
+  - Logged in MongoDB
+  - Visible to Human in **Dashboard view**, read-only
+  - Includes messages like ticket escalations, merge intent, resource pausing
+
+**Workflow:**
+1. Human types idea into chat
+2. PM proposes initial structure
+3. Human and PM iterate via:
+   - Inline chat suggestions
+   - Live Spec Panel edits
+4. Once human signals readiness:
+   - PM summarizes the draft
+   - Human presses "Approve Spec"
+5. PM saves final version ? triggers Architect
+
+**Escalations:**
+- If spec is edited post-approval ? project enters `On Hold`
+- If clarification is needed, PM asks for it in chat
+
+==== Architect Workflow (Post-Spec Approval)
+1. Triggered by PM after spec approval
+2. Responsibilities:
+o If Project is based on refactoring a current git repo:
+*  Clone the remote repo
+* Performs static code analysis
+* Reads structure, dependencies, patterns
+* Logs high-level findings to memory
+* Identifies improvement opportunities
+o If project is based on creating a new application/script/function:
+* Break spec into functional areas
+o Design high-level technical plans
+o Create a Kanban ticket per work unit
+o Check for local repo:
+* If missing ? clone from remote (e.g., Gogs) 
+* Create DEV branch
+* Create feature/<func> branches for each function
+* If DEV exists ? prompt PM whether to delete or pause project
+o Assign tickets to feature/<func> branches
+3. Notifies PM when ticket planning and repo prep are complete
+
+==== Developer/Tester Agent Workflow
+* Developer pulls from feature/<func> ? creates ticket/<id> branch
+* Commits every N minutes (configurable)
+* Tester follows TDD loop using same branch
+* Once ticket is complete:
+o Developer merges upstream feature/<func> into local
+o Notifies PM and logs via agent_logs
+==== PM Review & Function Completion
+* PM monitors ticket state
+* When all tickets for a function are done, PM triggers Architect review
+* Architect:
+o Validates all tickets and test coverage
+o Pushes feature/<func> branch to remote
+o Merges feature/<func> into DEV
+o Pushes DEV branch to remote
+o Notifies PM
+* PM updates dashboard/project metrics accordingly
+==== Human Oversight & Direct Edits
+* Human can manually edit Kanban tickets at any time (on Edit all operation for project on hold)
+* Triggers a review from PM and revalidation by Architect
+* Human may review branches outside the system via Git
+* Optional: Code Review Panel (future feature) for in-app discussion on WIP code
+==== GitOps Commands (shell-based)
+All repo actions use shell-level git commands:
+* git clone, git branch, git commit -am, git merge, git push
+* No Python Git libraries required
+* Git logs and refs are tied back to ticket IDs and agent actions
+==== Developer Agent
+Responsibilities:
+* Implements a ticket's functionality within a local ticket branch
+* Follows TDD workflow with paired Tester
+* Commits every N minutes (configurable)
+* Merges from feature branch resolves conflicts and commits before final push
+* Reports progress and signals ticket readiness
+Workflow:
+1. Receives ticket (via assignment)
+2. looks for clones project, if none found, rejects ticket and goes idle pending reassignment by PM (PM will make architect create clone project)
+3. Creates ticket/<id> branch from feature/<func>
+4. Confirms allocated Tester to pair with 
+5. Starts coding:
+1. Enforces strict TDD loop:
+1. Awaits failing test
+2. Writes minimal code to pass the failing test
+3. Repeat
+2. Commits work every N minutes
+3. Runs local test suite
+6. On ticket complete:
+o Confirms all ticket requirements are satisfied to Tester
+o Waits for confirmation from tester that all tests pass and code coverage requirements are met
+o Fetches & merges from feature/<func>
+o Never pushes remote (architect role)
+o Notifies PM & logs via agent_logs
+Interfaces:
+* Ticket Controller (assignments, status updates)
+* GitOps Controller (branch/commit/push)
+* Agent-Agent Chat (Tester coordination, visible in dashboard)
+* LLM Service: Code Llama 7B primarily; escalates via ModelManager if blocked
+
+==== Tester Agent
+Responsibilities:
+* Writes unit tests in parallel with Developer's implementation
+* Enforces strict TDD loop:
+1. Write failing test
+2. Await passing code
+3. Repeat
+* Reports test pass rate and logs
+Workflow:
+1. Monitors assigned ticket
+2. Coordinates with Developer over Agent-Agent Chat
+3. Writes unit tests ahead of implementation to facilitate the beginning of the TDD loop
+4. Logs test results and coverage, updates ticket when passing code to Developer
+5. On full pass, and coverage target met:
+o Notifies Developer and PM
+o Updates ticket metadata (test_pass_rate)
+Interfaces:
+* Ticket Controller (to fetch ticket info)
+* Memory Manager (prior test results for reuse)
+* GitOps Controller (checks out ticket branch, runs tests)
+* Agent-Agent Chat (Developer coordination)
+* LLM Service: Code Llama 7B
+Test Philosophy:
+* TDD discipline enforced: no production code without failing test
+* Minimal test for failure ? minimal code to pass ? refactor
+* Does not write integration tests - only unit scope
+==== Resource Allocation Policy
+Priority Tiers:
+* Each project is assigned a priority: critical, high, medium, or low
+* Configurable via Django admin on the Project model
+Base Allocation Strategy:
+* After reserving system resources for other applications, the remaining becomes "NOS" (non-other-system) resource
+* NOS resource is initially divided based on priority tier:
+o Critical: 90%
+o High: 70%
+o Medium: 40%
+o Low: 10%
+o (Hard cap: only <=90% of NOS resource ever allocated) (configurable)
+o Default Threshold 98% (configurable) 
+Dynamic Top-Up Allocation:
+* If allocated quota is under-utilized (e.g., no active tickets or agents idle), surplus NOS is redistributed:
+1. Priority order is respected (critical ? high ? medium ? low)
+2. Projects below their max quota are first offered top-up
+3. Remaining NOS is offered in priority order to projects with capacity to use it
+4. This continues until either:
+* All projects are maxed out
+* All NOS is allocated
+Pause/Resume Thresholds:
+* A project is paused when:
+o It exceeds its allocated NOS usage and has no capacity to offload
+o System-wide concurrency exceeds a configured threshold (e.g., >M concurrent tasks)
+* Tickets are paused individually by agent pair
+* Projects resume when:
+o Resource pressure lowers
+o PM confirms available work
+Review Cycle:
+* Allocation review runs every 20 minutes (configurable via Django setting)
+* RD logs all allocation decisions in agent_logs
+Visualization:
+* Dashboard displays per-project resource usage bars vs quota
+* Flags under-utilized or over-quota states
+* Read-only view into paused/resumed tickets with timestamps
+
+
+==== Memory Manager
+The Memory Manager service provides structured access to project-specific memory. It supports fast access to recent interactions, persistent agent knowledge, and embedding-based similarity lookups.
+Memory is organized into three tiers:
+===== 1. Short-Term "Working" Memory
+Purpose:
+* Immediate agent context (e.g., last 10 chat messages, current ticket state)
+* Fastest read/write for live prompting
+* Supports crash recovery of in-progress work
+Storage:
+* In-process Python cache (LRU or dict)
+* Backed by MongoDB capped collection: conversations_current
+* Max messages: ~10,000 (configurable)
+Write Workflow:
+1. Every new chat message or agent event:
+o Appended to in-memory cache
+o Written to conversations_current
+2. On service restart:
+o Loads N most recent entries from MongoDB into cache
+===== 2. Medium-Term "Session" Memory
+Purpose:
+* Full transcripts, agent logs, spec history
+* Needed for context over hours/days of project activity
+Storage Collections:
+* conversations (full sessions)
+* agent_logs
+* spec_versions
+* memories (non-embedding)
+Access:
+* Indexed queries on project_id and timestamp
+* Fetched by agents for planning, regression, or history reference
+===== 3. Long-Term "Knowledge" Memory
+Purpose:
+* Deep memory of architecture, rationale, recurring patterns
+* Retrieved via similarity matching, not raw lookup
+* Can be slower but more powerful context
+Storage Options:
+* Primary: MongoDB with native vector search
+o memories collection: embedding field + tags
+* Secondary (future): pgvector or FAISS disk index (optional fallback)
+Use Cases:
+* Architect retrieves prior design rationale
+* Developer queries related code snippets
+* PM researches similar product specifications
+Retrieval Pattern:
+* Memory Manager computes embedding of query
+* Performs K-NN search against vector index
+* Returns high-similarity memory entries
+===== Integration Summary
+Read Paths:
+* Agents ? Memory Manager ? appropriate tier (working/session/knowledge)
+Write Paths:
+* All agent state changes (chat, actions, logs) routed through Memory Manager
+* Stored in both short-term and medium-term layers depending on type
+Fault Tolerance:
+* All volatile context backed by capped Mongo collection
+* Crash recovery on restart is automatic via in-memory reload
+Security:
+* MongoDB with role-restricted access
+* TTL indexes for older data cleanup (e.g., 90-day chat expiry)
+Configurable Settings:
+* Max in-memory messages
+* Cap size for conversations_current
+* Embedding model and distance function
+* TTL for memory retention
+
+
+==== Model Manager
+
+The Model Manager coordinates all agent-to-model inference routing, runtime lifecycle management, and model loading. It supports a clean mapping of agent roles to dedicated models with optional escalation to heavier models like Scout.
+
+===== Model Registry
+
+|===
+| Model Name      | Assigned To                | Purpose                                 | Profile
+
+| CodeLlama 7B    | Developer, Tester          | Fast code generation, tight TDD loops   | Small, quantized, low-latency
+| ReasonLite      | PM, Resource Director      | Summarization, reasoning, metrics       | Small, efficient, non-code focused
+| LLaMA 4 Scout   | Architect, PM (on demand)  | High-context synthesis, architectural reasoning | Heavy, TTL-managed
+|===
+
+Each agent type is mapped to a primary model in the registry:
+- Developer ? CodeLlama 7B
+- Tester ? CodeLlama 7B
+- PM ? ReasonLite (escalate to Scout)
+- Resource Director ? ReasonLite
+- Architect ? Scout
+
+===== Runtime Behavior
+
+- **ModelManager.ask(agent_role, prompt, context)**:
+  - Routes call to the primary model assigned in registry
+  - Logs request metadata (tokens, latency, success)
+  - If `escalate=True` or unsatisfactory:
+    - Routes to LLaMA 4 Scout
+    - Optionally routes to future external API (e.g., OpenAI)
+
+===== Model Lifecycle
+
+- CodeLlama 7B and ReasonLite are loaded at application startup
+- Scout is loaded on-demand and evicted after 2 minutes idle (TTL, configurable)
+- Models are accessed via `llama-cpp-python` or internal API interface
+- Optional GPU offload via `n_gpu_layers` or `device_map=auto`
+
+===== Escalation Strategy
+
+- Each agent defines its own `is_satisfactory()` validator
+  - Developer: code compiles, tests pass
+  - PM: summary matches spec
+  - Architect: all functions defined, design coherent
+- If validation fails:
+  - Retry using LLaMA 4 Scout
+- Future: pluggable fallback to OpenAI API with cost-aware flags
+
+===== Concurrency & Pooling
+
+- CodeLlama 7B and ReasonLite support lightweight round-robin pools
+- Scout is accessed via serialized lock (single active session)
+- Resource Director monitors concurrent usage for throttling
+
+===== Extensibility
+
+The model registry supports future extension via config file or admin UI:
+- Add named models and quant profiles
+- Define routing rules per agent role
+- Override model path or backend (OpenAI, Ollama, vLLM)
+
+Example:
+```json
+{
+  "Developer": "CodeLlama7B",
+  "Tester": "CodeLlama7B",
+  "PM": { "primary": "ReasonLite", "fallback": "LLaMA4Scout" },
+  "Architect": "LLaMA4Scout"
+}
+
+
+== Implementation
+
+This section defines how to initialize and build the system from scratch, aligning with the architecture and agent services previously defined. The implementation prioritizes modular design, HTMX-first frontend logic, and local execution.
+
+=== Directory Structure
+commercial_agentic_ai/
++-- core/
+¦ +-- models/ # Django models (Project, UserConfig, etc.)
+¦ +-- repos/ # MongoDB access layers
+¦ +-- memory/ # Memory Manager + cache/load logic
+¦ +-- services/
+¦ ¦ +-- agents/
+¦ ¦ ¦ +-- pm_service.py
+¦ ¦ ¦ +-- architect_service.py
+¦ ¦ ¦ +-- developer_service.py
+¦ ¦ ¦ +-- tester_service.py
+¦ ¦ ¦ +-- resource_director_service.py
+¦ ¦ +-- llm/
+¦ ¦ ¦ +-- model_manager.py
+¦ ¦ ¦ +-- model_registry.json
+¦ ¦ +-- gitops/
+¦ ¦ ¦ +-- git_controller.py
+¦ ¦ +-- approvals/
++-- static/
+¦ +-- js/ # Minimal JS; mostly Alpine for modals
+¦ +-- css/ # Tailwind setup
++-- templates/
+¦ +-- base.html
+¦ +-- components/
+¦ +-- pages/
+¦ +-- dashboard.html
+¦ +-- kanban.html
+¦ +-- live_spec.html
+¦ +-- chat.html
++-- config/
+¦ +-- settings/
+¦ ¦ +-- development.py
+¦ ¦ +-- production.py
+¦ +-- urls.py
++-- llm_models/ # Local GGUF models
++-- scripts/
++-- tests/
++-- pyproject.toml
+
+
+=== Initial Components (Phase 1)
+
+1. **Django App Initialization**
+   - Single app: `core`
+   - SQLite for configs, MongoDB for ticket + memory
+   - Django Ninja for APIs
+
+2. **Base Services**
+   - PM agent (chat interface + spec builder)
+   - Architect agent (ticket generator + repo initializer)
+   - Memory Manager (tiered cache + capped Mongo)
+   - GitOps Controller (branch logic + git commands)
+   - Model Manager (registry + LlamaCPP loader)
+
+3. **HTMX Frontend Pages**
+   - Chat Interface (PM-driven)
+   - Live Spec Panel (shared doc)
+   - Kanban View (per project)
+   - Dashboard (agent logs + system state)
+   - Code Review Panel (stubbed)
+
+4. **MongoDB Collections**
+   - `tickets`, `conversations`, `memories`, `agent_logs`, `spec_versions`, `snippets`
+
+=== Configuration & Environment
+
+- All services run locally (no Docker required)
+- Poetry-managed virtualenv
+- SQLite for Django ORM
+- MongoDB for high-throughput ops (memory/logs)
+- LLM models loaded via `llama-cpp-python`
+- Git used via subprocess (no GitPython)
+- Dev config: `.env`, Poetry, Tailwind CLI, and `settings/development.py`
+
+=== MVP Scope
+
+- PM & Architect agents fully implemented
+- Developer/Tester agents functional with commit loops and test handling
+- Ticket lifecycle (Kanban + Git branches)
+- Live spec editing and human approval
+- RD resource logic simulated (can pause/resume via config toggle)
+- ModelManager with CodeLlama + Scout
+- No external LLMs or CI/CD integration initially
+
+
+
+== Milestones
+
+This section outlines the phased delivery of the system. Each milestone builds toward a fully functional local AI-driven software development environment with a minimal but complete vertical slice.
+
+=== Phase 1: Project Scaffold and Core Services
+- Initialize Django project with Poetry and HTMX support
+- Setup config split: development/production settings
+- Define MongoDB connection + base schema
+- Create initial collections: tickets, conversations, agent_logs
+- Implement:
+  - PM agent skeleton (chat parsing, spec writing)
+  - Model Manager (load CodeLlama 7B, dummy prompt call)
+  - Basic GitOps Controller (repo clone, branch create)
+
+=== Phase 2: Live Spec, Chat, and Kanban UX
+- Build HTMX frontend:
+  - Chat panel with PM interactions
+  - Live Spec Panel with edit/save + change logs
+  - Kanban board (editable in dev mode)
+- Implement:
+  - Ticket Controller API
+  - Ticket MongoDB model + CRUD routes
+  - PM-to-Architect trigger after spec approval
+
+=== Phase 3: Architect Agent & Ticket Breakdown
+- Architect agent:
+  - Parses spec into functions
+  - Creates functionality branches in Git
+  - Generates ticket Mongo entries
+  - Logs planning activity
+- GitOps Controller expanded:
+  - Detect `DEV` branch
+  - Handle re-init prompt via PM
+- Full ticket lifecycle logging
+
+=== Phase 4: Dev/Test Agent TDD Loop
+- Implement Developer and Tester agents:
+  - Git branching (`ticket/<id>`)
+  - Timed commits + push logic
+  - TDD loop with pass/fail check
+- Memory Manager:
+  - Short-term + capped session store
+  - Read/write ticket-specific context
+- Tests auto-run after each commit
+
+=== Phase 5: RD Agent and Resource Allocation
+- RD monitors ticket concurrency per project
+- Pause/resume logic:
+  - Detect over-capacity
+  - Suspend Dev/Test tickets
+  - Notify PM + log to dashboard
+- Resource dashboard:
+  - Per-project usage, quotas, paused tickets
+  - Configurable cycle (20 min default)
+
+=== Phase 6: Final MVP Polish
+- Dashboard features:
+  - Code review stub panel
+  - Agent-Agent Chat viewer (read-only)
+  - Metrics: test pass rate, open tickets, upcoming milestone
+- LLaMA 4 Scout escalation enabled
+- PM full approval loop with human intent parser
+- MVP walkthrough with all components connected
