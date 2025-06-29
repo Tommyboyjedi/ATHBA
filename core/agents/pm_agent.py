@@ -16,11 +16,13 @@ class PmAgent(IAgent):
         self._session = session
         self.ticket_repo = TicketRepo()
         self.behaviors = BehaviorLoader().load_for_agent(self)
+        self.request = None
 
     async def initialize(self):
         self._project = await ProjectsController().get_project(self._session.project_id)
 
-    async def run(self, content: str) -> list[ChatMessage]:
+    async def run(self, content: str, request) -> list[ChatMessage]:
+        self.request = request
         response = await LlmExchange(agent=self, session=self._session, content=content).get_intent()
         results = []
         print("LLM INTENT:", response.intent)
@@ -46,7 +48,7 @@ class PmAgent(IAgent):
     async def set_project(self, project: Project):
         self._project = project
         self._session.project_id = project._id
-        await SessionService().manage(self._session.request)
+        await SessionService().manage(self.request)
 
     async def log(self, message: str):
         print(f"[{self.name}][{self._session.project_id}] {message}")
@@ -119,7 +121,3 @@ class PmAgent(IAgent):
     @property
     def session(self):
         return self._session
-
-
-
-

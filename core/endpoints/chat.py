@@ -8,7 +8,7 @@ chat_router = Router()
 
 @chat_router.post("send")
 async def send_message(request, message: str = Form(...), session_key: str = Form(...)):
-    await ChatService().handle_user_message(session_key, message)
+    await ChatService().handle_user_message(request, session_key, message)
 
     return Response("""
     <script>

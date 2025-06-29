@@ -3,11 +3,15 @@ from core.dataclasses.chat_message import ChatMessage
 
 
 class BasicReplyBehavior(AgentBehavior):
-    async def run(self, agent, content: str, intent) -> list[ChatMessage]:
-        # Always returns the raw LLM response if no other behavior has matched
-        return [
-            ChatMessage(
-                sender=agent.name,
-                content=intent.response.strip()
-            )
-        ]
+    intent = ["basic_reply"]
+
+    async def run(self, agent, content: str, llm_response) -> list[ChatMessage]:
+        if llm_response.intent in self.intent:
+            # Always returns the raw LLM response if no other behavior has matched
+            return [
+                ChatMessage(
+                    sender=agent.name,
+                    content=llm_response.response.strip()
+                )
+            ]
+        return []

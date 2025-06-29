@@ -13,7 +13,7 @@ class ChatService:
     def __init__(self):
         self.repo = ConversationRepo()
 
-    async def handle_user_message(self, session_key: str, user_input: str):
+    async def handle_user_message(self, request, session_key: str, user_input: str):
         # 1. Save the user's message (but don't stream it back)
         user_msg = ChatMessage(sender="user", content=user_input).with_session_key(session_key)
         await self.repo.append_message(user_msg)
@@ -21,7 +21,7 @@ class ChatService:
 
         # 2. Run the agent and stream its responses
         agent = AgentGenerator().get_agent(session_key)
-        responses = await agent.run(user_input)
+        responses = await agent.run(user_input, request)
 
         for msg in responses:
             if isinstance(msg, ChatMessage):

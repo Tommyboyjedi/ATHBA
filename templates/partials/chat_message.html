@@ -1,3 +1,9 @@
-<div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %}">
+<div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %}"
+     {% if msg.metadata.refresh_overview %}
+        hx-get="/api/ui/overview/"
+        hx-target="#main-panel"
+        hx-swap="outerHTML"
+        hx-trigger="load"
+     {% endif %}>
   <strong>{{ msg.sender }}:</strong> {{ msg.content }}
 </div>

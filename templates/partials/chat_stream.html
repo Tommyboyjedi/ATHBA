@@ -2,6 +2,7 @@
      class="chat-stream"
      hx-ext="sse"
      sse-connect="/chat/stream/"
-     sse-swap="none"
+     sse-swap="beforeend"
+     sse-target="#chat-messages"
      sse-event="chat">
 </div>
