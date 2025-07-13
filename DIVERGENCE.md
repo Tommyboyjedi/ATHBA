@@ -13,10 +13,11 @@ This document outlines the differences between the specified requirements in `Sp
 
 - **Agent System**
   - Base agent interface (`IAgent`)
-  - PM Agent implementation with behaviors
-  - Developer and Tester agent stubs
+  - PM Agent implementation with behaviors as a high-level orchestrator
+  - Developer and Tester agent stubs (incomplete IAgent implementation)
   - Resource Director agent with basic functionality
   - Behavior-based agent architecture
+  - `SpecBuilderAgent` for handling specification creation and modification
 
 - **Model Management**
   - Model registry with tiered model support
@@ -55,22 +56,24 @@ This document outlines the differences between the specified requirements in `Sp
 ### ❌ Missing or Incomplete
 
 #### 1. Agent System
+- **PM Agent (Divergence)**
+  - The `Specification Document.txt` describes the PM agent as a co-author of the project specification. 
+  - **Current Implementation**: The PM agent acts as a high-level orchestrator. It routes user requests to other agents based on intent. It no longer directly handles specification authoring, delegating that task to the new `SpecBuilderAgent`.
+
 - **Architect Agent**
   - No implementation found
   - Missing repository analysis and planning functionality
 
 - **Developer/Tester Pairs**
-  - Basic stubs exist but lack complete TDD workflow
+  - Basic stubs exist but lack complete TDD workflow.
+  - They do not fully implement the `IAgent` interface (missing `llm_prompt`, `agent_type`, `session` properties).
   - Missing integration with Git operations
 
-#### 2. Memory System
-- **Short-Term Memory**
-  - Limited implementation of in-memory caching
-  - Missing complete conversation history management
-
-- **Long-Term Memory**
-  - No vector search implementation
-  - Missing knowledge base functionality
+#### 2. Memory System (Divergence)
+- **Centralized Memory Manager Missing**: The specification describes a `Memory Manager` service that provides structured access to a three-tier memory system. This service has not been implemented. Data access is handled by individual repositories instead.
+- **Short-Term Memory**: The in-memory cache backed by a capped MongoDB collection is not implemented.
+- **Medium-Term Memory**: This is the most complete tier, with repositories for conversations, agent logs, and spec versions.
+- **Long-Term Memory**: A `SnippetRepo` exists for storing code snippets, but it lacks the vector search and similarity matching capabilities required by the specification. It functions as a simple document store.
 
 #### 3. Model Management
 - **Model Lifecycle**
