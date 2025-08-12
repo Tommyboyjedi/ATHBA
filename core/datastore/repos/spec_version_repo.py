@@ -1,9 +1,8 @@
-from typing import Optional, Any, Dict
+from typing import Optional
 from uuid import UUID
 from datetime import datetime
 from pymongo import DESCENDING
 from core.infra.mongo import get_mongo_db
-import json
 
 class SpecVersionRepo:
     def __init__(self):
@@ -25,36 +24,13 @@ class SpecVersionRepo:
             cursor = cursor.limit(limit)
         return await cursor.to_list(length=limit or 100)
 
-    def _normalize_content(self, content: Any) -> Dict[str, Any]:
-        if isinstance(content, dict):
-            if "sections" in content and isinstance(content["sections"], list):
-                return content
-            if "content" in content and isinstance(content["content"], str):
-                return {
-                    "sections": [{"name": "raw", "body": content["content"]}],
-                    "meta": {"migratedFrom": "json-content"}
-                }
-        if isinstance(content, str):
-            try:
-                parsed = json.loads(content)
-                return self._normalize_content(parsed)
-            except Exception:
-                return {
-                    "sections": [{"name": "raw", "body": content}],
-                    "meta": {"migratedFrom": "plaintext"}
-                }
-        return {
-            "sections": [{"name": "raw", "body": str(content)}],
-            "meta": {"migratedFrom": "unknown"}
-        }
-
-    async def add_version(self, project_id: str, content: Any, author: str, diff: Optional[str] = None):
+    async def add_version(self, project_id: str, content: str, author: str, diff: Optional[str] = None):
         latest = await self.col.find_one({"project_id": project_id}, sort=[("version", DESCENDING)])
         next_version = (latest["version"] + 1) if latest else 1
         return await self.insert({
             "project_id": project_id,
             "version": next_version,
-            "content": self._normalize_content(content),
+            "content": content,
             "author": author,
             "diff": diff
         })

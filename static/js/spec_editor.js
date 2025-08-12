@@ -1,19 +1,6 @@
 let quill = null;
 
-function toInitialHtml(data) {
-  if (typeof data === 'string') return data;
-  if (data && typeof data === 'object') {
-    if (Array.isArray(data.sections) && data.sections.length > 0) {
-      return data.sections[0]?.body || '';
-    }
-    if (typeof data.content === 'string') {
-      return data.content;
-    }
-  }
-  return '';
-}
-
-export function initSpecEditor(initialData = '') {
+export function initSpecEditor(initialHtml = '') {
   const editor = document.getElementById('editor-container');
 
   quill = new Quill(editor, {
@@ -29,9 +16,10 @@ export function initSpecEditor(initialData = '') {
     }
   });
 
-  const initialHtml = toInitialHtml(initialData);
+  // Load initial content
   quill.clipboard.dangerouslyPasteHTML(initialHtml);
 
+  // Save button logic
   const saveBtn = document.getElementById('save-spec-btn');
   if (saveBtn) {
     saveBtn.addEventListener('click', () => {
