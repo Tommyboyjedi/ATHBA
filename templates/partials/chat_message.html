@@ -1,9 +1,27 @@
-<div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %}"
-     {% if msg.metadata.refresh_overview %}
-        hx-get="/api/ui/overview/"
-        hx-target="#main-panel"
-        hx-swap="outerHTML"
-        hx-trigger="load"
-     {% endif %}>
+<!-- templates/partials/chat_message.html -->
+<div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %}">
+
+  {# If either switch or refresh is requested, wrap them so HTMX queues requests in order #}
+  {% if msg.metadata.switch_project_id or msg.metadata.refresh_overview %}
+    <div class="switch-refresh" hx-sync="this:queue">
+      {# 1) Switch the session project_id FIRST #}
+      {% if msg.metadata.switch_project_id %}
+        <form hx-post="/api/projects/switch/"
+              hx-trigger="load"
+              hx-swap="none">
+          <input type="hidden" name="project_id" value="{{ msg.metadata.switch_project_id }}" />
+        </form>
+      {% endif %}
+
+      {# 2) THEN refresh overview (returns OOB selector that uses request.session['project_id']) #}
+      {% if msg.metadata.refresh_overview %}
+        <div hx-get="/api/ui/overview/"
+             hx-target="#main-panel"
+             hx-swap="innerHTML"
+             hx-trigger="load"></div>
+      {% endif %}
+    </div>
+  {% endif %}
+
   <strong>{{ msg.sender }}:</strong> {{ msg.content|safe }}
 </div>

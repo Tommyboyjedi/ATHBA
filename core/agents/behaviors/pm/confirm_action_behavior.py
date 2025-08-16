@@ -1,3 +1,4 @@
+# core/agents/behaviors/pm/confirm_action_behavior.py
 from core.agents.interfaces import AgentBehavior
 from core.dataclasses.llm_intent import LlmIntent
 from core.agents.pm_agent import PmAgent
@@ -22,23 +23,25 @@ class ConfirmActionBehavior(AgentBehavior):
         project_id = pending_action.get('project_id')
         project_name = pending_action.get('project_name')
 
-        # Clear the pending action from the session
+        # Clear pending action (conversation-scoped, not Django session)
         agent.session_proxy.delete('pending_action')
 
         if action_type == 'activate_project':
             if is_confirmed:
+                # Optional: keep this if you want a conversation-local mirror
                 agent.session_proxy.set('project_id', project_id)
+
                 content = f"OK. I've made '{project_name}' the active project."
                 return [ChatMessage(
                     sender=agent.name,
                     content=content,
-                    metadata={"refresh_overview": True}
+                    metadata={
+                        "switch_project_id": project_id,  # POST /api/projects/switch/ (updates request.session)
+                        "refresh_overview": True          # GET /api/ui/overview/ (OOB selector uses session)
+                    }
                 )]
             else:
                 content = f"OK. I will not activate '{project_name}'."
-                return [ChatMessage(
-                    sender=agent.name,
-                    content=content
-                )]
+                return [ChatMessage(sender=agent.name, content=content)]
 
         return []
