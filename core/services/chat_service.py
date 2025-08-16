@@ -5,6 +5,7 @@ from core.agents.agent_generator import AgentGenerator
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.session_state import SessionState
 from core.datastore.repos.conversation_repo import ConversationRepo
+from core.services.session_proxy import SessionProxy
 from core.sse.chat_stream_handler import chat_stream_subscribers
 from django.utils.html import escape
 
@@ -34,7 +35,8 @@ class ChatService:
 
         # 2. Get agent based on session state
         agent_name = request.session.get('agent_name', 'PM')
-        agent = AgentGenerator().get_agent(agent_name, project_id, session_key)
+        session_proxy = SessionProxy(request)
+        agent = AgentGenerator().get_agent(agent_name, project_id, session_key, session_proxy)
 
         # 3. Run the agent and process its responses
         responses = await agent.run(user_input)

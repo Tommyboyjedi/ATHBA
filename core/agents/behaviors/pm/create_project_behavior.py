@@ -19,11 +19,11 @@ class CreateProjectBehavior(AgentBehavior):
                 project_name = llm_response.entities.get("projectName") or "New Project(" + uuid.uuid4().hex + ")"
             project = await ProjectsController().create_project(name=project_name)
 
-            agent.request.session['pending_action'] = {
+            agent.session_proxy.set('pending_action', {
                 'type': 'activate_project',
                 'project_id': str(project.id),
                 'project_name': project.name,
-            }
+            })
 
             content = f"I have created the project '{project.name}'. Would you like to make it the active project? (yes/no)"
 

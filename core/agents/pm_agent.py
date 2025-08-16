@@ -8,12 +8,14 @@ from core.dataclasses.projses import Projses
 from core.datastore.repos.ticket_repo import TicketRepo
 from core.services.session_service import SessionService
 from llm_service.enums.eagent import EAgent
+from core.services.session_proxy import SessionProxy
 
 class PmAgent(IAgent):
 
 
-    def __init__(self, session: Projses):
+    def __init__(self, session: Projses, session_proxy: SessionProxy):
         self._session = session
+        self.session_proxy = session_proxy
         self.ticket_repo = TicketRepo()
         self.behaviors = BehaviorLoader().load_for_agent(self)
         self.request = None
@@ -47,7 +49,6 @@ class PmAgent(IAgent):
     async def set_project(self, project: Project):
         self._project = project
         self._session.project_id = project._id
-        await SessionService().manage(self.request)
 
     async def log(self, message: str):
         print(f"[{self.name}][{self._session.project_id}] {message}")

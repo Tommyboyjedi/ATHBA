@@ -11,7 +11,7 @@ class ConfirmActionBehavior(AgentBehavior):
         if llm_response.intent != self.intent:
             return []
 
-        pending_action = agent.request.session.get('pending_action')
+        pending_action = agent.session_proxy.get('pending_action')
         if not pending_action:
             return []
 
@@ -23,12 +23,11 @@ class ConfirmActionBehavior(AgentBehavior):
         project_name = pending_action.get('project_name')
 
         # Clear the pending action from the session
-        del agent.request.session['pending_action']
+        agent.session_proxy.delete('pending_action')
 
         if action_type == 'activate_project':
             if is_confirmed:
-                agent.request.session['project_id'] = project_id
-                agent.request.session.save()
+                agent.session_proxy.set('project_id', project_id)
                 content = f"OK. I've made '{project_name}' the active project."
                 return [ChatMessage(
                     sender=agent.name,
