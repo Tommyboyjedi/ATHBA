@@ -21,8 +21,7 @@ class PmAgent(IAgent):
     async def initialize(self):
         self._project = await ProjectsController().get_project(self._session.project_id)
 
-    async def run(self, content: str, request) -> list[ChatMessage]:
-        self.request = request
+    async def run(self, content: str) -> list[ChatMessage]:
         response = await LlmExchange(agent=self, session=self._session, content=content).get_intent()
         results = []
         print("LLM INTENT:", response.intent)

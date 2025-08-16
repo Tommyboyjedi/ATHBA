@@ -3,6 +3,7 @@ import logging
 from django.template.loader import render_to_string
 from core.agents.agent_generator import AgentGenerator
 from core.dataclasses.chat_message import ChatMessage
+from core.dataclasses.session_state import SessionState
 from core.datastore.repos.conversation_repo import ConversationRepo
 from core.sse.chat_stream_handler import chat_stream_subscribers
 from django.utils.html import escape
@@ -14,20 +15,41 @@ class ChatService:
         self.repo = ConversationRepo()
 
     async def handle_user_message(self, request, session_key: str, user_input: str):
-        # 1. Save the user's message (but don't stream it back)
-        user_msg = ChatMessage(sender="user", content=user_input).with_session_key(session_key)
-        await self.repo.append_message(user_msg)
-        # The user's message is now rendered client-side optimistically.
+        project_id = request.session.get('project_id')
 
-        # 2. Run the agent and stream its responses
-        agent = AgentGenerator().get_agent(session_key)
-        responses = await agent.run(user_input, request)
+        if not project_id:
+            log.debug("No active project, asking to create one.")
+            response_msg = ChatMessage(sender="assistant", content="Welcome! This application requires at least one project to function initially. Would you like to create one now? (yes/no)")
+            await self._stream(session_key, response_msg)
+            return
+
+        # 1. Save the user's message with full context
+        user_msg = ChatMessage(
+            sender="user",
+            content=user_input,
+            session_id=session_key,
+            project_id=project_id
+        )
+        await self.repo.append_message(user_msg)
+
+        # 2. Get agent based on session state
+        agent_name = request.session.get('agent_name', 'PM')
+        agent = AgentGenerator().get_agent(agent_name, project_id, session_key)
+
+        # 3. Run the agent and process its responses
+        responses = await agent.run(user_input)
 
         for msg in responses:
             if isinstance(msg, ChatMessage):
-                msg.with_session_key(session_key)
+                # Ensure agent messages also have the correct session/project context
+                msg.session_id = session_key
+                msg.project_id = project_id
                 await self.repo.append_message(msg)
                 await self._stream(session_key, msg)
+            elif isinstance(msg, SessionState):
+                # The agent has requested a change to the session state
+                if msg.agent_name:
+                    request.session['agent_name'] = msg.agent_name
 
     async def _stream(self, session_key: str, message: ChatMessage):
         if session_key in chat_stream_subscribers:

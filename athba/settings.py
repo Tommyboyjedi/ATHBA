@@ -35,7 +35,14 @@ DATABASES = {
 
 ASGI_APPLICATION = "athba.asgi.application"
 # Mongo URI available for your code
-MONGO_DB = os.getenv('DJANGO_MONGO', 'mongodb://localhost:27017')
+MONGO_USER = env("MONGO_USER")
+MONGO_PASS = env("MONGO_PASS")
+MONGO_HOST = env("MONGO_HOST")
+MONGO_PORT = env("MONGO_PORT")
+MONGO_DB_NAME = env("MONGO_DB_NAME")
+MONGO_DB = f"mongodb://{MONGO_USER}:{MONGO_PASS}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DB_NAME}?authSource=admin"
+print(f"DEBUG: Using MONGO_DB connection string: {MONGO_DB}")
+
 
 # Application definition
 INSTALLED_APPS = [
