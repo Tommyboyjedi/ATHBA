@@ -10,6 +10,7 @@ from core.endpoints.activity import router as activity_router
 from core.endpoints.dashboard import router as dashboard_router
 from core.endpoints.spec import router as spec_router
 from core.endpoints.ui import router as ui_router
+from core.endpoints.health import router as health_router
 
 
 # Single NinjaAPI instance
@@ -24,4 +25,5 @@ api.add_router("/projects", activity_router)  # will pick up /{project_id}/ticke
 api.add_router("/projects", dashboard_router)
 api.add_router("/spec", spec_router)
 api.add_router("/ui", ui_router)
+api.add_router("/health", health_router)
 # No URL patterns here; mount in core/urls.py

@@ -50,23 +50,29 @@ Key dependencies (from pyproject.toml):
 - Uses environment variables via django-environ
 - Development settings allow all hosts
 - SQLite database by default
-- MongoDB connection configured via `DJANGO_MONGO` env var
+- MongoDB connection configured via `MONGO_*` env vars (see `core/infra/mongo.py`)
 - Debug mode controlled by `DEBUG` env var
 
 ## Running the Project
 1. Install dependencies:
-   ```bash
+   ```bat
    poetry install
    ```
 2. Set up environment variables in `.env` file
-3. Run migrations:
-   ```bash
-   python manage.py migrate
+3. Run migrations (SQLite by default):
+   ```bat
+   poetry run python manage.py migrate
    ```
-4. Start the development server:
-   ```bash
-   python manage.py runserver
-   ```
+4. Start services (Windows):
+   - Web (Django via Uvicorn) on http://localhost:8010
+     ```bat
+     poetry run uvicorn athba.asgi:application --host 0.0.0.0 --port 8010 --reload
+     ```
+   - LLM Service (FastAPI) on http://localhost:8011
+     ```bat
+     poetry run uvicorn llm_service.llm_server:app --host 127.0.0.1 --port 8011 --reload
+     ```
+   - Or use batch files under `run scripts/` (e.g., `dev_up.bat`).
 
 ## Notable Features
 - AI agent system with multiple agent types

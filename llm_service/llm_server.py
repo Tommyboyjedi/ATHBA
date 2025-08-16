@@ -89,6 +89,13 @@ def clean_llm_response(raw: str) -> str:
     return cleaned
 
 
+# Liveness endpoint
+@app.get("/health")
+def health():
+    """Simple liveness check for the LLM service."""
+    return {"status": "ok"}
+
+
 # API Routes
 @app.post("/llm/infer")
 def infer(req: LLMRequest):

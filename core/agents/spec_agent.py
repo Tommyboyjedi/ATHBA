@@ -13,7 +13,7 @@ from llm_service.enums.eagent import EAgent
 class SpecBuilderAgent(IAgent):
 
     def report(self) -> dict:
-        pass
+        return {"agent": self.name, "status": "Idle", "project_id": getattr(self._session, "project_id", None)}
 
     def __init__(self, session: Projses):
         self._session = session
@@ -49,23 +49,23 @@ class SpecBuilderAgent(IAgent):
             
             Classify user input as one or many intents (but only these choices as they lead to behaviors in the application):
             - add_to_spec
-            - ask_a question
+            - ask_a_question
             - change_spec
             - start_spec
             - finalize_spec
             
             Respond only in JSON:
             
-            [{{
+            [{
               "response": "<statement and.or question as a sentance>",
               "intent": "<chosen_intent>",
               "agents_routing": [""] (always empty),
-              "entities": {{
+              "entities": {
                 "projectName": "<name>",
                 "humanIdeas": ["<prose containing idea (summarised)>","<prose containing another idea (summarised)>"]
                 "specSections": ["<name of spec section>","<name of another spec section>"],
-              }}
-            }}]
+              }
+            }]
             
             User input: 
             """
