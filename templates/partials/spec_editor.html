@@ -4,6 +4,16 @@
   <div id="spec-container">
     <div id="editor-container" style="height: 300px;" class="spec-editor-container"></div>
     <button id="save-spec-btn" class="mt-2 bg-blue-500 text-white px-4 py-1 rounded">Save</button>
+
+    <!-- Questions panel -->
+    <div id="questions-panel"
+         class="mt-4"
+         hx-ext="sse"
+         hx-get="/api/ui/questions/"
+         hx-trigger="load, sse:chat"
+         hx-swap="innerHTML">
+      <!-- Will be replaced with questions list -->
+    </div>
   </div>
 </div>
 <!-- Quill.js (Rich Text Editor) -->

@@ -5,6 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chatStream) {
         chatStream.addEventListener('htmx:afterSwap', function() {
             chatStream.scrollTop = chatStream.scrollHeight;
+
+            // Also refresh the Open Questions panel if present
+            const qp = document.getElementById('questions-panel');
+            if (qp && window.htmx) {
+                window.htmx.ajax('GET', '/api/ui/questions/', { target: '#questions-panel', swap: 'innerHTML' });
+            }
         });
     }
 });

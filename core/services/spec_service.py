@@ -19,6 +19,10 @@ class SpecService:
         latest = await self.repo.col.find_one({"project_id": project_id}, sort=[("version", -1)])
         return latest.get("content", "") if latest else ""
 
+    async def get_latest_version(self, project_id: str) -> int | None:
+        latest = await self.repo.col.find_one({"project_id": project_id}, sort=[("version", -1)])
+        return int(latest.get("version")) if latest and latest.get("version") is not None else None
+
     async def append_content(self, project_id: str, content_append_html: str, author: str = "Spec"):
         base = await self.get_latest_content(project_id)
         new_html = (base or "") + ("\n" if base else "") + content_append_html
