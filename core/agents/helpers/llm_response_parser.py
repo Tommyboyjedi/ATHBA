@@ -19,8 +19,18 @@ class LlmResponseParser:
         if not raw or not isinstance(raw, str):
             raise ValueError("Empty or invalid LLM response string")
 
-        # Remove leading/trailing backticks and whitespace
-        cleaned = re.sub(r"^`+|`+$", "", raw.strip())
+        # Normalize whitespace
+        cleaned = raw.strip()
+
+        # Remove code fences like ```json ... ``` or ``` ... ``` if present
+        if cleaned.startswith("```"):
+            # Drop the opening fence with optional language
+            cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", cleaned)
+            # Drop the trailing fence if present
+            cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+
+        # Also remove any stray leading/trailing backticks
+        cleaned = re.sub(r"^`+|`+$", "", cleaned)
 
         # Handle stringified-JSON-inside-string case
         try:

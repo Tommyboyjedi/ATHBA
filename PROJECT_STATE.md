@@ -86,6 +86,15 @@ Key dependencies (from pyproject.toml):
 - Follows a modular architecture with clear separation of concerns
 - Includes infrastructure for testing and evaluation
 - Supports both synchronous and asynchronous operations
+ 
+## Architecture Direction
+
+- **Multi-intent per turn:** LLM may return an array of intent objects; behaviors process each to allow multiple spec updates and questions in one turn.
+- **AI-first extraction:** No keyword heuristics. LLM must populate `entities` (e.g., `humanIdeas`, `specSections`) even for `ask_a_question`. Schema validation + repair pass planned.
+- **Session policy:** Endpoints access `request.session`. Agents receive a framework-agnostic session struct and never parse `session_key`.
+- **Always-on roadmap:** Background scheduler and Mongo-backed job queue will enable autonomous agents with SSE streaming.
+
+See `docs/ARCHITECTURE.md` for full details.
 
 ## Next Steps
 - Review and complete the specification document

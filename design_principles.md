@@ -23,18 +23,17 @@ To enforce this principle, the following constraint must be observed:
 *   The Django `HttpRequest` object **must not** be passed beyond the service layer (e.g., `ChatService`).
 *   Agents and their associated components (like `AgentGenerator` or `AgentBehavior`) must not import from `django.http` or have any direct knowledge of the request object.
 
-### Current Challenge: Session Management
+### Session Management (Updated Policy)
 
-This strict decoupling introduces a significant challenge for managing session state. The standard and most secure way to interact with Django's session is via the `request.session` dictionary, which is only available on the `request` object.
+This strict decoupling impacts how we manage session state. The authoritative and secure way to access session data is via `request.session`, which exists only on the Django request object.
 
-The current implementation in `core/agents/agent_generator.py` works around this by manually decoding the `session_key` string to extract session data.
+Updated rules we follow:
 
-**Identified Risks with the current approach:**
+1. Endpoints and services that need session data must receive the `request` and access `request.session` directly.
+2. Agents must never parse or decode `session_key`. Agents receive a lightweight, immutable session struct (`Projses`) created by services and, where needed, an adapter such as `SessionProxy` to perform session-safe operations on their behalf.
+3. The boundary is enforced in `ChatService` (and similar services): it reads from `request.session`, then constructs `Projses` and passes it into agents via `AgentGenerator`.
 
-1.  **Fragility:** The format of the session key is an internal Django implementation detail and is not guaranteed to remain stable across different Django versions. This makes the implementation brittle and prone to breaking during upgrades.
-2.  **Security:** This method bypasses Django's built-in session security, specifically the cryptographic signature that prevents tampering.
-
-This design choice represents a trade-off: it achieves high decoupling at the cost of relying on a fragile and less secure mechanism for session data access. Future work should address this trade-off.
+This preserves security and stability while keeping agents framework-agnostic.
 
 ## 2. General Coding Philosophy
 
@@ -45,3 +44,9 @@ The overarching goal is to produce well-structured, maintainable, and object-ori
 1.  **Prioritize Debuggability:** The most important consideration when writing code is that it should be easy to debug. This means favoring clarity, straightforward logic, and avoiding overly complex or "magical" implementations that obscure the flow of execution.
 
 2.  **Pragmatic Application of SOLID:** The SOLID principles of object-oriented design are highly valued and serve as a strong guide for architectural decisions. However, they are not to be followed dogmatically. There is a preference for pragmatism over purism, and principles may be bent when it leads to a simpler, more maintainable, or more debuggable outcome.
+
+## 3. Agent System Direction (Summary)
+
+- **Multi-intent per turn:** A single user message may produce multiple intent objects (e.g., several spec updates and questions simultaneously). Behaviors consume each item independently.
+- **AI-first extraction:** No keyword heuristics in behaviors. The LLM must populate entities (e.g., `humanIdeas`, `specSections`) even when asking questions. Schema validation and a repair pass ensure reliability.
+- **Toward always-on:** We will evolve to a background scheduler and job queue for autonomous agents that continue work beyond a single HTTP turn (see `docs/ARCHITECTURE.md`).

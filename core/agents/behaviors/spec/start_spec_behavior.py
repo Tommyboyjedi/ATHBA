@@ -12,12 +12,16 @@ class StartSpecBehavior(AgentBehavior):
             return []
 
         # Initialize a new spec document if one does not exist
-        await SpecService().initialize_spec(agent.session.project_id, author=agent.name)
+        svc = SpecService()
+        exists = await svc.spec_exists(agent.session.project_id)
+        if not exists:
+            await svc.initialize_spec(agent.session.project_id, author=agent.name)
 
         return [
             ChatMessage(
                 sender=agent.name,
-                content="🧱 I've created the initial structure for the project specification. Please describe your first requirement."
+                content="🧱 I've created the initial structure for the project specification. Please describe your first requirement.",
+                metadata={"open_spec_panel": True}
             )
         ]
 

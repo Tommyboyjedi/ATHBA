@@ -24,7 +24,7 @@ export function initSpecEditor(initialHtml = '') {
   if (saveBtn) {
     saveBtn.addEventListener('click', () => {
       const html = quill.root.innerHTML;
-      fetch(window.location.href, {
+      fetch('/api/ui/spec/', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: html })

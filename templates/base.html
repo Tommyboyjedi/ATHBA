@@ -57,7 +57,7 @@
       <!-- Single, unique main-panel (HTMX target) -->
       <main id="main-panel"
             hx-get="/api/ui/overview/"
-            hx-trigger="load, chat-response from:body delay:200ms"
+            hx-trigger="load"
             hx-swap="innerHTML">
         Loading overview…
       </main>

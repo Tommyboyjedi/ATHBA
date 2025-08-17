@@ -9,6 +9,7 @@ from core.datastore.repos.ticket_repo import TicketRepo
 from core.services.session_service import SessionService
 from llm_service.enums.eagent import EAgent
 from core.services.session_proxy import SessionProxy
+from core.dataclasses.session_state import SessionState
 
 class PmAgent(IAgent):
 
@@ -24,18 +25,45 @@ class PmAgent(IAgent):
         self._project = await ProjectsController().get_project(self._session.project_id)
 
     async def run(self, content: str) -> list[ChatMessage]:
-        response = await LlmExchange(agent=self, session=self._session, content=content).get_intent()
-        results = []
-        print("LLM INTENT:", response.intent)
-        print("LLM RAW RESPONSE:", repr(response.response))
+        exchange = LlmExchange(agent=self, session=self._session, content=content)
+        intents = await exchange.get_intents()
+        results: list = []
 
-        for behavior in self.behaviors:
-            messages = await behavior.run(self, content, response)
-            if messages:
-                if isinstance(messages, list):
-                    results.extend(messages)
-                else:
-                    results.append(messages)
+        # Repair pass if the LLM failed to return valid JSON/intents
+        if not intents:
+            repair_prompt = (
+                "You are repairing a previous PM agent extraction that failed to return valid JSON. "
+                "Return a valid JSON array of one or more objects following this exact schema per object: "
+                "{\n  \"response\": \"<your_response_here>\",\n  \"intent\": \"<one_of: create_project | rename_project | edit_spec | remind_approval | confirm_action | basic_reply>\",\n  \"agents_routing\": [\"@AgentName\"],\n  \"entities\": {}\n}. "
+                "Rules: 1) Output ONLY raw JSON (no code fences). 2) Include ALL fields. 3) If the user wants to work on the specification or provides concrete requirements/stack details, set intent to 'edit_spec' and include ['@Spec'] in agents_routing. 4) If no specific action, use 'basic_reply'. 5) Keep entities an empty object unless you have a specific key like project_name for create_project.\n\n"
+                f"User input: {content}\n\nReturn only the JSON array."
+            )
+            repaired = await exchange.infer_with_prompt(repair_prompt)
+            if repaired:
+                intents = repaired
+            else:
+                return [ChatMessage(sender=self.name, content="I couldn't parse that. Could you rephrase?")]
+
+        for intent in intents:
+            print("LLM INTENT:", intent.intent)
+            print("LLM RAW RESPONSE:", repr(intent.response))
+            for behavior in self.behaviors:
+                messages = await behavior.run(self, content, intent)
+                if messages:
+                    if isinstance(messages, list):
+                        results.extend(messages)
+                    else:
+                        results.append(messages)
+
+            # Multi-agent routing directives
+            try:
+                for route in intent.agents_routing or []:
+                    agent_name = route[1:] if isinstance(route, str) and route.startswith("@") else route
+                    if agent_name and agent_name != self.name:
+                        results.append(SessionState(agent_name=agent_name))
+            except Exception:
+                pass
+
         print("Behaviors returned:", results)
         return results
 
@@ -57,7 +85,7 @@ class PmAgent(IAgent):
     def llm_prompt(self) -> str:
         return f"""You are the Project Manager (PM) agent in an AI-driven DevOps team.
 
-    You MUST respond with a valid JSON array containing exactly one object with these exact fields:
+    Respond with a valid JSON array containing one or more objects. Each object must have these exact fields:
     {{
       "response": "<your_response_here>",
       "intent": "<one_of_the_intents>",
@@ -74,51 +102,27 @@ class PmAgent(IAgent):
     - basic_reply: For general conversation that doesn't fit other intents
 
     Rules:
-    1. The response MUST be valid JSON
-    2. Include ALL fields in the response
-    3. Keep agents_routing as an empty list if no routing is needed
+    1. The response MUST be valid JSON (no code fences)
+    2. Include ALL fields in each object
+    3. Use agents_routing (e.g., ["@Spec"]) when another agent should act this turn
     4. Keep entities as an empty object if no entities are extracted
 
     Examples:
-    User: "Let's start a new project called 'Customer Portal'"
-    {{
-      "response": "I'll help you create a new project called 'Customer Portal'.",
-      "intent": "create_project",
-      "agents_routing": ["@Spec"],
-      "entities": {{"project_name": "Customer Portal"}}
-    }}
-
-    User: "yes"
-    {{
-      "response": "Got it.",
-      "intent": "confirm_action",
-      "agents_routing": [],
-      "entities": {{"confirmation": "yes"}}
-    }}
-
-    User: "no, don't do that"
-    {{
-      "response": "OK, I won't.",
-      "intent": "confirm_action",
-      "agents_routing": [],
-      "entities": {{"confirmation": "no"}}
-    }}
-
-    User: "Update the login page spec"
-    {{
-      "response": "I'll update the login page specification.",
-      "intent": "edit_spec",
-      "agents_routing": ["@Spec"],
-      "entities": {{"section": "login"}}
-    }}
-
-    User: "Hello!"
-    {{
-      "response": "Hi there! How can I assist you today?",
-      "intent": "basic_reply",
-      "agents_routing": [],
-      "entities": {{}}
-    }}
+    User: "Let's start a new project called 'Customer Portal' and update the login spec."
+    [
+      {{
+        "response": "I'll create a new project called 'Customer Portal'.",
+        "intent": "create_project",
+        "agents_routing": ["@Spec"],
+        "entities": {{"project_name": "Customer Portal"}}
+      }},
+      {{
+        "response": "Routing to Spec to update the login section.",
+        "intent": "edit_spec",
+        "agents_routing": ["@Spec"],
+        "entities": {{"section": "login"}}
+      }}
+    ]
 
     Current conversation:
     """

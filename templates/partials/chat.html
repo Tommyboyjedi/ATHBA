@@ -37,6 +37,19 @@
 
 
 </div>
+<!-- Open Questions panel in the chat sidebar -->
+<div id="questions-panel"
+     class="mt-4"
+     hx-ext="sse"
+     hx-get="/api/ui/questions/"
+     hx-trigger="load, sse:chat, questions-updated from:body"
+     hx-swap="innerHTML">
+  <!-- Will be replaced with questions list -->
+  <div class="text-sm text-gray-500">Loading questions…</div>
+  
+</div>
+<!-- Detailed Question Answer editor will load here -->
+<div id="question-detail-panel" class="mt-3"></div>
 <script>
   function escapeHtml(unsafe) {
     return unsafe

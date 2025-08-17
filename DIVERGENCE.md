@@ -43,15 +43,15 @@ This document outlines the differences between the specified requirements in `Sp
   - Partial MongoDB integration for data storage
 
 - **Agent Communication**
-  - Basic message passing implemented
-  - Missing complete implementation of the agent coordination patterns
+  - Basic message passing implemented; design for multi-intent per turn and multi-agent routing is documented (see `docs/ARCHITECTURE.md`).
+  - Missing complete implementation of the coordination patterns (multi-intent execution loop, cross-agent routing) and always-on scheduler.
   - Partial implementation of the agent lifecycle
 
 - **User Interface**
   - Basic HTMX frontend with real-time chat updates via SSE is implemented.
   - Chat UI is functional but lacks advanced features (e.g., avatars, rich formatting).
   - Dashboard for project metrics is not yet implemented.
-  - Live Spec Panel and editor are not yet implemented.
+  - Live Spec Panel and editor are implemented; they dynamically update on SSE chat events via HTMX and can auto-open/refresh via message metadata. Advanced UX polish remains.
 
 ### ❌ Missing or Incomplete
 
@@ -136,7 +136,7 @@ This document outlines the differences between the specified requirements in `Sp
 
 4. **User Interface**
    - Implement dashboard for project metrics
-   - Create Live Spec Panel and editor
+   - Enhance Live Spec Panel/editor (auto-open/refresh polish, advanced UX)
 
 ## Notes
 

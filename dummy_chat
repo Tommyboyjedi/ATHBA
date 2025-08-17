@@ -1,0 +1,1 @@
+ok I want to build a solution that looks a bit like this.. it is basically a replacement for a spreadsheet. It will have a django backend, using django ORM to talk to a sqllite file which will be its database. its front end will eb as basic as possible but using alpine.js and bootstrap.css. no build step.

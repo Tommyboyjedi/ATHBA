@@ -29,7 +29,10 @@ class AddToSpecBehavior(AgentBehavior):
             linked_spec_version=latest_version,
         )
 
+        confirmation = f"📌 I've added your input to the spec under: _{section_title}_."
+        follow_up = f" Also: {intent.response}" if getattr(intent, 'response', None) else ""
         return [ChatMessage(
             sender=agent.name,
-            content=f"📌 I've added your input to the spec under: _{section_title}_."
+            content=confirmation + follow_up,
+            metadata={"open_spec_panel": True}
         )]
