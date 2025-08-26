@@ -1,11 +1,16 @@
 from django.shortcuts import render
-from ninja import Router
+from ninja import Router, Schema
 
 from core.dataclasses.project import Project
 from core.services.project_service import ProjectsService
 
 router = Router(tags=["Projects"])
 ps = ProjectsService()
+
+
+class ActiveProjectResponse(Schema):
+    id: str | None
+    name: str | None
 
 @router.get("/", response=list[Project])
 async def list_projects(request):
@@ -22,6 +27,20 @@ def update_project(request, project_id: str, data: Project):
 @router.get("/{project_id}", response=Project)
 def get_project(request, project_id: str):
     return ps.get_project_by_id(project_id)
+
+
+@router.get("/active/", response=ActiveProjectResponse)
+async def get_active_project(request):
+    project_id = request.session.get("project_id")
+    name = None
+    if project_id:
+        try:
+            project = await ps.get_project_by_id(project_id)
+            if project:
+                name = project.name
+        except Exception:
+            name = None
+    return {"id": project_id, "name": name}
 
 @router.post("/{project_id}/deactivate/")
 async def deactivate_project(request, project_id: str):
