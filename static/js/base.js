@@ -8,3 +8,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Automatically attach the CSRF token to all HTMX requests.
+    const tokenTag = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = tokenTag ? tokenTag.getAttribute('content') : null;
+    if (!csrfToken) {
+        return;
+    }
+    document.body.addEventListener('htmx:configRequest', (event) => {
+        event.detail.headers['X-CSRFToken'] = csrfToken;
+    });
+});
