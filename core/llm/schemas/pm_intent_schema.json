@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PM Intent Envelope",
+  "type": "object",
+  "properties": {
+    "response": {"type": "string"},
+    "intent": {"type": "string"},
+    "agents_routing": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "entities": {"type": "object", "default": {}},
+    "evaluation": {"type": ["object", "null"], "default": null}
+  },
+  "required": ["response", "intent", "agents_routing", "entities"]
+}
