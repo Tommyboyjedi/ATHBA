@@ -55,4 +55,24 @@ class LlmExchange:
         except Exception as e:
             return LlmIntent(response=f"❌ Error talking to LLM: {e}", intent="error", agents_routing=[],entities={})
 
+    async def get_response(self) -> str:
+        """Get a raw text response from LLM without intent parsing."""
+        llm_request = LLMRequest(
+            agent=self.agent.agent_type,
+            tier=self.tier,
+            project_id=self.session.project_id,
+            prompt=self.content  # Just the content, not the agent prompt
+        )
+
+        try:
+            response = requests.post(
+                f"{os.environ.get('LLM_SERVER_URL', 'http://localhost:8011')}/llm/infer",
+                json=llm_request.model_dump(),
+                timeout=120  # Longer timeout for spec analysis
+            )
+            response.raise_for_status()
+            return response.json().get("response", "")
+        except Exception as e:
+            return f"Error: {e}"
+
 
