@@ -26,5 +26,21 @@
         <rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/>
       </svg>
     </button>
+    {% if msg.sender != 'user' %}
+    <button class="message-action-btn reaction-btn" 
+            onclick="reactToMessage(this, 'thumbs_up')" 
+            aria-label="Helpful"
+            title="Mark as helpful"
+            data-reaction="thumbs_up">
+      👍
+    </button>
+    <button class="message-action-btn reaction-btn" 
+            onclick="reactToMessage(this, 'thumbs_down')" 
+            aria-label="Not helpful"
+            title="Mark as not helpful"
+            data-reaction="thumbs_down">
+      👎
+    </button>
+    {% endif %}
   </div>
 </div>

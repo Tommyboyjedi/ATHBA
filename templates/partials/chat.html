@@ -57,6 +57,22 @@
               <rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/>
             </svg>
           </button>
+          {% if msg.sender != 'user' and msg.sender != 'human' %}
+          <button class="message-action-btn reaction-btn" 
+                  onclick="reactToMessage(this, 'thumbs_up')" 
+                  aria-label="Helpful"
+                  title="Mark as helpful"
+                  data-reaction="thumbs_up">
+            👍
+          </button>
+          <button class="message-action-btn reaction-btn" 
+                  onclick="reactToMessage(this, 'thumbs_down')" 
+                  aria-label="Not helpful"
+                  title="Mark as not helpful"
+                  data-reaction="thumbs_down">
+            👎
+          </button>
+          {% endif %}
         </div>
       </div>
     {% endfor %}
@@ -65,6 +81,17 @@
   <!-- Typing indicator -->
   <div id="typing-indicator" class="typing-indicator" style="display: none;">
     Agent is thinking<span class="dots">...</span>
+  </div>
+
+  <!-- Quick action buttons -->
+  <div id="quick-actions" class="quick-actions" style="display: none;">
+    <div class="quick-actions-content">
+      <span class="quick-actions-label">Quick replies:</span>
+      <button class="quick-action-btn" onclick="sendQuickMessage('Yes, please continue')">Yes</button>
+      <button class="quick-action-btn" onclick="sendQuickMessage('No, thank you')">No</button>
+      <button class="quick-action-btn" onclick="sendQuickMessage('Can you explain that in more detail?')">Explain</button>
+      <button class="quick-action-btn" onclick="sendQuickMessage('Stop')">Stop</button>
+    </div>
   </div>
 
   <!-- Error toast container -->
@@ -102,6 +129,9 @@
       </svg>
       Sending...
     </span>
+  </button>
+  <button type="button" class="help-button" onclick="toggleQuickActions()" aria-label="Toggle quick actions" title="Quick actions">
+    ⚡
   </button>
   <button type="button" class="help-button" onclick="toggleKeyboardHelp()" aria-label="Show keyboard shortcuts" title="Keyboard shortcuts (?)">
     ?
@@ -202,6 +232,44 @@
     URL.revokeObjectURL(url);
     
     showToast('Conversation exported successfully');
+  }
+
+  function reactToMessage(button, reaction) {
+    // Toggle reaction state
+    const isActive = button.classList.contains('active');
+    
+    // Remove active state from all reaction buttons in this message
+    const messageDiv = button.closest('.message');
+    messageDiv.querySelectorAll('.reaction-btn').forEach(btn => btn.classList.remove('active'));
+    
+    // Add active state to clicked button if it wasn't already active
+    if (!isActive) {
+      button.classList.add('active');
+      showToast(`Feedback recorded: ${reaction === 'thumbs_up' ? 'Helpful' : 'Not helpful'}`);
+    }
+    
+    // In a real implementation, you would send this to the server
+    // to store the user's reaction
+  }
+
+  function sendQuickMessage(message) {
+    const messageInput = document.getElementById('chat-input');
+    messageInput.value = message;
+    document.getElementById('chat-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }
+
+  function toggleQuickActions() {
+    const quickActions = document.getElementById('quick-actions');
+    if (quickActions.style.display === 'none' || !quickActions.style.display) {
+      quickActions.style.display = 'flex';
+    } else {
+      quickActions.style.display = 'none';
+    }
+  }
+
+  function hideQuickActions() {
+    const quickActions = document.getElementById('quick-actions');
+    quickActions.style.display = 'none';
   }
 
   function handleAfterRequest(event) {
