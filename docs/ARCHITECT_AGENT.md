@@ -4,6 +4,48 @@
 
 The Architect Agent is responsible for analyzing approved project specifications and breaking them down into actionable development tickets. It serves as the bridge between high-level requirements (captured in specifications) and concrete development tasks.
 
+**⚠️ IMPORTANT: The Architect agent ALWAYS uses Claude Sonnet 4.5 via Anthropic's cloud API. It never uses local LLM models.**
+
+## Cloud Provider Requirement
+
+### Why Cloud?
+
+The Architect agent requires Claude Sonnet 4.5 for:
+- **Superior reasoning**: Breaking down complex specs requires advanced logical understanding
+- **Reliability**: Cloud models provide consistent, high-quality ticket generation
+- **Context handling**: Better handling of large specification documents
+- **JSON parsing**: More reliable structured output generation
+
+### Setup
+
+Before using the Architect agent, you must configure your Anthropic API key:
+
+```bash
+# Add to your .env file
+ANTHROPIC_API_KEY=your_api_key_here
+ANTHROPIC_API_BASE=https://api.anthropic.com/v1  # Optional, defaults to this
+ANTHROPIC_DEFAULT_MODEL=claude-sonnet-4.5-20250514  # Optional
+```
+
+To get an API key:
+1. Sign up at https://console.anthropic.com/
+2. Navigate to API Keys section
+3. Create a new API key
+4. Copy the key to your .env file
+
+### Cost Considerations
+
+Using Claude Sonnet 4.5 incurs costs based on token usage:
+- **Input tokens**: ~$3 per million tokens
+- **Output tokens**: ~$15 per million tokens
+
+Typical costs per spec analysis:
+- **Small spec** (1-2 pages): $0.01-0.05
+- **Medium spec** (5-10 pages): $0.10-0.25
+- **Large spec** (20+ pages): $0.50-1.00
+
+The Architect is only triggered when you finalize a specification, so costs are incurred once per spec version.
+
 ## Responsibilities
 
 1. **Specification Analysis**: Parse and understand approved project specifications
@@ -188,13 +230,42 @@ Total: 25 test cases covering:
 
 ## Configuration
 
-The Architect agent uses the model registry for LLM selection:
+The Architect agent uses Claude Sonnet 4.5 exclusively:
 
 ```python
-# Uses agent_type = EAgent.Architect
-# Default tier: ETier.STANDARD
-# Can be escalated to ETier.HEAVY for complex specs
+# In architect_agent.py
+async def run(self, content: str) -> list[ChatMessage]:
+    # Architect ALWAYS uses cloud provider (Claude Sonnet 4.5)
+    response = await LlmExchange(
+        agent=self, 
+        session=self._session, 
+        content=content,
+        use_cloud=True  # Force cloud usage
+    ).get_intent()
 ```
+
+### Environment Variables
+
+Required:
+- `ANTHROPIC_API_KEY` - Your Anthropic API key
+
+Optional:
+- `ANTHROPIC_API_BASE` - API base URL (defaults to https://api.anthropic.com/v1)
+- `ANTHROPIC_DEFAULT_MODEL` - Model to use (defaults to claude-sonnet-4.5-20250514)
+
+### Model Selection
+
+The Architect uses:
+- **Model**: claude-sonnet-4.5-20250514
+- **Temperature**: 0.0 (deterministic output)
+- **Max tokens**: 1024 for intent recognition, 4096 for ticket generation
+- **Timeout**: 120 seconds
+
+This configuration ensures:
+- Consistent ticket generation
+- High-quality analysis
+- Reliable JSON output
+- Sufficient context for large specs
 
 ## Future Enhancements
 
@@ -239,6 +310,21 @@ The Architect includes robust error handling:
 2. **LLM Parsing Failure**: Uses fallback ticket generation
 3. **Invalid Ticket Data**: Validates and fills in defaults
 4. **Network Errors**: Gracefully degrades with informative messages
+5. **API Key Missing**: Clear error message directing to setup instructions
+6. **Rate Limits**: Automatic retry with exponential backoff (3 retries)
+
+### Cloud API Error Handling
+
+When the Anthropic API is unavailable:
+```python
+try:
+    result = provider.invoke(...)
+except RuntimeError as e:
+    # Falls back to creating default tickets
+    return self._create_fallback_tickets(spec_text)
+```
+
+The fallback mechanism ensures the workflow continues even if the cloud API fails, though ticket quality may be reduced.
 
 ## Monitoring
 

@@ -2,11 +2,11 @@
 
 ## Overview
 
-**ATHBA** is a local AI-powered software development environment that simulates a complete agile team using multiple AI agents. The system orchestrates Project Manager, Architect, Developer, Tester, and Resource Director agents to collaboratively deliver software projects following TDD principles and GitOps workflows.
+**ATHBA** is an AI-powered software development environment that simulates a complete agile team using multiple AI agents. The system orchestrates Project Manager, Architect, Developer, Tester, and Resource Director agents to collaboratively deliver software projects following TDD principles and GitOps workflows.
 
 **Key Features:**
-- 🤖 Multi-agent system with specialized roles (PM, Spec Builder, Resource Director, Dev/Test pairs)
-- 🏠 Fully local execution using quantized LLM models (no cloud dependencies)
+- 🤖 Multi-agent system with specialized roles (PM, Spec Builder, Architect, Resource Director, Dev/Test pairs)
+- ☁️ Hybrid LLM approach: Cloud AI (Claude) for Architect, local models for other agents
 - 💬 Chat-based interaction with real-time updates (SSE)
 - 📋 Ticket-driven development with Kanban workflow
 - 🔄 GitOps branching strategy (planned)
@@ -20,6 +20,7 @@
 - Poetry
 - MongoDB (optional but recommended)
 - ~5-10GB disk space for LLM models
+- **Anthropic API key** (required for Architect agent - see [Cloud Setup Guide](docs/CLOUD_SETUP.md))
 
 ### Installation
 
@@ -35,7 +36,12 @@
    DEBUG=True
    DJANGO_MONGO=mongodb://localhost:27017
    LLM_SERVER_URL=http://127.0.0.1:8011
+   
+   # REQUIRED: Anthropic API key for Architect agent
+   ANTHROPIC_API_KEY=sk-ant-your-key-here
    ```
+   
+   See [Cloud Setup Guide](docs/CLOUD_SETUP.md) for detailed Anthropic configuration.
 
 3. **Download models** to `llm_service/models/`:
    - `llama-3.2-3b-instruct-q4_k_m.gguf` (required)
