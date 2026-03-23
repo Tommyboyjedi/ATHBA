@@ -3,38 +3,118 @@
 <div class="chat-container">
   <div class="chat-header">
     <h2 class="font-semibold">Chat – {{ project.name }}</h2>
+    <div class="connection-status">
+      <span id="connection-indicator" class="status-dot status-connecting" title="Connecting..."></span>
+      <span id="connection-text">Connecting...</span>
+    </div>
   </div>
 
-  <div id="chat-stream" class="chat-stream" hx-ext="sse" sse-connect="/chat/stream/?session={{ request.session.session_key }}" sse-swap="chat" hx-swap="beforeend">
+  <div id="chat-stream" 
+       class="chat-stream" 
+       role="log" 
+       aria-live="polite" 
+       aria-relevant="additions"
+       aria-label="Chat conversation"
+       hx-ext="sse" 
+       sse-connect="/chat/stream/?session={{ request.session.session_key }}" 
+       sse-swap="chat" 
+       hx-swap="beforeend">
     {% for msg in chat_log %}
-      <div class="message {% if msg.sender == 'human' %}message-human{% else %}message-system{% endif %}">
-        <strong>{{ msg.sender }}:</strong> {{ msg.message }}
+      <div class="message {% if msg.sender == 'human' or msg.sender == 'user' %}message-human{% else %}message-system{% endif %}"
+           role="article"
+           aria-label="Message from {{ msg.sender }}">
+        <div class="message-header">
+          <strong class="message-sender">{{ msg.sender }}:</strong>
+          <span class="message-timestamp" title="{{ msg.timestamp }}">
+            {{ msg.get_formatted_timestamp }}
+          </span>
+        </div>
+        <div class="message-content">{{ msg.content|safe }}</div>
+        <div class="message-actions">
+          <button class="message-action-btn copy-btn" 
+                  onclick="copyMessage(this)" 
+                  aria-label="Copy message"
+                  title="Copy to clipboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M10 2H3C2.44772 2 2 2.44772 2 3V10" stroke="currentColor" stroke-width="1.5"/>
+              <rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+          </button>
+        </div>
       </div>
     {% endfor %}
   </div>
 
+  <!-- Typing indicator -->
+  <div id="typing-indicator" class="typing-indicator" style="display: none;">
+    Agent is thinking<span class="dots">...</span>
+  </div>
+
+  <!-- Error toast container -->
+  <div id="error-toast-container" class="error-toast-container" aria-live="assertive"></div>
+
 <form id="chat-form"
       hx-post="/api/chat/send"
-      hx-target="#chat-form"
-      hx-swap="none"
-      hx-on::after-request="this.reset()"
-      class="chat-form">
+      hx-target="#error-toast-container"
+      hx-swap="innerHTML"
+      hx-on::after-request="handleAfterRequest(event)"
+      class="chat-form"
+      role="form"
+      aria-label="Send message form">
   {% csrf_token %}
   <input type="hidden" name="session_key" value="{{ request.session.session_key }}">
-  <input
-      type="text"
+  <textarea
+      id="chat-input"
       name="message"
       oninput="this.setCustomValidity('')"
       oninvalid="this.setCustomValidity('Type something!')"
-      placeholder="Type a message…"
+      placeholder="Type a message… (Enter to send, Shift+Enter for new line)"
       class="chat-input"
       autocomplete="off"
+      rows="1"
       required
-    />
+      aria-label="Message input"
+      aria-describedby="chat-help-text"
+    ></textarea>
 
-  <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded">Send</button>
+  <button id="send-button" type="submit" class="send-button" aria-label="Send message">
+    <span class="send-text">Send</span>
+    <span class="sending-text" style="display: none;">
+      <svg class="spinner" width="16" height="16" viewBox="0 0 16 16">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="31.4" stroke-dashoffset="10" />
+      </svg>
+      Sending...
+    </span>
+  </button>
+  <button type="button" class="help-button" onclick="toggleKeyboardHelp()" aria-label="Show keyboard shortcuts" title="Keyboard shortcuts (?)">
+    ?
+  </button>
 </form>
 
+<!-- Keyboard shortcuts help panel -->
+<div id="keyboard-help" class="keyboard-help-panel" style="display: none;" role="dialog" aria-labelledby="keyboard-help-title">
+  <div class="keyboard-help-content">
+    <h3 id="keyboard-help-title">Keyboard Shortcuts</h3>
+    <button class="close-btn" onclick="toggleKeyboardHelp()" aria-label="Close help panel">×</button>
+    <dl>
+      <dt><kbd>Enter</kbd></dt>
+      <dd>Send message</dd>
+      
+      <dt><kbd>Shift</kbd> + <kbd>Enter</kbd></dt>
+      <dd>New line in message</dd>
+      
+      <dt><kbd>Escape</kbd></dt>
+      <dd>Clear input</dd>
+      
+      <dt><kbd>?</kbd></dt>
+      <dd>Toggle this help panel</dd>
+    </dl>
+  </div>
+</div>
+
+<span id="chat-help-text" class="sr-only">
+  Press Enter to send your message, Shift+Enter for a new line, or ? for keyboard shortcuts
+</span>
 
 </div>
 <script>
@@ -47,16 +127,118 @@
       .replace(/'/g, "&#039;");
   }
 
+  function copyMessage(button) {
+    const messageDiv = button.closest('.message');
+    const contentDiv = messageDiv.querySelector('.message-content');
+    const text = contentDiv.innerText || contentDiv.textContent;
+    
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Message copied to clipboard');
+    }).catch(err => {
+      showToast('Failed to copy message', true);
+    });
+  }
+
+  function showToast(message, isError = false) {
+    const container = document.getElementById('error-toast-container');
+    const toast = document.createElement('div');
+    toast.className = isError ? 'error-toast' : 'success-toast';
+    toast.textContent = message;
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+  function toggleKeyboardHelp() {
+    const helpPanel = document.getElementById('keyboard-help');
+    helpPanel.style.display = helpPanel.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function handleAfterRequest(event) {
+    const form = document.getElementById('chat-form');
+    const button = document.getElementById('send-button');
+    
+    // Reset button state
+    button.disabled = false;
+    button.querySelector('.send-text').style.display = 'inline';
+    button.querySelector('.sending-text').style.display = 'none';
+    
+    // Reset form if successful
+    if (event.detail.successful) {
+      form.reset();
+      autoResizeTextarea();
+    }
+  }
+
+  function autoResizeTextarea() {
+    const textarea = document.getElementById('chat-input');
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 150) + 'px';
+  }
+
   document.addEventListener('DOMContentLoaded', (event) => {
     const chatStream = document.getElementById('chat-stream');
     const chatForm = document.getElementById('chat-form');
-    const messageInput = chatForm.querySelector('input[name="message"]');
+    const messageInput = document.getElementById('chat-input');
+    const sendButton = document.getElementById('send-button');
+    const connectionIndicator = document.getElementById('connection-indicator');
+    const connectionText = document.getElementById('connection-text');
+
+    // Auto-resize textarea
+    messageInput.addEventListener('input', autoResizeTextarea);
+
+    // Keyboard shortcuts
+    messageInput.addEventListener('keydown', (e) => {
+      // Enter without Shift = submit
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        chatForm.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      }
+      // Escape = clear input
+      else if (e.key === 'Escape') {
+        messageInput.value = '';
+        autoResizeTextarea();
+      }
+    });
+
+    // Global ? key for help
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '?' && !e.target.matches('input, textarea')) {
+        e.preventDefault();
+        toggleKeyboardHelp();
+      }
+      // Escape to close help
+      if (e.key === 'Escape') {
+        const helpPanel = document.getElementById('keyboard-help');
+        if (helpPanel.style.display !== 'none') {
+          toggleKeyboardHelp();
+        }
+      }
+    });
 
     if (chatStream) {
       // Initialize HTMX SSE
       htmx.process(chatStream);
+      
+      // SSE connection handlers
+      chatStream.addEventListener('htmx:sseBeforeMessage', function(evt) {
+        connectionIndicator.className = 'status-dot status-connected';
+        connectionText.textContent = 'Connected';
+      });
+
       chatStream.addEventListener('htmx:sseError', function(evt) {
         console.error('HTMX SSE Error:', evt.detail.error);
+        connectionIndicator.className = 'status-dot status-disconnected';
+        connectionText.textContent = 'Disconnected';
+        showToast('Connection lost. Attempting to reconnect...', true);
+      });
+
+      chatStream.addEventListener('htmx:sseOpen', function(evt) {
+        connectionIndicator.className = 'status-dot status-connected';
+        connectionText.textContent = 'Connected';
       });
     } else {
       console.error('Could not find #chat-stream element.');
@@ -67,10 +249,35 @@
         const messageContent = evt.detail.requestConfig.parameters.message;
         if (!messageContent || messageContent.trim() === '') return;
 
+        // Disable button and show sending state
+        sendButton.disabled = true;
+        sendButton.querySelector('.send-text').style.display = 'none';
+        sendButton.querySelector('.sending-text').style.display = 'inline';
+
         // Create and append the user's message optimistically
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message message-human';
-        messageDiv.innerHTML = `<strong>user:</strong> ${escapeHtml(messageContent)}`;
+        messageDiv.setAttribute('role', 'article');
+        messageDiv.setAttribute('aria-label', 'Message from user');
+        
+        const now = new Date();
+        const timestamp = now.toISOString();
+        
+        messageDiv.innerHTML = `
+          <div class="message-header">
+            <strong class="message-sender">user:</strong>
+            <span class="message-timestamp" title="${timestamp}">just now</span>
+          </div>
+          <div class="message-content">${escapeHtml(messageContent)}</div>
+          <div class="message-actions">
+            <button class="message-action-btn copy-btn" onclick="copyMessage(this)" aria-label="Copy message" title="Copy to clipboard">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M10 2H3C2.44772 2 2 2.44772 2 3V10" stroke="currentColor" stroke-width="1.5"/>
+                <rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+            </button>
+          </div>
+        `;
         chatStream.appendChild(messageDiv);
 
         // Scroll to the bottom
@@ -78,9 +285,21 @@
 
         // Reset the form immediately
         chatForm.reset();
+        autoResizeTextarea();
         // Re-focus the input
         messageInput.focus();
       });
+
+      chatForm.addEventListener('htmx:afterRequest', function(evt) {
+        if (!evt.detail.successful) {
+          showToast('Failed to send message. Please try again.', true);
+        }
+      });
+    }
+
+    // Initial scroll to bottom
+    if (chatStream) {
+      chatStream.scrollTop = chatStream.scrollHeight;
     }
   });
 </script>

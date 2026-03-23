@@ -10,10 +10,30 @@ class ChatMessage:
     timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     session_id: str = None
     project_id: str = None
-    metadata: dict = None
+    metadata: dict = field(default_factory=dict)
 
     def to_dict(self):
         return asdict(self)
+    
+    def get_formatted_timestamp(self):
+        """Return human-readable timestamp"""
+        try:
+            dt = datetime.fromisoformat(self.timestamp.replace('Z', '+00:00'))
+            now = datetime.utcnow()
+            diff = now - dt
+            
+            if diff.total_seconds() < 60:
+                return "just now"
+            elif diff.total_seconds() < 3600:
+                minutes = int(diff.total_seconds() / 60)
+                return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+            elif diff.total_seconds() < 86400:
+                hours = int(diff.total_seconds() / 3600)
+                return f"{hours} hour{'s' if hours > 1 else ''} ago"
+            else:
+                return dt.strftime("%b %d, %Y at %I:%M %p")
+        except Exception:
+            return self.timestamp
 
     def with_session(self, session) -> "ChatMessage":
         self.session_id = session.session_id
