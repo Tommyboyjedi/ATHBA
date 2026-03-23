@@ -2,7 +2,7 @@ from typing import List, Dict, Any
 import json
 from datetime import datetime, timedelta
 from core.agents.interfaces import AgentBehavior
-from core.dataclasses.agent_message import AgentMessage
+from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from core.dataclasses.ticket_model import TicketModel
 from core.dataclasses.history_entry import HistoryEntry
@@ -11,7 +11,7 @@ from core.dataclasses.history_entry import HistoryEntry
 class AnalyzeSpecBehavior(AgentBehavior):
     intent = ["analyze_spec"]
 
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> AgentMessage | None:
+    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
         if llm_response.intent not in self.intent:
             return None
 
@@ -23,10 +23,10 @@ class AnalyzeSpecBehavior(AgentBehavior):
         )
         
         if not spec_versions:
-            return AgentMessage(
+            return [ChatMessage(
                 sender=agent.name,
-                text="❌ No specification found for this project. Please create and finalize a specification first."
-            )
+                content="❌ No specification found for this project. Please create and finalize a specification first."
+            )]
         
         latest_spec = spec_versions[0]
         spec_content = latest_spec.get("content", {})
@@ -46,10 +46,10 @@ class AnalyzeSpecBehavior(AgentBehavior):
         tickets = await self._generate_tickets_from_spec(agent, spec_text)
         
         if not tickets:
-            return AgentMessage(
+            return [ChatMessage(
                 sender=agent.name,
-                text="⚠️ I analyzed the specification but couldn't generate any tickets. The spec might need more detail."
-            )
+                content="⚠️ I analyzed the specification but couldn't generate any tickets. The spec might need more detail."
+            )]
 
         # Save tickets to database
         created_tickets = []
@@ -82,10 +82,10 @@ class AnalyzeSpecBehavior(AgentBehavior):
             for t in created_tickets
         ])
 
-        return AgentMessage(
+        return [ChatMessage(
             sender=agent.name,
-            text=f"✅ I've analyzed the specification and created {len(created_tickets)} tickets:\n\n{ticket_summary}\n\nAll tickets have been added to the Backlog. You can view them on the Kanban board."
-        )
+            content=f"✅ I've analyzed the specification and created {len(created_tickets)} tickets:\n\n{ticket_summary}\n\nAll tickets have been added to the Backlog. You can view them on the Kanban board."
+        )]
 
     async def _generate_tickets_from_spec(self, agent, spec_text: str) -> List[Dict[str, Any]]:
         """
