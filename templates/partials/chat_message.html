@@ -1,3 +1,4 @@
+{% load chat_filters %}
 <div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %} {% if msg.metadata and msg.metadata.get('is_error') %}message-error{% endif %}"
      data-message-id="{{ msg.timestamp }}"
      role="article"
@@ -14,7 +15,7 @@
       {{ msg.get_formatted_timestamp }}
     </span>
   </div>
-  <div class="message-content">{{ msg.content|safe }}</div>
+  <div class="message-content">{{ msg.content|markdown }}</div>
   <div class="message-actions">
     <button class="message-action-btn copy-btn" 
             onclick="copyMessage(this)" 

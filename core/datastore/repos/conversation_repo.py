@@ -46,3 +46,15 @@ class ConversationRepo:
 
     async def list_by_project(self, project_id: str) -> list[dict]:
         return await self.col.find({"project_id": project_id}).to_list(length=100)
+    
+    async def clear_conversation(self, session_id: str) -> None:
+        """Clear all messages for a given session"""
+        await self.col.update_one(
+            {"session_id": session_id},
+            {
+                "$set": {
+                    "messages": [],
+                    "last_updated": datetime.utcnow()
+                }
+            }
+        )

@@ -72,3 +72,12 @@ class ChatService:
         except Exception as e:
             log.error(f"Error retrieving conversation history: {e}", exc_info=True)
             return []
+    
+    async def clear_conversation_history(self, session_key: str):
+        """Clear conversation history for a session"""
+        try:
+            await self.repo.clear_conversation(session_key)
+            log.info(f"Cleared conversation history for session: {session_key}")
+        except Exception as e:
+            log.error(f"Error clearing conversation history: {e}", exc_info=True)
+            raise
