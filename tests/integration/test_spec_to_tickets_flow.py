@@ -109,25 +109,37 @@ async def test_architect_creates_tickets_with_correct_metadata(sample_session, s
     
     architect.ticket_repo.create = mock_create
     
-    # Mock LLM to return tickets
+    # Mock Anthropic provider to return tickets
     import json
-    with patch('core.agents.helpers.llm_exchange.LlmExchange') as MockLLM:
-        # Mock get_intent
-        intent_instance = MagicMock()
-        intent_instance.get_intent = AsyncMock(return_value=LlmIntent(
-            response="Analyzing", intent="analyze_spec", agents_routing=[], entities={}
-        ))
-        intent_instance.get_response = AsyncMock(return_value=json.dumps([
-            {
-                "title": "Setup authentication",
-                "description": "Implement JWT auth",
-                "severity": "High",
-                "label": "Feature",
-                "eta": "1 week",
-                "estimated_days": 7
-            }
-        ]))
-        MockLLM.return_value = intent_instance
+    with patch('core.agents.helpers.llm_exchange.AnthropicProvider') as MockProvider:
+        mock_provider_instance = MagicMock()
+        from core.llm.contracts.provider import NormalizedResult
+        
+        # Mock both calls: get_intent and get_response
+        mock_provider_instance.invoke.side_effect = [
+            # First call for get_intent
+            NormalizedResult(
+                text='[{"response": "Analyzing", "intent": "analyze_spec", "agents_routing": [], "entities": {}}]',
+                usage={"input_tokens": 100, "output_tokens": 50},
+                raw={}
+            ),
+            # Second call for get_response (ticket generation)
+            NormalizedResult(
+                text=json.dumps([
+                    {
+                        "title": "Setup authentication",
+                        "description": "Implement JWT auth",
+                        "severity": "High",
+                        "label": "Feature",
+                        "eta": "1 week",
+                        "estimated_days": 7
+                    }
+                ]),
+                usage={"input_tokens": 500, "output_tokens": 200},
+                raw={}
+            )
+        ]
+        MockProvider.return_value = mock_provider_instance
         
         await architect.run("analyze spec")
         

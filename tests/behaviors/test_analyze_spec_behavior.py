@@ -60,10 +60,17 @@ async def test_analyze_spec_behavior_generates_tickets(sample_session, sample_sp
     
     agent.ticket_repo.create = mock_create
     
-    # Mock LLM response for ticket generation
+    # Mock Anthropic provider response for ticket generation
     import json
-    with patch('core.agents.helpers.llm_exchange.LlmExchange.get_response') as mock_response:
-        mock_response.return_value = json.dumps(sample_tickets)
+    with patch('core.agents.helpers.llm_exchange.AnthropicProvider') as MockProvider:
+        mock_provider_instance = MagicMock()
+        from core.llm.contracts.provider import NormalizedResult
+        mock_provider_instance.invoke.return_value = NormalizedResult(
+            text=json.dumps(sample_tickets),
+            usage={"input_tokens": 500, "output_tokens": 300},
+            raw={}
+        )
+        MockProvider.return_value = mock_provider_instance
         
         intent = LlmIntent(response="", intent="analyze_spec", agents_routing=[], entities={})
         result = await behavior.run(agent, "analyze spec", intent)
@@ -92,9 +99,16 @@ async def test_analyze_spec_behavior_handles_json_in_text(sample_session, sample
         title="Test", severity="Medium", label="Feature"
     ))
     
-    # Mock LLM response with extra text around JSON
-    with patch('core.agents.helpers.llm_exchange.LlmExchange.get_response') as mock_response:
-        mock_response.return_value = 'Here are the tickets: [{"title": "Test ticket", "description": "Test", "severity": "High", "label": "Feature", "eta": "1 week", "estimated_days": 7}] All done!'
+    # Mock Anthropic provider response with extra text around JSON
+    with patch('core.agents.helpers.llm_exchange.AnthropicProvider') as MockProvider:
+        mock_provider_instance = MagicMock()
+        from core.llm.contracts.provider import NormalizedResult
+        mock_provider_instance.invoke.return_value = NormalizedResult(
+            text='Here are the tickets: [{"title": "Test ticket", "description": "Test", "severity": "High", "label": "Feature", "eta": "1 week", "estimated_days": 7}] All done!',
+            usage={"input_tokens": 100, "output_tokens": 50},
+            raw={}
+        )
+        MockProvider.return_value = mock_provider_instance
         
         intent = LlmIntent(response="", intent="analyze_spec", agents_routing=[], entities={})
         result = await behavior.run(agent, "analyze spec", intent)
@@ -119,9 +133,16 @@ async def test_analyze_spec_behavior_fallback_on_parse_error(sample_session, sam
     
     agent.ticket_repo.create = mock_create
     
-    # Mock LLM response with invalid JSON
-    with patch('core.agents.helpers.llm_exchange.LlmExchange.get_response') as mock_response:
-        mock_response.return_value = "This is not valid JSON at all!"
+    # Mock Anthropic provider response with invalid JSON
+    with patch('core.agents.helpers.llm_exchange.AnthropicProvider') as MockProvider:
+        mock_provider_instance = MagicMock()
+        from core.llm.contracts.provider import NormalizedResult
+        mock_provider_instance.invoke.return_value = NormalizedResult(
+            text="This is not valid JSON at all!",
+            usage={"input_tokens": 100, "output_tokens": 50},
+            raw={}
+        )
+        MockProvider.return_value = mock_provider_instance
         
         intent = LlmIntent(response="", intent="analyze_spec", agents_routing=[], entities={})
         result = await behavior.run(agent, "analyze spec", intent)
@@ -155,13 +176,18 @@ async def test_analyze_spec_behavior_extracts_text_from_sections(sample_session)
         title="Test", severity="Medium", label="Feature"
     ))
     
-    with patch('core.agents.helpers.llm_exchange.LlmExchange.get_response') as mock_response:
-        mock_response.return_value = '[{"title": "Test", "description": "Test", "severity": "Medium", "label": "Feature", "eta": "1 week", "estimated_days": 7}]'
+    with patch('core.agents.helpers.llm_exchange.AnthropicProvider') as MockProvider:
+        mock_provider_instance = MagicMock()
+        from core.llm.contracts.provider import NormalizedResult
+        mock_provider_instance.invoke.return_value = NormalizedResult(
+            text='[{"title": "Test", "description": "Test", "severity": "Medium", "label": "Feature", "eta": "1 week", "estimated_days": 7}]',
+            usage={"input_tokens": 100, "output_tokens": 50},
+            raw={}
+        )
+        MockProvider.return_value = mock_provider_instance
         
         intent = LlmIntent(response="", intent="analyze_spec", agents_routing=[], entities={})
         await behavior.run(agent, "analyze spec", intent)
         
-        # Check that the LLM was called with spec content
-        call_args = mock_response.call_args
-        # The spec text should be in the prompt somewhere
-        assert mock_response.called
+        # Check that the provider was called (spec content was extracted)
+        assert mock_provider_instance.invoke.called

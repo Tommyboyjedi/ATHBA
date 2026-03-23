@@ -72,13 +72,18 @@ async def test_architect_agent_run_triggers_behaviors(sample_session):
     agent = ArchitectAgent(sample_session)
     
     # Mock the LLM exchange to return analyze_spec intent
-    with patch('core.agents.helpers.llm_exchange.LlmExchange.get_intent') as mock_llm:
-        mock_llm.return_value = LlmIntent(
-            response="I'll analyze the specification",
-            intent="analyze_spec",
-            agents_routing=[],
-            entities={}
+    # Note: Architect uses cloud provider, so we mock AnthropicProvider
+    with patch('core.agents.helpers.llm_exchange.AnthropicProvider') as MockProvider:
+        mock_provider_instance = MagicMock()
+        
+        # Mock the invoke method to return intent response
+        from core.llm.contracts.provider import NormalizedResult
+        mock_provider_instance.invoke.return_value = NormalizedResult(
+            text='[{"response": "I\'ll analyze the specification", "intent": "analyze_spec", "agents_routing": [], "entities": {}}]',
+            usage={"input_tokens": 100, "output_tokens": 50},
+            raw={}
         )
+        MockProvider.return_value = mock_provider_instance
         
         # Mock the spec repo to return a spec
         agent.spec_repo.find = AsyncMock(return_value=[
@@ -97,12 +102,24 @@ async def test_architect_agent_run_triggers_behaviors(sample_session):
             label="Feature"
         ))
         
-        # Mock LLM response for ticket generation
-        with patch('core.agents.helpers.llm_exchange.LlmExchange.get_response') as mock_response:
-            mock_response.return_value = '[{"title": "Test ticket", "description": "Test", "severity": "Medium", "label": "Feature", "eta": "1 week", "estimated_days": 7}]'
-            
-            responses = await agent.run("analyze the specification")
-            
-            assert len(responses) > 0
-            # Should return ChatMessage responses
-            assert all(hasattr(r, 'content') for r in responses)
+        # Mock second invoke for ticket generation
+        mock_provider_instance.invoke.side_effect = [
+            # First call for get_intent
+            NormalizedResult(
+                text='[{"response": "I\'ll analyze the specification", "intent": "analyze_spec", "agents_routing": [], "entities": {}}]',
+                usage={"input_tokens": 100, "output_tokens": 50},
+                raw={}
+            ),
+            # Second call for ticket generation in get_response
+            NormalizedResult(
+                text='[{"title": "Test ticket", "description": "Test", "severity": "Medium", "label": "Feature", "eta": "1 week", "estimated_days": 7}]',
+                usage={"input_tokens": 200, "output_tokens": 100},
+                raw={}
+            )
+        ]
+        
+        responses = await agent.run("analyze the specification")
+        
+        assert len(responses) > 0
+        # Should return ChatMessage responses
+        assert all(hasattr(r, 'content') for r in responses)
