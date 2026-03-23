@@ -1,9 +1,46 @@
-<div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %}"
+{% load chat_filters %}
+<div class="message {% if msg.sender == 'user' %}message-human{% else %}message-system{% endif %} {% if msg.metadata and msg.metadata.get('is_error') %}message-error{% endif %}"
+     data-message-id="{{ msg.timestamp }}"
+     role="article"
+     aria-label="Message from {{ msg.sender }}"
      {% if msg.metadata.refresh_overview %}
         hx-get="/api/ui/overview/"
         hx-target="#main-panel"
         hx-swap="outerHTML"
         hx-trigger="load"
      {% endif %}>
-  <strong>{{ msg.sender }}:</strong> {{ msg.content|safe }}
+  <div class="message-header">
+    <strong class="message-sender">{{ msg.sender }}:</strong>
+    <span class="message-timestamp" title="{{ msg.timestamp }}">
+      {{ msg.get_formatted_timestamp }}
+    </span>
+  </div>
+  <div class="message-content">{{ msg.content|markdown }}</div>
+  <div class="message-actions">
+    <button class="message-action-btn copy-btn" 
+            onclick="copyMessage(this)" 
+            aria-label="Copy message"
+            title="Copy to clipboard">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M10 2H3C2.44772 2 2 2.44772 2 3V10" stroke="currentColor" stroke-width="1.5"/>
+        <rect x="5" y="5" width="9" height="9" rx="1" stroke="currentColor" stroke-width="1.5"/>
+      </svg>
+    </button>
+    {% if msg.sender != 'user' %}
+    <button class="message-action-btn reaction-btn" 
+            onclick="reactToMessage(this, 'thumbs_up')" 
+            aria-label="Helpful"
+            title="Mark as helpful"
+            data-reaction="thumbs_up">
+      👍
+    </button>
+    <button class="message-action-btn reaction-btn" 
+            onclick="reactToMessage(this, 'thumbs_down')" 
+            aria-label="Not helpful"
+            title="Mark as not helpful"
+            data-reaction="thumbs_down">
+      👎
+    </button>
+    {% endif %}
+  </div>
 </div>
