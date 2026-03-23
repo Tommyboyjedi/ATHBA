@@ -31,7 +31,13 @@ class ArchitectAgent(IAgent):
         self._project = await ProjectsService().get_project_by_id(self._session.project_id)
 
     async def run(self, content: str) -> list[ChatMessage]:
-        response = await LlmExchange(agent=self, session=self._session, content=content).get_intent()
+        # Architect ALWAYS uses cloud provider (Claude Sonnet 4.5)
+        response = await LlmExchange(
+            agent=self, 
+            session=self._session, 
+            content=content,
+            use_cloud=True  # Force cloud usage for Architect
+        ).get_intent()
         results = []
 
         for behavior in self.behaviors:

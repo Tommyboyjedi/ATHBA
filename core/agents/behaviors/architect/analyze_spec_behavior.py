@@ -90,6 +90,7 @@ class AnalyzeSpecBehavior(AgentBehavior):
     async def _generate_tickets_from_spec(self, agent, spec_text: str) -> List[Dict[str, Any]]:
         """
         Use LLM to analyze the specification and extract tickets.
+        Uses cloud provider (Claude) for Architect agent.
         """
         from core.agents.helpers.llm_exchange import LlmExchange
         
@@ -120,8 +121,13 @@ Respond with a JSON array of tickets. Example:
 
 Generate 3-8 tickets that cover the main features. Focus on high-level functionality first."""
 
-        # Create a temporary session for this LLM call
-        response = await LlmExchange(agent=agent, session=agent.session, content=prompt).get_response()
+        # Create a temporary session for this LLM call with cloud forced
+        response = await LlmExchange(
+            agent=agent, 
+            session=agent.session, 
+            content=prompt,
+            use_cloud=True  # Architect always uses cloud
+        ).get_response()
         
         # Parse the response
         try:
