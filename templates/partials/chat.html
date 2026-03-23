@@ -3,9 +3,26 @@
 <div class="chat-container">
   <div class="chat-header">
     <h2 class="font-semibold">Chat – {{ project.name }}</h2>
-    <div class="connection-status">
-      <span id="connection-indicator" class="status-dot status-connecting" title="Connecting..."></span>
-      <span id="connection-text">Connecting...</span>
+    <div class="chat-header-actions">
+      <button class="header-action-btn" onclick="exportConversation()" title="Export conversation" aria-label="Export conversation">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M8 2v8m0 0L5 7m3 3l3-3M3 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="header-action-btn" 
+              hx-post="/api/chat/clear"
+              hx-vals='{"session_key": "{{ request.session.session_key }}"}'
+              hx-confirm="Are you sure you want to clear the conversation?"
+              title="Clear conversation" 
+              aria-label="Clear conversation">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 5h10M5 5V3h6v2M6 8v4M10 8v4M4 5h8v9H4z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div class="connection-status">
+        <span id="connection-indicator" class="status-dot status-connecting" title="Connecting..."></span>
+        <span id="connection-text">Connecting...</span>
+      </div>
     </div>
   </div>
 
@@ -155,6 +172,36 @@
   function toggleKeyboardHelp() {
     const helpPanel = document.getElementById('keyboard-help');
     helpPanel.style.display = helpPanel.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function exportConversation() {
+    const chatStream = document.getElementById('chat-stream');
+    const messages = chatStream.querySelectorAll('.message');
+    
+    let conversationText = '';
+    let conversationMarkdown = '';
+    
+    messages.forEach((msg) => {
+      const sender = msg.querySelector('.message-sender')?.textContent || 'Unknown';
+      const timestamp = msg.querySelector('.message-timestamp')?.textContent || '';
+      const content = msg.querySelector('.message-content')?.innerText || '';
+      
+      conversationText += `${sender} [${timestamp}]\n${content}\n\n`;
+      conversationMarkdown += `**${sender}** _${timestamp}_\n\n${content}\n\n---\n\n`;
+    });
+    
+    // Create a blob and download
+    const blob = new Blob([conversationMarkdown], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat-export-${new Date().toISOString().split('T')[0]}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast('Conversation exported successfully');
   }
 
   function handleAfterRequest(event) {
