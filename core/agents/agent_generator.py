@@ -35,3 +35,6 @@ class AgentGenerator:
         if session.agent_name == "Spec":
             from core.agents.spec_agent import SpecBuilderAgent
             return SpecBuilderAgent(session)
+        if session.agent_name == "Architect":
+            from core.agents.architect_agent import ArchitectAgent
+            return ArchitectAgent(session)
