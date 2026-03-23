@@ -56,8 +56,10 @@ This document outlines the differences between the specified requirements in `Sp
 
 #### 1. Agent System
 - **Architect Agent**
-  - No implementation found
-  - Missing repository analysis and planning functionality
+  - ✅ **IMPLEMENTED** - Full agent implementation with behavior system
+  - ✅ Spec analysis and ticket generation functionality
+  - ✅ LLM-based ticket extraction with fallback mechanism
+  - ✅ Integration with spec finalization workflow
 
 - **Developer/Tester Pairs**
   - Basic stubs exist but lack complete TDD workflow
@@ -96,9 +98,11 @@ This document outlines the differences between the specified requirements in `Sp
   - No automated testing pipeline
 
 - **Ticket System**
-  - Basic ticket repository exists
-  - Missing Kanban board implementation
-  - No integration with Git branches
+  - ✅ **IMPLEMENTED** - Ticket repository with full CRUD operations
+  - ✅ Automatic ticket generation from specifications
+  - Basic Kanban board implementation exists (functional, needs UX enhancement)
+  - ✅ Integration with Architect agent for ticket creation
+  - No integration with Git branches yet
 
 ## Implementation Details
 
@@ -116,24 +120,26 @@ This document outlines the differences between the specified requirements in `Sp
 
 ## Next Steps
 
-1. **Complete Core Agent Implementation**
-   - Finalize Developer/Tester agent implementations
-   - Implement Architect agent
-   - Enhance agent communication patterns
+1. **Phase 1B: Git Integration + Developer Agent**
+   - Add Git repository management (clone, branch, commit)
+   - Implement basic Developer agent
+   - Connect tickets to Git branches
 
-2. **Enhance Memory System**
+2. **Phase 1C: Tester Agent + TDD Loop**
+   - Implement Tester agent
+   - Create TDD workflow between Dev/Test pairs
+   - Close the Red-Green-Refactor loop
+
+3. **UI Enhancements**
+   - Improve Kanban board with drag-and-drop
+   - Add ticket detail modals
+   - Create Live Spec Panel editor
+   - Build dashboard with project metrics
+
+4. **Memory System Enhancement**
    - Implement three-tier memory model
    - Add vector search capabilities
    - Improve session persistence
-
-3. **GitOps Integration**
-   - Add Git repository management
-   - Implement branch-per-ticket workflow
-   - Set up automated testing
-
-4. **User Interface**
-   - Implement dashboard for project metrics
-   - Create Live Spec Panel and editor
 
 ## Notes
 
