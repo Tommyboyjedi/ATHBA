@@ -73,6 +73,14 @@ class CommitCodeBehavior(AgentBehavior):
                 content="❌ No Git branch exists for this ticket. Please create a branch first."
             )]
         
+        # UNCLE BOB'S LAW #1: No production code unless it makes a failing test pass
+        # Ensure tests exist before committing production code
+        if not ticket.test_files or len(ticket.test_files) == 0:
+            return [ChatMessage(
+                sender=agent.name,
+                content="❌ **Uncle Bob's Law #1 Violation**\n\nYou are not allowed to write any production code unless it is to make a failing unit test pass.\n\n**Tests must be committed FIRST** before production code. The Tester agent must generate and commit tests in the RED phase before you can commit implementation code.\n\nPlease wait for Tester to commit tests, then generate code to make them pass."
+            )]
+        
         # Check for pending code in session
         if not hasattr(agent.session, 'pending_code') or not agent.session.pending_code:
             return [ChatMessage(

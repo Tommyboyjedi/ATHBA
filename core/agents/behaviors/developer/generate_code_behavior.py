@@ -72,32 +72,67 @@ class GenerateCodeBehavior(AgentBehavior):
                 content="❌ No Git branch exists for this ticket. Please create a branch first."
             )]
         
-        # Use LLM to generate code
-        code_prompt = f"""Generate clean, production-ready code for this ticket:
+        # UNCLE BOB'S LAW #1: Ensure tests exist before generating production code
+        if not ticket.test_files or len(ticket.test_files) == 0:
+            return [ChatMessage(
+                sender=agent.name,
+                content="⚠️ **Warning: No tests found**\n\nUncle Bob's Law #1: You must have a failing test before writing production code.\n\nTester should generate tests first. However, if you're certain tests aren't needed, you may proceed.\n\nGenerate code anyway? (This violates TDD principles)"
+            )]
+        
+        # Read the test file to understand what needs to be implemented
+        test_code_context = ""
+        if ticket.test_files:
+            try:
+                # Read the first test file to understand requirements
+                test_file_path = ticket.test_files[0]
+                repo_path = f"/tmp/athba_repos/{agent.project.id}"
+                
+                # Try to read test file
+                import os
+                full_test_path = os.path.join(repo_path, test_file_path)
+                if os.path.exists(full_test_path):
+                    with open(full_test_path, 'r') as f:
+                        test_code_context = f.read()
+            except Exception:
+                # If we can't read test, proceed without context
+                pass
+        
+        # Use LLM to generate code following Uncle Bob's Law #3
+        code_prompt = f"""Generate code for this ticket following Uncle Bob's Law #3 of TDD.
 
-Title: {ticket.title}
-Description: {ticket.description}
-Label: {ticket.label}
+**UNCLE BOB'S LAW #3:** You are not allowed to write any more production code than is sufficient to pass the one failing unit test.
 
-Requirements:
-1. Write clean, readable code with proper documentation
-2. Follow best practices and design patterns
-3. Include error handling
-4. Add unit tests if appropriate
-5. Use meaningful variable and function names
+**Ticket:** {ticket.title}
+**Description:** {ticket.description}
+**Label:** {ticket.label}
 
-Please provide:
-1. File path (where this code should go)
-2. Complete code implementation
-3. Brief explanation of the approach
+"""
+        
+        # Add test context if available
+        if test_code_context:
+            code_prompt += f"""**Existing Test (must pass):**
+```python
+{test_code_context}
+```
 
-Format your response as:
+"""
+        
+        code_prompt += """**Requirements (Uncle Bob's Law #3):**
+1. Write ONLY the MINIMAL code needed to make the test pass
+2. Do NOT add error handling unless the test validates it
+3. Do NOT add features beyond what the test checks
+4. Do NOT implement edge cases unless tested
+5. Keep it simple - just make the test green
+6. If no test exists yet, write minimal code for the requirement
+
+**Output format:**
 FILE: <file_path>
 ```
-<code>
+<minimal_code_implementation>
 ```
 EXPLANATION: <brief explanation>
-"""
+
+Generate the minimal implementation:"""
         
         try:
             from core.agents.helpers.llm_exchange import LlmExchange
