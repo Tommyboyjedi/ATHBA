@@ -19,6 +19,11 @@ ATHBA strictly enforces Robert C. Martin's (Uncle Bob) **Three Laws of TDD**:
 
 **In ATHBA:** The Tester agent MUST generate tests FIRST before the Developer writes implementation.
 
+**Enforcement Mechanism:**
+- `commit_code_behavior.py` **blocks** production code commits if `ticket.test_files` is empty
+- Developer receives error: _"Uncle Bob's Law #1 Violation - Tests must be committed FIRST"_
+- Hard validation ensures test-first workflow cannot be bypassed
+
 ```
 🔴 RED PHASE (Tester)
 ├─> Tester analyzes requirements
@@ -30,6 +35,13 @@ ATHBA strictly enforces Robert C. Martin's (Uncle Bob) **Three Laws of TDD**:
 ### Law #2: You must not write more of a test than is sufficient to fail
 
 **In ATHBA:** The Tester generates focused, minimal tests that verify specific requirements.
+
+**Enforcement Mechanism:**
+- `generate_test_behavior.py` LLM prompt explicitly requires:
+  - _"Write the MINIMAL test sufficient to fail"_
+  - _"Test should verify ONE specific requirement only"_
+  - _"Compilation/import failures count as failures"_
+  - _"Do NOT write comprehensive tests or test edge cases"_
 
 **Example:**
 ```python
@@ -47,6 +59,14 @@ def test_entire_authentication_system():
 ### Law #3: You must not write more production code than is sufficient to pass the test
 
 **In ATHBA:** The Developer writes only enough code to make the current test pass.
+
+**Enforcement Mechanism:**
+- `generate_code_behavior.py` reads test files before generating code
+- LLM prompt explicitly requires:
+  - _"Write ONLY the MINIMAL code needed to make the test pass"_
+  - _"Do NOT add error handling unless the test validates it"_
+  - _"Do NOT add features beyond what the test checks"_
+  - Provides actual test code to LLM so it knows exactly what to implement
 
 **Example:**
 ```python
