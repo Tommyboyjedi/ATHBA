@@ -74,11 +74,11 @@ class CommitCodeBehavior(AgentBehavior):
             )]
         
         # UNCLE BOB'S LAW #1: No production code unless it makes a failing test pass
-        # Ensure tests exist before committing production code
+        # Hard enforcement: tests must exist and be committed before production code
         if not ticket.test_files or len(ticket.test_files) == 0:
             return [ChatMessage(
                 sender=agent.name,
-                content="❌ **Uncle Bob's Law #1 Violation**\n\nYou are not allowed to write any production code unless it is to make a failing unit test pass.\n\n**Tests must be committed FIRST** before production code. The Tester agent must generate and commit tests in the RED phase before you can commit implementation code.\n\nPlease wait for Tester to commit tests, then generate code to make them pass."
+                content="❌ **Uncle Bob's Law #1 Violation**\n\n**Rule:** You are not allowed to write any production code unless it is to make a failing unit test pass.\n\n**Enforcement:** Test files must be committed to the branch BEFORE production code can be committed. This ensures test-first development.\n\n**Action Required:** The Tester agent must generate and commit tests in the RED phase first. Then you can commit implementation code to make those tests pass (GREEN phase)."
             )]
         
         # Check for pending code in session

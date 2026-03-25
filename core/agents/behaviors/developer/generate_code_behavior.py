@@ -73,10 +73,12 @@ class GenerateCodeBehavior(AgentBehavior):
             )]
         
         # UNCLE BOB'S LAW #1: Ensure tests exist before generating production code
+        # This is a warning, not a hard block, because generate_code doesn't commit
+        # The hard enforcement is in commit_code_behavior.py
         if not ticket.test_files or len(ticket.test_files) == 0:
             return [ChatMessage(
                 sender=agent.name,
-                content="⚠️ **Warning: No tests found**\n\nUncle Bob's Law #1: You must have a failing test before writing production code.\n\nTester should generate tests first. However, if you're certain tests aren't needed, you may proceed.\n\nGenerate code anyway? (This violates TDD principles)"
+                content="⚠️ **Warning: No tests found**\n\nUncle Bob's Law #1: You must have a failing test before writing production code.\n\nTester should generate tests first. You may proceed to generate code, but **commit_code_behavior will block your commit** until tests exist.\n\nRecommendation: Wait for Tester to commit tests first."
             )]
         
         # Read the test file to understand what needs to be implemented
