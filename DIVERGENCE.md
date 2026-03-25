@@ -61,9 +61,21 @@ This document outlines the differences between the specified requirements in `Sp
   - ✅ LLM-based ticket extraction with fallback mechanism
   - ✅ Integration with spec finalization workflow
 
-- **Developer/Tester Pairs**
-  - Basic stubs exist but lack complete TDD workflow
-  - Missing integration with Git operations
+- **Developer Agent**
+  - ✅ **IMPLEMENTED (Phase 1B)** - Full agent implementation with 7 behaviors
+  - ✅ Ticket claiming from Backlog with priority sorting
+  - ✅ Git branch creation for tickets
+  - ✅ Ticket requirement analysis using LLM
+  - ✅ Code generation via local LLM (codellama-7b)
+  - ✅ Code committing to Git branches
+  - ✅ Code review requests to Tester agent
+  - ✅ Integration with GitService for all Git operations
+
+- **Tester Agent**
+  - Basic stub exists
+  - Missing test generation and execution
+  - Missing code review functionality
+  - Missing TDD workflow integration
 
 #### 2. Memory System
 - **Short-Term Memory**
@@ -93,16 +105,21 @@ This document outlines the differences between the specified requirements in `Sp
 
 #### 5. GitOps Workflow
 - **Repository Management**
-  - No Git integration for repository operations
-  - Missing branch management
-  - No automated testing pipeline
+  - ✅ **IMPLEMENTED (Phase 1B)** - Complete Git integration via GitService
+  - ✅ Repository initialization for projects
+  - ✅ Branch creation and management
+  - ✅ File commit operations
+  - ✅ Branch status monitoring
+  - ⚠️ No merge operations yet (planned for Phase 1C)
+  - ⚠️ No automated testing pipeline yet
 
 - **Ticket System**
   - ✅ **IMPLEMENTED** - Ticket repository with full CRUD operations
   - ✅ Automatic ticket generation from specifications
+  - ✅ **Git Integration (Phase 1B)** - Tickets track branch names and commits
   - Basic Kanban board implementation exists (functional, needs UX enhancement)
   - ✅ Integration with Architect agent for ticket creation
-  - No integration with Git branches yet
+  - ✅ Integration with Developer agent for Git workflow
 
 ## Implementation Details
 
@@ -120,30 +137,29 @@ This document outlines the differences between the specified requirements in `Sp
 
 ## Next Steps
 
-1. **Phase 1B: Git Integration + Developer Agent**
-   - Add Git repository management (clone, branch, commit)
-   - Implement basic Developer agent
-   - Connect tickets to Git branches
-
-2. **Phase 1C: Tester Agent + TDD Loop**
-   - Implement Tester agent
+1. **Phase 1C: Tester Agent + TDD Loop**
+   - Implement Tester agent with test generation
    - Create TDD workflow between Dev/Test pairs
+   - Implement test execution and reporting
    - Close the Red-Green-Refactor loop
+   - Add merge operations for approved code
 
-3. **UI Enhancements**
+2. **UI Enhancements**
    - Improve Kanban board with drag-and-drop
    - Add ticket detail modals
    - Create Live Spec Panel editor
    - Build dashboard with project metrics
 
-4. **Memory System Enhancement**
+3. **Memory System Enhancement**
    - Implement three-tier memory model
    - Add vector search capabilities
    - Improve session persistence
 
 ## Notes
 
-- The implementation shows good progress on core architectural components
-- Focus should be on completing the agent system and memory management
-- GitOps workflow and UI components are major outstanding items
-- The model registry is well-implemented but could benefit from additional features like TTL-based eviction
+- ✅ **Phase 1A Complete**: PM, Spec Builder, Architect agents fully functional
+- ✅ **Phase 1B Complete**: Developer agent and Git integration fully functional
+- The implementation shows excellent progress on core architectural components
+- Git integration enables proper code version control and tracking
+- Next focus should be on Tester agent to complete the TDD workflow
+- UI components remain a major outstanding item but are not blocking core functionality
