@@ -13,13 +13,16 @@ from core.dataclasses.history_entry import HistoryEntry
 
 class GenerateCodeBehavior(AgentBehavior):
     """
-    Behavior for generating code to implement a ticket.
+    Behavior for generating code to implement a ticket following Uncle Bob's Law #3.
     
     When triggered, this behavior:
-    1. Retrieves the ticket details
-    2. Uses LLM to generate code based on requirements
-    3. Saves generated code to memory (not yet committed)
-    4. Provides code preview to user
+    1. Retrieves the ticket details and test files
+    2. Reads existing test code to understand requirements
+    3. Uses LLM to generate MINIMAL code to pass tests (Uncle Bob's Law #3)
+    4. Saves generated code to memory (not yet committed)
+    5. Provides code preview to user
+    
+    Enforces Uncle Bob's Law #3: Write only enough code to pass one failing test.
     """
     
     intent = ["generate_code"]

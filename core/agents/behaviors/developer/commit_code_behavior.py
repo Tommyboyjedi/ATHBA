@@ -13,14 +13,17 @@ from core.dataclasses.history_entry import HistoryEntry
 
 class CommitCodeBehavior(AgentBehavior):
     """
-    Behavior for committing code to Git.
+    Behavior for committing code to Git with Uncle Bob's Law #1 enforcement.
     
     When triggered, this behavior:
-    1. Takes pending code from session
-    2. Writes files to Git repository
-    3. Creates a commit with appropriate message
-    4. Updates ticket with commit SHA
-    5. Updates ticket history
+    1. Validates tests exist (Uncle Bob's Law #1)
+    2. Takes pending code from session
+    3. Writes files to Git repository
+    4. Creates a commit with appropriate message
+    5. Updates ticket with commit SHA
+    6. Updates ticket history
+    
+    Enforces Uncle Bob's Law #1: No production code unless it makes a failing test pass.
     """
     
     intent = ["commit_code"]
