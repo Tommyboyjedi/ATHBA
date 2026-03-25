@@ -79,24 +79,26 @@ class GenerateTestBehavior(AgentBehavior):
         tier = agent.escalation_manager.get_current_tier(ticket, "Tester")
         
         # Generate test code with LLM
-        test_prompt = f"""Generate pytest test code for this ticket following TDD RED phase.
+        test_prompt = f"""Generate pytest test code for this ticket following TDD RED phase and Uncle Bob's Law #2.
 
 **Ticket:** {ticket.title}
 **Description:** {ticket.description}
 
-**Requirements:**
-1. Write comprehensive pytest tests
-2. Test should FAIL initially (no implementation yet)
-3. Use proper pytest patterns (fixtures, parametrize, etc.)
-4. Include docstrings
-5. Test edge cases
-6. Follow Python best practices
+**Requirements (Uncle Bob's Law #2):**
+1. Write the MINIMAL test sufficient to fail
+2. Test should verify ONE specific requirement only
+3. Stop as soon as you have a failing test
+4. Compilation/import failures count as failures
+5. Use proper pytest patterns (fixtures, parametrize, etc.)
+6. Include docstrings
+
+**IMPORTANT:** Do NOT write comprehensive tests or test edge cases. Write the simplest test that will fail because the implementation doesn't exist yet.
 
 **Output format:**
 Provide ONLY the Python test code, no explanations.
 Use appropriate file name: test_<feature>.py
 
-Generate the complete test file:"""
+Generate the minimal test file:"""
         
         from core.agents.helpers.llm_exchange import LlmExchange
         
