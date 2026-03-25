@@ -94,9 +94,12 @@ class TesterAgent(IAgent):
         
         result_messages = []
         for behavior in self.behaviors:
-            if behavior.can_handle(response.intent):
-                messages = await behavior.execute(response)
-                result_messages.extend(messages)
+            messages = await behavior.run(self, content, response)
+            if messages:
+                if isinstance(messages, list):
+                    result_messages.extend(messages)
+                else:
+                    result_messages.append(messages)
         
         return result_messages
     
