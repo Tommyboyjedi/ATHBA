@@ -32,6 +32,13 @@ class TicketModel:
         id: Unique identifier of the ticket (MongoDB ObjectId as string)
         branch_name: Git branch name associated with this ticket (optional)
         commits: List of commit SHAs associated with this ticket
+        test_files: List of test file paths associated with this ticket
+        test_pass_rate: Percentage of tests passing (0.0 to 1.0)
+        test_results: Latest test execution results (passed, failed, errors)
+        developer_failure_count: Consecutive failures for Developer (for LLM escalation)
+        tester_failure_count: Consecutive failures for Tester (for LLM escalation)
+        developer_llm_tier: Current LLM tier for Developer (standard, heavy, mega)
+        tester_llm_tier: Current LLM tier for Tester (standard, heavy, mega)
     """
     project_id: str
     title: str
@@ -48,3 +55,10 @@ class TicketModel:
     id: str
     branch_name: Optional[str] = None
     commits: List[str] = field(default_factory=list)
+    test_files: List[str] = field(default_factory=list)
+    test_pass_rate: float = 0.0
+    test_results: Dict = field(default_factory=dict)
+    developer_failure_count: int = 0
+    tester_failure_count: int = 0
+    developer_llm_tier: str = "standard"
+    tester_llm_tier: str = "standard"

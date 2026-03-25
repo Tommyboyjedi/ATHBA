@@ -41,3 +41,6 @@ class AgentGenerator:
         if session.agent_name == "Developer":
             from core.agents.developer_agent import DeveloperAgent
             return DeveloperAgent(session)
+        if session.agent_name == "Tester":
+            from core.agents.tester_agent import TesterAgent
+            return TesterAgent(session)
