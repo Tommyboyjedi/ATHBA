@@ -15,6 +15,7 @@ from core.datastore.repos.ticket_repo import TicketRepo
 from core.datastore.repos.code_repo import CodeRepo
 from core.services.project_service import ProjectsService
 from core.services.git_service import GitService
+from core.services.llm_escalation_manager import LlmEscalationManager
 from llm_service.enums.eagent import EAgent
 
 
@@ -29,6 +30,7 @@ class DeveloperAgent(IAgent):
     - Generating code to implement tickets
     - Committing code to branches
     - Requesting code review from Tester
+    - LLM escalation on repeated failures
     
     Attributes:
         name: Agent name ("Developer")
@@ -36,6 +38,7 @@ class DeveloperAgent(IAgent):
         ticket_repo: Repository for ticket operations
         code_repo: Repository for code storage
         git_service: Service for Git operations
+        escalation_manager: Manager for LLM tier escalation
         behaviors: List of loaded behaviors
     """
     
@@ -51,6 +54,7 @@ class DeveloperAgent(IAgent):
         self.ticket_repo = TicketRepo()
         self.code_repo = CodeRepo()
         self.git_service = GitService()
+        self.escalation_manager = LlmEscalationManager()
         self.behaviors = BehaviorLoader().load_for_agent(self)
     
     async def initialize(self):
@@ -63,7 +67,7 @@ class DeveloperAgent(IAgent):
         """
         Process user input and execute appropriate behaviors.
         
-        Uses local LLM (codellama-7b) for intent detection and code generation.
+        Uses local LLM with escalation support for code generation.
         
         Args:
             content: User input message
@@ -71,11 +75,19 @@ class DeveloperAgent(IAgent):
         Returns:
             List of ChatMessage responses from behaviors
         """
-        # Developer uses local LLM (codellama-7b)
+        # Developer uses local LLM with escalation
+        # Get current tier if working on a ticket
+        tier = None
+        if hasattr(self._session, 'current_ticket') and self._session.current_ticket:
+            ticket = await self.ticket_repo.get_ticket_by_id(self._session.current_ticket)
+            if ticket:
+                tier = self.escalation_manager.get_current_tier(ticket, "Developer")
+        
         response = await LlmExchange(
             agent=self,
             session=self._session,
             content=content,
+            tier=tier,  # Use escalated tier if available
             use_cloud=False  # Use local LLM for Developer
         ).get_intent()
         
