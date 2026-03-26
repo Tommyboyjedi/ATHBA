@@ -43,9 +43,9 @@ def preload_default_model():
             try:
                 print(f"[BOOT] Preloading Flow Judge model: {str(FLOW_JUDGE_PATH)}")
                 if CPU_ONLY:
-                    loaded_models[str(FLOW_JUDGE_PATH)] = Llama(str(str(FLOW_JUDGE_PATH)), n_ctx=ctx, n_threads=threads, n_gpu_layers=0)
+                    loaded_models[str(FLOW_JUDGE_PATH)] = Llama(model_path=str(FLOW_JUDGE_PATH), n_ctx=ctx, n_threads=threads, n_gpu_layers=0)
                 else:
-                    loaded_models[str(FLOW_JUDGE_PATH)] = Llama(str(str(FLOW_JUDGE_PATH)), n_ctx=ctx, n_threads=threads)
+                    loaded_models[str(FLOW_JUDGE_PATH)] = Llama(model_path=str(FLOW_JUDGE_PATH), n_ctx=ctx, n_threads=threads)
                 model_locks[str(FLOW_JUDGE_PATH)] = Lock()
                 model_last_used[str(FLOW_JUDGE_PATH)] = time.time()
             except Exception as e:

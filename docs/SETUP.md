@@ -260,7 +260,7 @@ Expected response (with CPU-only enabled):
   "cpu": 12.5,
   "loaded_models": ["./models/llama-3.2-3b-instruct-q4_k_m.gguf"],
   "protected_models": [],
-  "failed_unloads": {},
+  "failed_unloads": [],
   "cpu_only_mode": true
 }
 ```
