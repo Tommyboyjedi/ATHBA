@@ -21,6 +21,7 @@
 - MongoDB (optional but recommended)
 - ~5-10GB disk space for LLM models
 - **Anthropic API key** (required for Architect agent - see [Cloud Setup Guide](docs/CLOUD_SETUP.md))
+- **GPU (optional)**: NVIDIA GPU with CUDA support for faster inference. If no GPU is available, set `CPU_ONLY=true` in `.env` for testing purposes.
 
 ### Installation
 
@@ -39,14 +40,19 @@
    
    # REQUIRED: Anthropic API key for Architect agent
    ANTHROPIC_API_KEY=sk-ant-your-key-here
+   
+   # Optional: Enable CPU-only mode for testing on systems without GPU
+   CPU_ONLY=true
    ```
    
    See [Cloud Setup Guide](docs/CLOUD_SETUP.md) for detailed Anthropic configuration.
 
 3. **Download models** to `llm_service/models/`:
-   - `llama-3.2-3b-instruct-q4_k_m.gguf` (required)
-   - `codellama-7b-instruct.Q4_K_M.gguf` (required)
+   - `llama-3.2-3b-instruct-q4_k_m.gguf` (required for basic testing)
+   - `codellama-7b-instruct.Q4_K_M.gguf` (required for developer/tester agents)
    - Additional models listed in [docs/SETUP.md](docs/SETUP.md)
+   
+   **Note**: For CPU-only testing, only the basic models above are needed. Set `CPU_ONLY=true` in your `.env` file to run without GPU acceleration. Claude will handle more complex tasks via the Anthropic API.
 
 4. **Run migrations:**
    ```bash

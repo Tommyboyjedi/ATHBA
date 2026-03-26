@@ -19,6 +19,7 @@ registry = ModelRegistry()
 management = LlmServerManagement()
 # Config
 llm_server_url = os.getenv("LLM_SERVER_URL", "http://127.0.0.1:8011")
+CPU_ONLY = os.getenv("CPU_ONLY", "false").lower() == "true"
 
 
 # Preload PM-standard model
@@ -28,7 +29,11 @@ def preload_default_model():
     threads = registry.get_threads(EAgent.PM, ETier.STANDARD)
     if path not in loaded_models:
         print(f"[BOOT] Preloading PM standard model: {path}")
-        loaded_models[path] = Llama(model_path=path, n_ctx=ctx, n_threads=threads)
+        if CPU_ONLY:
+            print(f"[BOOT] CPU-ONLY mode enabled - loading model without GPU acceleration")
+            loaded_models[path] = Llama(model_path=path, n_ctx=ctx, n_threads=threads, n_gpu_layers=0)
+        else:
+            loaded_models[path] = Llama(model_path=path, n_ctx=ctx, n_threads=threads)
         model_locks[path] = Lock()
         model_last_used[path] = time.time()
     else:
@@ -37,7 +42,10 @@ def preload_default_model():
         if str(FLOW_JUDGE_PATH) not in loaded_models:
             try:
                 print(f"[BOOT] Preloading Flow Judge model: {str(FLOW_JUDGE_PATH)}")
-                loaded_models[str(FLOW_JUDGE_PATH)] = Llama(str(str(FLOW_JUDGE_PATH)), n_ctx=ctx, n_threads=threads)
+                if CPU_ONLY:
+                    loaded_models[str(FLOW_JUDGE_PATH)] = Llama(str(str(FLOW_JUDGE_PATH)), n_ctx=ctx, n_threads=threads, n_gpu_layers=0)
+                else:
+                    loaded_models[str(FLOW_JUDGE_PATH)] = Llama(str(str(FLOW_JUDGE_PATH)), n_ctx=ctx, n_threads=threads)
                 model_locks[str(FLOW_JUDGE_PATH)] = Lock()
                 model_last_used[str(FLOW_JUDGE_PATH)] = time.time()
             except Exception as e:
@@ -98,7 +106,10 @@ def infer(req: LLMRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     if path not in loaded_models:
-        loaded_models[path] = Llama(model_path=path, n_ctx=4096, n_threads=8)
+        if CPU_ONLY:
+            loaded_models[path] = Llama(model_path=path, n_ctx=4096, n_threads=8, n_gpu_layers=0)
+        else:
+            loaded_models[path] = Llama(model_path=path, n_ctx=4096, n_threads=8)
         model_locks[path] = Lock()
 
     model_last_used[path] = time.time()
@@ -158,7 +169,8 @@ def rd_status():
         "cpu": psutil.cpu_percent(),
         "loaded_models": list(loaded_models.keys()),
         "protected_models": list(management.protected_paths),
-        "failed_unloads": list(management.failed_unloads.keys())
+        "failed_unloads": list(management.failed_unloads.keys()),
+        "cpu_only_mode": CPU_ONLY
     }
 
 
