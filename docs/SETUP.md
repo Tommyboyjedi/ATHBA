@@ -248,6 +248,25 @@ Expected response:
 ]
 ```
 
+**To verify CPU-only mode:**
+```bash
+curl http://127.0.0.1:8011/llm/rd/status
+```
+
+Expected response (with CPU-only enabled):
+```json
+{
+  "mem": 45.2,
+  "cpu": 12.5,
+  "loaded_models": ["./models/llama-3.2-3b-instruct-q4_k_m.gguf"],
+  "protected_models": [],
+  "failed_unloads": {},
+  "cpu_only_mode": true
+}
+```
+
+If `cpu_only_mode` is `true`, GPU acceleration is disabled and models run on CPU only.
+
 ### 2. Test Chat Interface
 
 1. Navigate to http://localhost:8000
