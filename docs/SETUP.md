@@ -6,7 +6,9 @@
 - **RAM**: Minimum 8GB, 16GB+ recommended
 - **Storage**: 10-15GB for models and project data
 - **CPU**: Multi-core processor (8+ threads recommended)
-- **GPU**: Optional (CUDA support for faster inference)
+- **GPU**: Optional but recommended
+  - NVIDIA GPU with CUDA support for faster inference
+  - For systems without GPU, enable CPU-only mode (see Configuration section)
 
 ### Software
 - **OS**: Windows 10/11, Linux, or macOS
@@ -87,6 +89,11 @@ LLM_SERVER_URL=http://127.0.0.1:8011
 LLM_MODEL_TTL=120
 ENABLE_FLOW_JUDGE=false
 
+# CPU-only mode (set to true to disable GPU acceleration)
+# Useful for testing on systems without dedicated GPU
+# When enabled, only basic models run on CPU and Claude is used for complex tasks
+CPU_ONLY=false
+
 # DevOps Directory (where Git repos will be cloned)
 DEVOPS_DIR=c:\devops
 ```
@@ -95,6 +102,35 @@ DEVOPS_DIR=c:\devops
 ```python
 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
+
+### CPU-Only Mode (For Testing Without GPU)
+
+If you're running on a high-performance PC without a dedicated GPU, or just want to test the application functionality without worrying about GPU setup, enable CPU-only mode:
+
+1. **Set the environment variable in `.env`:**
+   ```env
+   CPU_ONLY=true
+   ```
+
+2. **What CPU-only mode does:**
+   - Disables GPU acceleration for local LLM models (sets `n_gpu_layers=0` in llama-cpp-python)
+   - Local models run entirely on CPU (slower but works on any system)
+   - Claude (Anthropic API) is still used for complex tasks via the Architect agent
+   - Perfect for testing application logic and workflows without GPU requirements
+
+3. **Performance considerations:**
+   - CPU inference will be slower than GPU (10-60 seconds per response vs 2-5 seconds)
+   - Only download the required basic models (llama-3.2-3b, codellama-7b)
+   - The application remains fully functional for testing purposes
+   - Response quality from local models may vary; Claude handles complex tasks
+
+4. **Recommended for:**
+   - Testing application functionality without GPU
+   - Development and debugging workflows
+   - Verifying integrations and agent behavior
+   - Systems with powerful CPUs but no dedicated GPU
+
+**Note:** This mode is explicitly designed for testing. For production use with quality LLM responses, a GPU or relying more heavily on Claude API is recommended.
 
 ### 5. Setup MongoDB (Optional)
 
@@ -211,6 +247,25 @@ Expected response:
   }
 ]
 ```
+
+**To verify CPU-only mode:**
+```bash
+curl http://127.0.0.1:8011/llm/rd/status
+```
+
+Expected response (with CPU-only enabled):
+```json
+{
+  "mem": 45.2,
+  "cpu": 12.5,
+  "loaded_models": ["./models/llama-3.2-3b-instruct-q4_k_m.gguf"],
+  "protected_models": [],
+  "failed_unloads": [],
+  "cpu_only_mode": true
+}
+```
+
+If `cpu_only_mode` is `true`, GPU acceleration is disabled and models run on CPU only.
 
 ### 2. Test Chat Interface
 
