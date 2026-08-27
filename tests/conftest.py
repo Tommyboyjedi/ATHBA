@@ -21,9 +21,8 @@ def sample_session():
 def sample_project():
     """Create a sample project for testing."""
     return Project(
-        id="test_project_456",
+        _id="test_project_456",
         name="Test Project",
-        description="A test project",
         active=True,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow()
