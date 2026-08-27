@@ -1,36 +1,39 @@
 import os
-import motor.motor_asyncio
 from urllib.parse import quote_plus
-from datetime import datetime
 
-# Load MongoDB configuration from environment
-MONGO_HOST = os.getenv("MONGO_HOST", "localhost")
-MONGO_PORT = os.getenv("MONGO_PORT", "27017")
-MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "ai_platform")
-MONGO_USER = os.getenv("MONGO_USER")
-MONGO_PASS = os.getenv("MONGO_PASS")
+import motor.motor_asyncio
 
-# Ensure credentials are present
-if not MONGO_USER or not MONGO_PASS:
-    raise RuntimeError("MONGO_USER and MONGO_PASS must be set.")
+_client = None
+_db_name = None
 
-# Percent-encode credentials
-user = quote_plus(MONGO_USER)
-pwd = quote_plus(MONGO_PASS)
 
-# Build Mongo URI
-MONGO_URI = (
-    f"mongodb://{user}:{pwd}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DB_NAME}"
-    f"?authSource={MONGO_DB_NAME}&retryWrites=true&w=majority"
-)
+def _build_mongo_uri() -> tuple[str, str]:
+    host = os.getenv("MONGO_HOST", "localhost")
+    port = os.getenv("MONGO_PORT", "27017")
+    db_name = os.getenv("MONGO_DB_NAME", "ai_platform")
+    user = os.getenv("MONGO_USER")
+    password = os.getenv("MONGO_PASS")
 
-# Singleton Motor client
-_client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+    if not user or not password:
+        raise RuntimeError("MONGO_USER and MONGO_PASS must be set.")
+
+    encoded_user = quote_plus(user)
+    encoded_password = quote_plus(password)
+    uri = (
+        f"mongodb://{encoded_user}:{encoded_password}@{host}:{port}/{db_name}"
+        f"?authSource={db_name}&retryWrites=true&w=majority"
+    )
+    return uri, db_name
 
 
 def get_mongo_db():
-    """Returns the MongoDB database handle (for repo use only)."""
-    return _client[MONGO_DB_NAME]
+    """Return the MongoDB database handle, creating the client lazily."""
+    global _client, _db_name
+    if _client is None:
+        mongo_uri, _db_name = _build_mongo_uri()
+        _client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
+    return _client[_db_name]
+
 
 async def ensure_capped_collection():
     """Create or verify the short-term chat memory capped collection."""
@@ -42,6 +45,6 @@ async def ensure_capped_collection():
             name,
             capped=True,
             size=100 * 1024 * 1024,
-            max=10000
+            max=10000,
         )
     await db[name].create_index([("timestamp", -1)])

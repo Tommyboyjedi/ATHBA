@@ -1,5 +1,3 @@
-# core/repos/ticket_repo.py
-
 from dataclasses import asdict
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -12,15 +10,20 @@ from core.infra.mongo import get_mongo_db
 
 
 class TicketRepo:
-    """Mongo repository for tickets with one canonical API.
+    """Mongo repository for tickets with one canonical API."""
 
-    ``get_ticket_by_id`` and ``update(TicketModel)`` remain as temporary
-    compatibility paths for pre-foundation agent behaviours. New code should use
-    ``get(ticket_id)`` and ``update(ticket_id, updates)``.
-    """
+    def __init__(self, collection=None):
+        self._col = collection
 
-    def __init__(self):
-        self.col = get_mongo_db().tickets
+    @property
+    def col(self):
+        if self._col is None:
+            self._col = get_mongo_db().tickets
+        return self._col
+
+    @col.setter
+    def col(self, value):
+        self._col = value
 
     @staticmethod
     def _to_model(doc: dict) -> TicketModel:
@@ -34,6 +37,12 @@ class TicketRepo:
         return TicketModel(**data)
 
     @staticmethod
+    def _id_filter(ticket_id: str) -> dict:
+        if ObjectId.is_valid(ticket_id):
+            return {"_id": ObjectId(ticket_id)}
+        return {"_id": ticket_id}
+
+    @staticmethod
     def _to_document(ticket: TicketModel) -> dict:
         data = asdict(ticket)
         data.pop("id", None)
@@ -43,12 +52,20 @@ class TicketRepo:
         docs = await self.col.find({"project_id": project_id}).to_list(length=None)
         return [self._to_model(doc) for doc in docs]
 
+    async def list_by_project(self, project_id: str) -> List[TicketModel]:
+        """Temporary compatibility alias; prefer `list_all` in new code."""
+        return await self.list_all(project_id)
+
+    async def list_ids_by_project(self, project_id: str) -> List[str]:
+        docs = await self.col.find({"project_id": project_id}, {"_id": 1}).to_list(length=None)
+        return [str(doc["_id"]) for doc in docs]
+
     async def get(self, ticket_id: str) -> Optional[TicketModel]:
-        doc = await self.col.find_one({"_id": ObjectId(ticket_id)})
+        doc = await self.col.find_one(self._id_filter(ticket_id))
         return self._to_model(doc) if doc else None
 
     async def get_ticket_by_id(self, ticket_id: str) -> Optional[TicketModel]:
-        """Temporary compatibility alias; prefer ``get`` in new code."""
+        """Temporary compatibility alias; prefer `get` in new code."""
         return await self.get(ticket_id)
 
     async def create(self, ticket: TicketModel) -> TicketModel:
@@ -57,7 +74,7 @@ class TicketRepo:
         data["created_at"] = now
         data["updated_at"] = now
         result = await self.col.insert_one(data)
-        data["id"] = str(result.inserted_id)
+        data["_id"] = result.inserted_id
         return self._to_model(data)
 
     async def update(
@@ -78,14 +95,19 @@ class TicketRepo:
         document.pop("id", None)
         document["updated_at"] = datetime.utcnow()
         result = await self.col.update_one(
-            {"_id": ObjectId(ticket_id)},
+            self._id_filter(ticket_id),
             {"$set": document},
         )
         return await self.get(ticket_id) if result.matched_count else None
 
     async def delete(self, ticket_id: str) -> bool:
-        result = await self.col.delete_one({"_id": ObjectId(ticket_id)})
+        result = await self.col.delete_one(self._id_filter(ticket_id))
         return result.deleted_count == 1
+
+    async def delete_many(self, project_id: str, ticket_ids: List[str]) -> int:
+        normalized_ids = [ObjectId(ticket_id) if ObjectId.is_valid(ticket_id) else ticket_id for ticket_id in ticket_ids]
+        result = await self.col.delete_many({"project_id": project_id, "_id": {"$in": normalized_ids}})
+        return result.deleted_count
 
     async def batch_update(self, project_id: str, tickets_data: List[Dict]) -> List[TicketModel]:
         existing_docs = await self.col.find({"project_id": project_id}).to_list(length=None)
@@ -116,7 +138,7 @@ class TicketRepo:
 
     async def assign_ticket(self, ticket_id: str, agents: list[str]) -> bool:
         result = await self.col.update_one(
-            {"_id": ObjectId(ticket_id)},
+            self._id_filter(ticket_id),
             {"$set": {"agents": agents, "column": "To Do", "updated_at": datetime.utcnow()}},
         )
         return result.modified_count == 1
@@ -124,3 +146,7 @@ class TicketRepo:
     async def get_backlog_tickets(self, project_id: str) -> list[TicketModel]:
         docs = await self.col.find({"project_id": project_id, "column": "Backlog"}).to_list(length=None)
         return [self._to_model(doc) for doc in docs]
+
+    async def get_latest(self, project_id: str) -> Optional[TicketModel]:
+        doc = await self.col.find_one({"project_id": project_id}, sort=[("updated_at", -1), ("created_at", -1)])
+        return self._to_model(doc) if doc else None

@@ -1,11 +1,12 @@
-from ninja import Router, Path
-from django.shortcuts import get_object_or_404
-from core.dataclasses.project import Project
-from ninja import Schema
+from ninja import Path, Router, Schema
+from ninja.errors import HttpError
+
+from core.datastore.repos.project_repo import ProjectRepo
 from core.datastore.repos.ticket_repo import TicketRepo
 
 router = Router(tags=["Dashboard"])
 ticket_repo = TicketRepo()
+project_repo = ProjectRepo()
 
 
 class DashboardOut(Schema):
@@ -13,16 +14,17 @@ class DashboardOut(Schema):
     done_tasks: int
 
 
-
 @router.get("{project_id}/dashboard/", response=DashboardOut)
-def project_dashboard(
+async def project_dashboard(
     request,
-    project_id: int = Path(..., description="Project ID"),
+    project_id: str = Path(..., description="Project ID"),
 ):
-    p = get_object_or_404(Project, pk=project_id)
-    tickets = ticket_repo.get_backlog_tickets(str(p.id))
+    project = await project_repo.get_by_id(project_id)
+    if not project:
+        raise HttpError(404, "Project not found")
 
-    open_count = len([t for t in tickets if t.get("column") != "Done"])
-    done_count = len([t for t in tickets if t.get("column") == "Done"])
+    tickets = await ticket_repo.list_all(project.id)
+    open_count = len([ticket for ticket in tickets if ticket.column != "Done"])
+    done_count = len([ticket for ticket in tickets if ticket.column == "Done"])
 
     return DashboardOut(open_tasks=open_count, done_tasks=done_count)

@@ -1,13 +1,21 @@
-from typing import Optional, Any, Dict
-from uuid import UUID
-from datetime import datetime
-from pymongo import DESCENDING
-from core.infra.mongo import get_mongo_db
 import json
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+from pymongo import DESCENDING
+
+from core.infra.mongo import get_mongo_db
+
 
 class _SpecColProxy:
-    def __init__(self, col):
-        self._col = col
+    def __init__(self, source):
+        self._source = source
+
+    @property
+    def _col(self):
+        if hasattr(self._source, "_collection"):
+            return self._source._collection
+        return self._source
 
     async def find_one(self, *args, **kwargs):
         doc = await self._col.find_one(*args, **kwargs)
@@ -26,22 +34,28 @@ class _SpecColProxy:
     def __getattr__(self, name):
         return getattr(self._col, name)
 
+
 class SpecVersionRepo:
-    def __init__(self):
-        base_col = get_mongo_db()["spec_versions"]
-        self._col = base_col
-        self.col = _SpecColProxy(base_col)
+    def __init__(self, collection=None):
+        self._base_col = collection
+        self.col = _SpecColProxy(self)
+
+    @property
+    def _collection(self):
+        if self._base_col is None:
+            self._base_col = get_mongo_db()["spec_versions"]
+        return self._base_col
 
     async def insert(self, doc: dict) -> str:
         doc["created_at"] = doc.get("created_at", datetime.utcnow())
-        result = await self._col.insert_one(doc)
+        result = await self._collection.insert_one(doc)
         return str(result.inserted_id)
 
     async def update(self, filter: dict, update: dict, upsert: bool = False):
-        return await self._col.update_one(filter, {"$set": update}, upsert=upsert)
+        return await self._collection.update_one(filter, {"$set": update}, upsert=upsert)
 
     async def find(self, filter: dict, sort=None, limit=0):
-        cursor = self._col.find(filter)
+        cursor = self._collection.find(filter)
         if sort:
             cursor = cursor.sort(sort)
         if limit:
@@ -72,12 +86,14 @@ class SpecVersionRepo:
         }
 
     async def add_version(self, project_id: str, content: Any, author: str, diff: Optional[str] = None):
-        latest = await self._col.find_one({"project_id": project_id}, sort=[("version", DESCENDING)])
+        latest = await self._collection.find_one({"project_id": project_id}, sort=[("version", DESCENDING)])
         next_version = (latest["version"] + 1) if latest else 1
-        return await self.insert({
-            "project_id": project_id,
-            "version": next_version,
-            "content": self._normalize_content(content),
-            "author": author,
-            "diff": diff
-        })
+        return await self.insert(
+            {
+                "project_id": project_id,
+                "version": next_version,
+                "content": self._normalize_content(content),
+                "author": author,
+                "diff": diff,
+            }
+        )

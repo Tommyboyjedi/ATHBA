@@ -1,15 +1,34 @@
-# core/repos/project_repo.py
+from datetime import datetime
+
+from bson import ObjectId
 
 from core.dataclasses.project import Project
 from core.infra.mongo import get_mongo_db
-from bson import ObjectId
-from datetime import datetime
+
 
 class ProjectRepo:
-    def __init__(self):
-        db = get_mongo_db()
-        self.collection = db.projects
-        self.milestones_col = db.milestones
+    def __init__(self, db=None):
+        self._db = db
+        self._collection = None
+        self._milestones_col = None
+
+    @property
+    def db(self):
+        if self._db is None:
+            self._db = get_mongo_db()
+        return self._db
+
+    @property
+    def collection(self):
+        if self._collection is None:
+            self._collection = self.db.projects
+        return self._collection
+
+    @property
+    def milestones_col(self):
+        if self._milestones_col is None:
+            self._milestones_col = self.db.milestones
+        return self._milestones_col
 
     async def get_by_id(self, project_id: str) -> Project:
         doc = await self.collection.find_one({"_id": ObjectId(project_id)})
