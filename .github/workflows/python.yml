@@ -1,0 +1,26 @@
+name: ATHBA Python gate
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CPU_ONLY: "true"
+      DJANGO_SECRET_KEY: "ci-test-secret"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install Poetry
+        run: pip install poetry
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      - name: Compile Python
+        run: poetry run python -m compileall athba core llm_service tests
+      - name: Run tests
+        run: poetry run pytest

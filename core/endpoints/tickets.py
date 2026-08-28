@@ -1,112 +1,121 @@
-from ninja import Router, Schema, Path
-from typing import List, Optional
 from datetime import datetime
-from django.shortcuts import get_object_or_404
+from typing import List, Optional
+
+from ninja import Path, Router, Schema
 from ninja.errors import HttpError
 
 from core.dataclasses.ticket_model import TicketModel
-from core.datastore.repos.ticket_repo import TicketRepo
-from core.dataclasses.project import Project
 from core.datastore.repos.agent_log_repo import AgentLogRepo
+from core.datastore.repos.project_repo import ProjectRepo
+from core.datastore.repos.ticket_repo import TicketRepo
 
 router = Router(tags=["Tickets"])
+project_repo = ProjectRepo()
+
 
 class TicketIn(Schema):
     title: str
-    description: Optional[str]
-    due: Optional[datetime]
-    eta: Optional[str]
-    agents: Optional[str]     # comma-separated
+    description: Optional[str] = None
+    due: Optional[datetime] = None
+    eta: Optional[str] = None
+    agents: Optional[str] = None
     label: str
-    severity: str             # ← new
-    column: Optional[str]
+    severity: str
+    column: Optional[str] = None
+
+
+class TicketPatch(TicketIn):
+    id: Optional[str] = None
+
 
 class TicketOut(TicketIn):
     id: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
 
-# Guard helper
-def ensure_not_locked(project_id: str):
-    proj = get_object_or_404(Project, pk=project_id)
-    if proj.locked:
+
+async def ensure_not_locked(project_id: str):
+    project = await project_repo.get_by_id(project_id)
+    if not project:
+        raise HttpError(404, "Project not found")
+    if project.locked:
         raise HttpError(409, "Project is in edit mode")
+    return project
+
 
 @router.get("/", response=List[TicketOut])
 async def list_tickets(
     request,
     project_id: str = Path(..., description="Project ID from URL"),
 ):
-    repo = TicketRepo()
-    tickets = await repo.list_by_project(project_id)
-    return tickets
+    return await TicketRepo().list_all(project_id)
 
 
 @router.post("/", response=TicketOut)
 async def create_ticket(request, project_id: str, data: TicketIn):
-    ensure_not_locked(project_id)
+    await ensure_not_locked(project_id)
     agent_list = data.agents.split(",") if data.agents else []
     model = TicketModel(
         project_id=project_id,
         title=data.title,
-        description=data.description,
+        description=data.description or "",
         due=data.due,
-        eta=data.eta,
+        eta=data.eta or "",
         agents=agent_list,
         label=data.label,
         severity=data.severity,
-        column=data.column or "Backlog"
+        column=data.column or "Backlog",
     )
     return await TicketRepo().create(model)
 
+
 @router.patch("/{ticket_id}", response=TicketOut)
 async def update_ticket(request, project_id: str, ticket_id: str, data: TicketIn):
-    ensure_not_locked(project_id)
-    updates = data.dict(exclude_unset=True)
-    if "agents" in updates:
+    await ensure_not_locked(project_id)
+    updates = data.model_dump(exclude_unset=True)
+    if "agents" in updates and updates["agents"] is not None:
         updates["agents"] = updates["agents"].split(",")
     updated = await TicketRepo().update(ticket_id, updates)
+    if not updated:
+        raise HttpError(404, "Ticket not found")
     return updated
 
-# Batch‐update with lock
+
 @router.patch("/batch-update", response=List[TicketOut])
-async def batch_update(request, project_id: str, tickets: List[TicketIn]):
-    proj = get_object_or_404(Project, pk=project_id)
-    # 1. Lock
-    proj.locked = True
-    proj.save(update_fields=["locked"])
+async def batch_update(request, project_id: str, tickets: List[TicketPatch]):
+    project = await ensure_not_locked(project_id)
+    project.locked = True
+    await project_repo.update(project)
 
     try:
-        # 2. Determine deletions & upserts (similar to earlier example)
         repo = TicketRepo()
         existing_ids = set(await repo.list_ids_by_project(project_id))
-        incoming_ids = {t.id for t in tickets if t.id}
+        incoming_ids = {ticket.id for ticket in tickets if ticket.id}
         to_delete = existing_ids - incoming_ids
         if to_delete:
             await repo.delete_many(project_id, list(to_delete))
 
         results = []
-        for t in tickets:
-            data = t.dict(exclude_unset=True)
-            # agents
-            if "agents" in data:
+        for ticket in tickets:
+            data = ticket.model_dump(exclude_unset=True)
+            ticket_id = data.pop("id", None)
+            if "agents" in data and data["agents"] is not None:
                 data["agents"] = data["agents"].split(",")
-            if t.id:
-                updated = await repo.update(t.id, data)
-                results.append(updated)
+            if ticket_id:
+                updated = await repo.update(ticket_id, data)
+                if updated:
+                    results.append(updated)
             else:
-                model = TicketModel(project_id=project_id, **data)
-                created = await repo.create(model)
+                created = await repo.create(TicketModel(project_id=project_id, **data))
                 results.append(created)
 
-        # 3. Log
         await AgentLogRepo.log(
-            project_id, agent="PMAgent", action="batch_edit",
-            details={"count": len(tickets)}
+            project_id,
+            agent="PMAgent",
+            action="batch_edit",
+            details={"count": len(tickets)},
         )
-
         return results
     finally:
-        # 4. Unlock
-        proj.locked = False
-        proj.save(update_fields=["locked"])
+        project.locked = False
+        await project_repo.update(project)
