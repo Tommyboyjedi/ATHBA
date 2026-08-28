@@ -13,6 +13,10 @@ from core.execution.rack_ai_contract import RepositoryBinding, parse_rack_ai_res
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
 
+class RackAiCliTransportError(RuntimeError):
+    """Raised when Rack AI output cannot be trusted or interpreted safely."""
+
+
 @dataclass(frozen=True)
 class RackAiCliConfig:
     executable: str = "cargo"
@@ -30,11 +34,14 @@ class RackAiCliExecutionGateway:
 
     async def execute(self, work_unit: DevelopmentWorkUnit) -> WorkUnitExecutionResult:
         payload = to_rack_ai_request(self.workload_id, self.binding, work_unit)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8", delete=False) as handle:
-            json.dump(payload, handle)
-            spec_path = Path(handle.name)
+        spec_path: Path | None = None
 
         try:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", encoding="utf-8", delete=False) as handle:
+                json.dump(payload, handle)
+                handle.flush()
+                spec_path = Path(handle.name)
+
             process = await asyncio.create_subprocess_exec(
                 self.config.executable,
                 "run",
@@ -54,17 +61,41 @@ class RackAiCliExecutionGateway:
                 stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await process.communicate()
-            if not stdout:
-                raise RuntimeError(stderr.decode("utf-8", errors="replace") or "Rack AI returned no JSON")
-            attempt = parse_rack_ai_result(json.loads(stdout.decode("utf-8")))
+            stdout_text = stdout.decode("utf-8", errors="replace")
+            stderr_text = stderr.decode("utf-8", errors="replace")
+
+            if not stdout_text.strip():
+                raise RackAiCliTransportError(_build_error_message("Rack AI returned no JSON", stderr_text))
+
+            try:
+                attempt = parse_rack_ai_result(json.loads(stdout_text))
+            except (json.JSONDecodeError, TypeError, ValueError) as error:
+                raise RackAiCliTransportError(
+                    _build_error_message(f"Rack AI returned untrustworthy output: {error}", stderr_text, stdout_text)
+                ) from error
+
             return WorkUnitExecutionResult(
                 work_unit_id=attempt.work_unit_id,
                 accepted=attempt.accepted,
                 status=attempt.status,
                 change_id=attempt.change_id,
+                selected_worker_id=attempt.selected_worker_id,
+                placement=attempt.placement,
                 branch=attempt.branch,
                 accepted_revision=attempt.accepted_revision,
                 evidence_location=attempt.packet_path,
+                worktree_path=attempt.worktree_path,
+                error=attempt.error,
             )
         finally:
-            spec_path.unlink(missing_ok=True)
+            if spec_path is not None:
+                spec_path.unlink(missing_ok=True)
+
+
+def _build_error_message(message: str, stderr_text: str, stdout_text: str | None = None) -> str:
+    parts = [message]
+    if stderr_text.strip():
+        parts.append(f"stderr: {stderr_text.strip()}")
+    if stdout_text is not None and stdout_text.strip():
+        parts.append(f"stdout: {stdout_text.strip()}")
+    return " | ".join(parts)
