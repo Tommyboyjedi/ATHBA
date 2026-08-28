@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -14,9 +14,13 @@ class WorkUnitExecutionResult:
     accepted: bool
     status: str
     change_id: str | None = None
+    selected_worker_id: str | None = None
+    placement: dict[str, Any] | None = None
     branch: str | None = None
     accepted_revision: str | None = None
     evidence_location: str | None = None
+    worktree_path: str | None = None
+    error: str | None = None
 
 
 class WorkUnitExecutionGateway(Protocol):
