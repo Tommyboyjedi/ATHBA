@@ -87,6 +87,8 @@ next predefined behavior starts from G1
 
 Repeat until the `TaskQueue` class satisfies the complete force-fed behavior list.
 
+If a later behavior is discovered to be already satisfied by earlier accepted minimal code, ATHBA must report that truthfully and fail closed rather than fabricate a RED state. PR15 exists to prove honest TDD/execution wiring, not to manufacture artificial failing tests after the fact.
+
 ## Important: no Architect functionality in PR15
 
 Do not ask ATHBA to invent the class, identify the five behaviors, recursively decompose a product concept, or decide architectural boundaries.
@@ -323,6 +325,8 @@ PR15 is a PASS when:
 - persisted ATHBA state reconstructs the TDD history;
 - no manual target-code intervention is needed.
 
+If a proof behavior is already green before its RED step, ATHBA should surface that condition explicitly as an `already satisfied before RED` outcome rather than misreporting it as an ordinary runtime failure.
+
 Report final result explicitly as:
 
 `PR15_TDD_LOOP = PASS`
@@ -361,5 +365,8 @@ Do NOT add in PR15:
 10. final TaskQueue class is roughly the intended modest size and fully covered by the accumulated tests.
 11. no Architect/decomposition functionality is smuggled into this PR.
 12. PR14 remains untouched.
+
+Observed qualification note:
+On August 28, 2026, the live `gpurack` proof completed real RED->GREEN cycles for behaviors 1 through 4. Behavior 5 was already satisfied by the accepted implementation from earlier steps, so the RED harness correctly reported `test unexpectedly passed`. PR15 therefore needs truthful reporting of the `already satisfied before RED` edge case rather than a fabricated fifth RED cycle.
 
 Do not merge PR15 automatically when implementation is complete; return it for review with full live evidence.

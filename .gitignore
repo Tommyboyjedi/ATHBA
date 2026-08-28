@@ -22,3 +22,4 @@ poetry.lock
 # Byte-compiled
 *.egg-info/
 llm_service/models/
+state/
