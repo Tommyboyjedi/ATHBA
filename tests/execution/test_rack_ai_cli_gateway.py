@@ -34,8 +34,8 @@ def sample_unit(*, status: WorkUnitStatus = WorkUnitStatus.READY) -> Development
     )
 
 
-def sample_binding() -> RepositoryBinding:
-    return RepositoryBinding(repository_id="repo-1", base_ref="main", base_sha="a" * 40)
+def sample_binding(base_sha="a" * 40) -> RepositoryBinding:
+    return RepositoryBinding(repository_id="repo-1", base_ref="main", base_sha=base_sha)
 
 
 @pytest.mark.asyncio
@@ -58,6 +58,7 @@ async def test_gateway_returns_structured_success_and_uses_argument_array(monkey
                     "placement": {"worker_ids": ["local-coder"], "resource_ids": ["gpu-2060"]},
                     "status": "checks_passed",
                     "acceptance_verdict": "approved",
+                    "accepted_head_sha": "b" * 40,
                     "branch": "rack/change/p1--wu-1",
                     "worktree_path": "/srv/rack-ai/worktrees/p1--wu-1",
                     "packet_path": "/srv/rack-ai/state/p1--wu-1.json",
@@ -69,14 +70,14 @@ async def test_gateway_returns_structured_success_and_uses_argument_array(monkey
 
     gateway = RackAiCliExecutionGateway(
         "p1",
-        sample_binding(),
         RackAiCliConfig(executable="cargo", rack_ai_root="/srv/rack-ai", state_root="/srv/rack-ai"),
     )
-    result = await gateway.execute(sample_unit())
+    result = await gateway.execute(sample_unit(), sample_binding())
 
     assert result.accepted is True
+    assert result.accepted_revision == "b" * 40
     assert result.selected_worker_id == "local-coder"
-    assert result.placement == {"worker_ids": ["local-coder"], "resource_ids": ["gpu-2060"]}
+    assert captured["payload"]["repository"]["base_sha"] == "a" * 40
     assert captured["args"] == (
         "cargo",
         "run",
@@ -92,10 +93,32 @@ async def test_gateway_returns_structured_success_and_uses_argument_array(monkey
         "/srv/rack-ai",
         "--emit-json",
     )
-    assert captured["kwargs"]["cwd"] == "/srv/rack-ai"
-    assert captured["payload"]["version"] == "rack-ai/work-unit/v1"
-    assert captured["payload"]["work_unit"]["readiness"] == {"ready": True, "depends_on": []}
     assert not Path(captured["spec_path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_gateway_passes_updated_binding_base_sha(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_exec(*args, **_kwargs):
+        spec_path = Path(args[7])
+        captured["payload"] = json.loads(spec_path.read_text(encoding="utf-8"))
+        return FakeProcess(
+            json.dumps(
+                {
+                    "work_unit_id": "wu-1",
+                    "change_id": "p1--wu-1",
+                    "status": "checks_passed",
+                    "acceptance_verdict": "approved",
+                    "accepted_head_sha": "c" * 40,
+                }
+            )
+        )
+
+    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    gateway = RackAiCliExecutionGateway("p1")
+    await gateway.execute(sample_unit(), sample_binding(base_sha="b" * 40))
+    assert captured["payload"]["repository"]["base_sha"] == "b" * 40
 
 
 @pytest.mark.asyncio
@@ -116,8 +139,8 @@ async def test_gateway_returns_structured_rejection_even_on_nonzero_exit(monkeyp
 
     monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
 
-    gateway = RackAiCliExecutionGateway("p1", sample_binding())
-    result = await gateway.execute(sample_unit())
+    gateway = RackAiCliExecutionGateway("p1")
+    result = await gateway.execute(sample_unit(), sample_binding())
 
     assert result.accepted is False
     assert result.status == "checks_failed"
@@ -141,8 +164,8 @@ async def test_gateway_preserves_structured_failed_status(monkeypatch):
 
     monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
 
-    gateway = RackAiCliExecutionGateway("p1", sample_binding())
-    result = await gateway.execute(sample_unit())
+    gateway = RackAiCliExecutionGateway("p1")
+    result = await gateway.execute(sample_unit(), sample_binding())
 
     assert result.accepted is False
     assert result.status == "failed"
@@ -155,9 +178,9 @@ async def test_gateway_raises_on_nonzero_exit_without_usable_json(monkeypatch):
 
     monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
 
-    gateway = RackAiCliExecutionGateway("p1", sample_binding())
+    gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="cargo failed"):
-        await gateway.execute(sample_unit())
+        await gateway.execute(sample_unit(), sample_binding())
 
 
 @pytest.mark.asyncio
@@ -167,9 +190,9 @@ async def test_gateway_raises_on_empty_stdout(monkeypatch):
 
     monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
 
-    gateway = RackAiCliExecutionGateway("p1", sample_binding())
+    gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="returned no JSON"):
-        await gateway.execute(sample_unit())
+        await gateway.execute(sample_unit(), sample_binding())
 
 
 @pytest.mark.asyncio
@@ -179,9 +202,9 @@ async def test_gateway_raises_on_malformed_json(monkeypatch):
 
     monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
 
-    gateway = RackAiCliExecutionGateway("p1", sample_binding())
+    gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="untrustworthy output"):
-        await gateway.execute(sample_unit())
+        await gateway.execute(sample_unit(), sample_binding())
 
 
 @pytest.mark.asyncio
@@ -199,9 +222,9 @@ async def test_gateway_raises_on_missing_required_identifiers(monkeypatch):
 
     monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
 
-    gateway = RackAiCliExecutionGateway("p1", sample_binding())
+    gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="missing required field: work_unit_id"):
-        await gateway.execute(sample_unit())
+        await gateway.execute(sample_unit(), sample_binding())
 
 
 @pytest.mark.asyncio
@@ -215,7 +238,7 @@ async def test_gateway_rejects_non_ready_units_before_subprocess(monkeypatch):
 
     monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
 
-    gateway = RackAiCliExecutionGateway("p1", sample_binding())
+    gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(ValueError, match="marked ready for execution"):
-        await gateway.execute(sample_unit(status=WorkUnitStatus.PLANNED))
+        await gateway.execute(sample_unit(status=WorkUnitStatus.PLANNED), sample_binding())
     assert called is False

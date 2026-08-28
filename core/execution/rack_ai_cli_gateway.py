@@ -27,13 +27,16 @@ class RackAiCliConfig:
 class RackAiCliExecutionGateway:
     """Invoke Rack AI without leaking worker/model/GPU choices into ATHBA."""
 
-    def __init__(self, workload_id: str, binding: RepositoryBinding, config: RackAiCliConfig | None = None):
+    def __init__(self, workload_id: str, config: RackAiCliConfig | None = None):
         self.workload_id = workload_id
-        self.binding = binding
         self.config = config or RackAiCliConfig()
 
-    async def execute(self, work_unit: DevelopmentWorkUnit) -> WorkUnitExecutionResult:
-        payload = to_rack_ai_request(self.workload_id, self.binding, work_unit)
+    async def execute(
+        self,
+        work_unit: DevelopmentWorkUnit,
+        repository_binding: RepositoryBinding,
+    ) -> WorkUnitExecutionResult:
+        payload = to_rack_ai_request(self.workload_id, repository_binding, work_unit)
         spec_path: Path | None = None
 
         try:
