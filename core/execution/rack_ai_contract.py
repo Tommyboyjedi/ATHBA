@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from core.development.work_unit import DevelopmentWorkUnit, ExecutionAttempt
@@ -50,6 +50,12 @@ class RepositoryBinding:
             _require_text(self.base_sha, "base sha")
         if self.registered_root is not None:
             _require_text(self.registered_root, "registered root")
+
+    def with_base_sha(self, base_sha: str | None) -> "RepositoryBinding":
+        if base_sha is None:
+            return replace(self, base_sha=None)
+        _require_text(base_sha, "base sha")
+        return replace(self, base_sha=base_sha)
 
 
 def to_rack_ai_request(workload_id: str, binding: RepositoryBinding, unit: DevelopmentWorkUnit) -> dict[str, Any]:
