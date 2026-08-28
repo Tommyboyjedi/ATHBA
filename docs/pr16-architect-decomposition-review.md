@@ -1,191 +1,223 @@
-# PR16 — Architect decomposition and senior semantic review
+# PR16 — Behavior-contract lane, senior review, and pool-ready progression
 
 ## Goal
 
-Move ATHBA one layer upward from PR15.
+Move ATHBA one layer upward from PR15 without trying to implement the full seven-role software-development hierarchy yet.
 
-PR15 proved that, when ATHBA is given an ordered list of `TddBehavior` objects, it can drive a real RED -> GREEN loop through Rack AI/JCode/local models while preserving trusted repository progression.
+PR15 proved that, when ATHBA is given an ordered list of precise `TddBehavior` objects, it can drive a real RED -> GREEN loop through Rack AI/JCode/local models while preserving trusted repository progression.
 
-PR16 must remove the largest manual step in that proof:
+PR16 should prove a narrower and more realistic next step:
 
-1. take a modest higher-level software requirement;
-2. have ATHBA's Architect/decomposition layer produce the `TddBehavior` sequence that PR15 previously received by hand;
-3. feed that generated sequence into the existing PR15 TDD loop;
-4. after each GREEN result has passed Rack AI acceptance, perform an ATHBA-owned senior-engineer semantic/code-quality review;
-5. advance to the next behavior only after that semantic review approves the implementation.
+1. take one modest component-level requirement;
+2. have ATHBA produce **one bounded Behavior Contract** rather than a pre-authored list of every Tester and Developer prompt;
+3. let the Tester and Developer generate the individual RED/GREEN steps dynamically inside that contract;
+4. after each mechanically accepted GREEN candidate, place the result into a **review-ready pool**;
+5. have an ATHBA senior reviewer assess candidate quality separately from Rack AI acceptance;
+6. move approved work into an **approved pool**, repairable work into a **repair pool**, and decomposition/design defects into a **replan pool**;
+7. keep all state transitions explicit so future parallel execution is possible, while PR16 itself may run serially.
 
-This PR does not attempt full application architecture, broad natural-language product planning, UI work, or the full Tiny Ticket application.
+PR16 does **not** attempt to implement all identified roles:
 
-## Why this PR exists
+- Project Manager / Master Designer
+- Solution Architect
+- Component Designer
+- Behavior Decomposer
+- Tester
+- Developer
+- Senior Reviewer
 
-Rack AI answers a mechanical and safety question:
+Only the lower slice needed for this proof is implemented. The higher architectural layers remain future work.
 
-> Did this bounded change remain inside authority, satisfy deterministic acceptance, and produce a trusted accepted revision?
+## Why this shape
 
-PR15 answers the TDD sequencing question:
-
-> Did ATHBA correctly create RED, then GREEN, and preserve revision progression?
-
-Neither layer answers the senior-engineering question:
-
-> Even though the tests pass, is this actually a good implementation of the intended behavior and consistent with the design we are trying to build?
-
-The PR15 live proof produced working code but also showed examples of small-model noise and mediocre engineering quality, including unnecessary imports/comments, misleading comments, and speculative/noisy test annotations in some attempts.
-
-That is not primarily a Rack AI acceptance defect. It is an ATHBA semantic review concern.
-
-PR16 therefore proves the first complete local development slice with three distinct gates:
+The emerging target hierarchy is:
 
 ```text
-higher-level requirement
+Project Manager / Master Designer
         |
         v
-ATHBA Architect/decomposer
+Solution Architect
         |
         v
-structured TDD behavior plan
+Component Designer
         |
         v
-PR15 RED -> GREEN loop
+Behavior Decomposer
         |
         v
-Rack AI acceptance / trusted candidate revision
+Behavior Contract
         |
-        v
-ATHBA senior semantic review
-        |
-    +---+---+
-    |       |
- approve  repair required
-    |       |
-    v       v
- next      bounded repair -> Rack AI -> review again
- behavior
+        +-------------------------------+
+        |                               |
+        v                               |
+Tester RED <----------------------> Developer GREEN
+        |                               |
+        +---------------+---------------+
+                        |
+                        v
+                 review-ready pool
+                        |
+                        v
+                 Senior Reviewer
+                        |
+              +---------+----------+
+              |         |          |
+              v         v          v
+           approved   repair      replan
+             pool      pool        pool
 ```
+
+PR16 proves only the portion from **component-level requirement -> Behavior Contract -> Tester/Developer TDD lane -> senior review -> pool transition**.
+
+## Core design decision: contract, not pre-written prompts
+
+PR15 succeeded partly because the RED and GREEN prompts were hand-authored in great detail. That was useful for proving mechanics, but it front-loaded too much intelligence outside ATHBA.
+
+PR16 should not generate every Tester and Developer prompt up front.
+
+Instead, the planning layer should generate a compact durable **Behavior Contract** that defines the lane the Tester and Developer must stay inside.
+
+The contract describes:
+
+- the capability to be added;
+- externally observable requirements;
+- invariants and state-preservation rules;
+- allowed production path(s);
+- allowed test path(s);
+- relevant API/interface constraints;
+- required error behavior;
+- explicit non-goals;
+- completion criteria;
+- any dependencies on already-approved behavior;
+- requirement traceability.
+
+The Tester then chooses the smallest useful missing RED step inside that contract. After GREEN and approval, the Tester may choose the next smallest missing RED step in the same contract until the contract is complete.
+
+The road is planned; the footsteps are generated dynamically.
 
 ## Proof target: ReservationBook
 
-Use a fresh disposable Python 3.14 repository. Do not reuse the PR15 TaskQueue fixture as the decomposition target.
+Use a fresh disposable Python 3.14 repository. Do not reuse the PR15 TaskQueue fixture.
 
-Give ATHBA the following higher-level requirement as the Architect input. Do not pre-split it into TDD behaviors in production code or the live runner.
+Give ATHBA this component-level requirement:
 
 > Build a small in-memory `ReservationBook` for reservable resources. A resource has a unique id and a positive integer capacity. Clients can add resources, create uniquely identified reservations for a number of units on a resource, cancel reservations, and query remaining availability. Duplicate resource ids and duplicate reservation ids must be rejected. Reservations for unknown resources, cancellations of unknown reservations, invalid/non-positive quantities, and reservations that exceed remaining capacity must be rejected without corrupting state. Cancelling a reservation restores that capacity. The implementation is in-memory only, dependency-free, and should remain small, direct, readable Python rather than introducing unnecessary abstractions.
 
-This is intentionally larger than one TaskQueue behavior but still small enough to reason about as one class/component.
+For PR16, this input is treated as if it had already been produced by the future higher architecture layers.
 
-The Architect must decide the actual behavior sequence, dependencies, focused test names, and RED/GREEN work-unit descriptions.
+Do not claim that PR16 proves broad user-intent -> architecture -> component-design generation.
 
-## Architect output
+## Behavior Contract output
 
-The decomposition layer should output a structured plan, not free-form prose.
+Create a structured provider-neutral contract, for example `BehaviorContract` or equivalent.
 
-Reuse or extend `TddBehavior` where sensible. The generated plan needs enough information for the existing TDD loop to derive Tester and Developer work units of the quality demonstrated in the successful PR15 live prompts.
+It should contain enough information to constrain the local TDD lane without containing pre-written per-cycle prompts.
 
-At minimum each behavior should have:
+At minimum:
 
-- stable behavior id;
-- concise human-readable objective;
-- test name/node id;
-- test path;
-- production path;
-- dependency/order information where genuinely required;
-- RED objective/prompt material;
-- GREEN objective/prompt material;
-- deterministic RED acceptance command;
-- deterministic GREEN acceptance commands;
-- expected exception type/message when relevant;
-- expected observable result/state when relevant.
+- stable contract id;
+- project/component id;
+- concise component capability statement;
+- observable requirements;
+- invariants/state preservation expectations;
+- test path(s);
+- production path(s);
+- public API constraints where known;
+- error/exception expectations where known;
+- explicit non-goals;
+- completion criteria;
+- traceability back to the component requirement;
+- status/progression metadata.
 
-Do not include GPU/model/worker ids.
+Do not include concrete GPU/model/worker identities.
 
-Do not require exact wording identical to the PR15 prompts, but use the accepted PR15 prompts as empirical reference for the amount of specificity small local workers required.
+## Tester/Developer lane
 
-## Decomposition quality rules
+The Tester and Developer operate dynamically inside the contract.
 
-The Architect/decomposer must aim for behaviors that are:
+### Tester
 
-- small enough for one focused test;
-- externally observable;
-- independently understandable;
-- minimally overlapping;
-- ordered only where dependency genuinely exists;
-- explicit about error behavior and state preservation;
-- specific enough that Tester does not need to redesign the feature;
-- specific enough that Developer does not need to infer unrelated requirements;
-- free from concrete implementation code unless essential to identify an API contract;
-- suitable for PR15's strict test-path RED and production-path GREEN authority.
+The Tester should:
 
-The b5 outcome from PR15 is important evidence: a later behavior was already satisfied by earlier minimal code. Some overlap is unavoidable, but the decomposition layer should actively minimize redundant behavior definitions rather than blindly producing a checklist.
+- inspect the Behavior Contract and current semantically approved repository state;
+- identify the smallest useful missing observable behavior;
+- generate one focused RED test;
+- preserve existing approved tests;
+- modify only allowed test paths;
+- avoid speculative helpers, comments, fixtures or extra tests unless genuinely needed;
+- produce a structured record of what requirement slice this RED step covers.
 
-## Plan validation before execution
+The Tester is not handed a complete pre-written test prompt for every future cycle.
 
-Before starting RED/GREEN execution, validate the generated behavior plan.
+### Developer
 
-Deterministic validation should cover at least:
+The Developer should:
 
-- unique behavior ids;
-- unique focused test names;
-- non-empty objectives;
-- valid repository-relative test/production paths;
-- no self-dependencies;
-- no unknown dependencies;
-- acyclic dependency graph;
-- required RED/GREEN commands present;
-- no physical resource-selection fields;
-- behavior plan covers the stated high-level requirements in a traceable way.
+- start from the accepted RED revision;
+- inspect the current focused failing test and the Behavior Contract;
+- implement the minimum production change needed for GREEN;
+- preserve prior approved behavior;
+- modify only allowed production paths;
+- avoid speculative abstraction, dead imports/code, noisy comments and unrelated features.
 
-If coverage of the high-level requirement cannot be demonstrated, fail before implementation rather than silently dropping requirements.
+The Developer is not handed a complete pre-written implementation prompt for every future cycle.
 
-## Requirement traceability
+### Cycle completion
 
-Represent enough traceability to answer:
+After GREEN passes mechanically and semantic review approves it, the contract remains active if unfulfilled requirements remain. The Tester then selects the next smallest missing behavior.
 
-- which high-level requirement(s) is this behavior intended to satisfy?
-- which behavior/test proves it?
-- which accepted/semantically-approved revision implemented it?
+If all contract requirements are satisfied, the contract moves to the completed/approved pool.
 
-The proof does not need a sophisticated requirements database. A compact structured mapping is sufficient.
+## PR15 prompts as empirical guidance
 
-## Senior semantic/code review gate
+The successful PR15 prompts remain useful evidence for the level of specificity small local models may need.
 
-After a GREEN work unit passes Rack AI acceptance, its `accepted_revision` is a trusted mechanically accepted **candidate** revision.
+Use them to design role prompt templates and context packaging, but do not hard-code a giant prompt per future behavior.
 
-ATHBA must not automatically treat that candidate as semantically complete.
+The system should be able to dynamically produce prompts of comparable clarity from:
 
-Run an ATHBA-owned senior-engineer review before advancing the behavior.
+- the Behavior Contract;
+- current approved tests;
+- current approved source state;
+- the current focused cycle objective;
+- phase-specific path authority;
+- prior review findings where applicable.
 
-The reviewer should inspect, at minimum:
+## Rack AI versus ATHBA senior review
 
-- behavior requirement;
-- relevant generated test(s);
-- candidate diff or changed production file(s);
-- previously approved behavior/design context;
-- Rack AI result/evidence as useful context.
+Rack AI answers:
 
-The reviewer is not replacing Rack AI. It must not re-run or reinterpret path/safety authority as its main job.
+> Did this bounded change safely satisfy deterministic acceptance and produce a trusted candidate revision?
 
-## Review criteria
+ATHBA senior review answers:
 
-The senior review should judge whether the implementation:
+> Is this actually a good implementation of the intended design and current Behavior Contract?
 
-- actually expresses the intended behavior, not merely the narrowest accidental way to satisfy the test;
-- preserves previously accepted behavior;
-- is simple and direct;
-- avoids speculative features and abstractions;
+These are intentionally separate gates.
+
+A Rack AI GREEN result is a mechanically accepted **candidate**, not automatically a semantically approved progression point.
+
+## Senior review criteria
+
+The reviewer should assess whether candidate code:
+
+- expresses the intended behavior rather than merely gaming a narrow test;
+- remains consistent with the Behavior Contract;
+- preserves previous approved behavior;
+- is simple, direct and readable;
+- avoids speculative abstractions/features;
 - uses clear names;
 - avoids dead/unused imports and dead code;
-- avoids misleading or excessive comments/docstrings;
-- avoids test-gaming or implementation tricks;
-- avoids duplicated logic where an obvious simple structure exists;
-- is idiomatic enough for the target language/project;
-- remains consistent with the component-level design and current behavior plan;
-- does not create an obvious maintainability problem that a competent senior developer would send back in review.
+- avoids misleading/excessive comments or docstrings;
+- avoids duplicate or obviously poor structures;
+- remains idiomatic enough for the project;
+- does not create an obvious maintainability problem a competent senior developer would send back.
 
-For example, code can pass tests and still deserve repair if it adds an unused import, misleading comment, unnecessary abstraction, inappropriate global state, or other obvious junior-developer noise.
+The PR15 TaskQueue output is useful calibration: code may pass tests while still containing unnecessary imports/comments, misleading commentary or junior-level noise worthy of repair.
 
-## Structured review result
+## Structured review outcomes
 
-Use a small structured result such as:
+Use structured results:
 
 - `approved`
 - `repair_required`
@@ -193,221 +225,266 @@ Use a small structured result such as:
 
 with:
 
-- concise rationale;
+- rationale;
 - concrete findings;
-- optional bounded repair instructions;
-- evidence/reference to candidate revision and behavior id.
+- bounded repair guidance where applicable;
+- candidate revision;
+- contract/cycle id;
+- evidence references.
 
-`replan_required` is for cases where the problem is not merely code quality but the generated behavior/decomposition itself is flawed, contradictory, redundant, or insufficient.
+`replan_required` means the issue is with the current contract/decomposition/design lane rather than simply implementation quality.
 
-Do not allow arbitrary unstructured reviewer prose to become orchestration state.
+## Pool model
 
-## Candidate revision versus semantically approved revision
+PR16 should introduce explicit pool-ready orchestration state.
 
-Keep these concepts distinct.
+A pool is a logical durable collection/state, not necessarily an in-memory worker queue and not necessarily parallel in PR16.
 
-Rack AI GREEN acceptance produces a trusted candidate revision.
+At minimum model these states/collections conceptually:
 
-ATHBA semantic approval determines whether that candidate is allowed to become the base for the next behavior.
+### `tdd_ready`
+Behavior Contracts ready for a Tester/Developer cycle.
 
-If semantic review approves:
+### `cycle_active`
+Contracts currently inside a RED/GREEN cycle.
+
+### `review_ready`
+Mechanically accepted GREEN candidates awaiting senior semantic review.
+
+### `repair_ready`
+Candidates for which senior review requested bounded repair.
+
+### `replan_ready`
+Contracts/candidates blocked because the behavior lane itself needs redesign/decomposition.
+
+### `approved`
+Semantically approved cycles/contracts whose revision may be used for subsequent progression.
+
+### `completed`
+Behavior Contracts whose completion criteria are fully satisfied.
+
+The exact internal representation can be enum/status records rather than six physical queues, but transitions must be explicit and queryable.
+
+## Why pools now
+
+Pools are introduced now to avoid baking a strictly synchronous call stack into ATHBA.
+
+PR16 may execute serially:
 
 ```text
-last semantic base G0
- -> RED R1
- -> GREEN candidate G1
- -> review approved
- -> semantic base becomes G1
- -> next behavior starts from G1
+Tester -> Developer -> review -> next cycle
 ```
 
-If review requires repair:
+but state should support a future scheduler doing:
 
 ```text
-last semantic base G0
- -> RED R1
- -> GREEN candidate G1
- -> review repair_required
- -> bounded repair starts from G1
- -> Rack AI acceptance gives G1r
- -> semantic review runs again
- -> only approved G1r becomes the next semantic base
+many tdd_ready contracts
+ -> multiple active RED/GREEN lanes where resources allow
+ -> review_ready pool
+ -> one or more reviewer workers
+ -> repair/replan/approved pools
 ```
 
-A rejected semantic review must not allow the next behavior to start.
+Do not implement full parallel scheduling in PR16.
 
-Do not delete or pretend the Rack AI candidate revision did not exist; retain it as evidence/history.
+Do not bind a pool to a GPU/model/worker.
+
+The design goal is simply that future parallelism does not require rewriting the domain progression model.
+
+## Revision progression with pools
+
+Keep mechanically accepted candidate revisions distinct from semantically approved revisions.
+
+Example:
+
+```text
+approved base G0
+ -> RED R1
+ -> GREEN candidate G1
+ -> review_ready
+ -> reviewer approved
+ -> approved pool / semantic base G1
+ -> next cycle may start from G1
+```
+
+Repair:
+
+```text
+G1 candidate
+ -> review_required repair
+ -> repair_ready
+ -> bounded repair via Rack AI -> G1r
+ -> review_ready again
+ -> approved only after review
+```
+
+Replan:
+
+```text
+G1 candidate or RED discovery
+ -> reviewer/decomposer detects contract flaw
+ -> replan_ready
+ -> stop this lane
+```
+
+An unreviewed or rejected candidate must never become the next semantic base.
 
 ## Repair loop
 
-Implement the smallest bounded repair loop necessary for this proof.
+Support a small bounded repair loop.
 
-When review returns `repair_required`:
+When semantic review returns `repair_required`:
 
-- create a narrowly scoped repair work unit;
-- start from the mechanically accepted candidate revision;
-- production path only unless the review explicitly identifies a test/decomposition defect (which should normally become `replan_required` instead);
-- preserve the same behavior's accumulated tests;
-- run normal Rack AI acceptance;
-- obtain a new trusted candidate revision;
-- re-run semantic review;
-- bound the number of semantic repair attempts (for example 2) and fail closed after the budget is exhausted.
+- move the item to `repair_ready`;
+- create a narrowly scoped production repair task from the candidate revision;
+- preserve accumulated tests;
+- run through normal Rack AI acceptance;
+- return the new candidate to `review_ready`;
+- re-review;
+- bound repair attempts (for example 2) and fail closed when exhausted.
 
-Do not turn this into an unlimited self-editing loop.
+Do not create unlimited self-editing.
 
-## Reviewer/decomposer reasoning boundary
+## Reasoning boundary
 
-Architect decomposition and senior semantic review require judgment, so they should depend on ATHBA's provider-neutral reasoning abstractions rather than hard-coded model identities.
+Tester cycle selection, Developer implementation, contract creation and senior review require judgment.
 
-Prefer the existing `ReasoningGateway` seam where appropriate.
+Use ATHBA provider-neutral abstractions and the existing Rack AI execution boundary.
 
-The live PR16 proof should use local reasoning on `gpurack`, not default to a cloud model.
+The live proof should be local-first on `gpurack`.
 
-However:
+ATHBA application/domain code must not name:
 
-- ATHBA domain/application code must not name a GPU, worker, model id or local endpoint;
-- do not silently bypass the Rack AI resource-authority boundary merely because reasoning is read-only;
-- inspect the current Rack AI/ATHBA runtime and use the cleanest existing local reasoning path available;
-- if a genuine missing Rack AI non-mutating reasoning-dispatch capability prevents a boundary-correct live implementation, document that concrete gap and stop rather than hard-coding `local-primary`/ports into ATHBA.
+- `local-primary`;
+- `local-coder`;
+- GPU ids;
+- concrete model ids;
+- ports/endpoints.
 
-Do not use OpenRouter/cloud reasoning as the default acceptance proof for PR16.
+Rack AI retains physical resource authority.
 
-## Prompt construction
+Cloud/OpenRouter is not the default PR16 proof path.
 
-Use the successful PR15 live Tester/Developer prompts as evidence for prompt quality.
+## What PR16 does not prove
 
-Do not store a giant hard-coded prompt per behavior.
+PR16 does not implement or prove:
 
-Build role-specific prompt templates from structured behavior fields and current progression state.
+- Project Manager / Master Designer agent;
+- Solution Architect agent;
+- full Component Designer agent;
+- generalized Behavior Decomposer for arbitrary applications;
+- broad user prompt -> architecture generation;
+- multi-component planning;
+- full Tiny Ticket;
+- generalized project backlog/Kanban execution;
+- automatic cloud escalation;
+- full parallel scheduler;
+- multiple concurrent GPU workers;
+- reviewer batching policy optimization.
 
-Tester prompt generation should reliably convey:
-
-- RED role;
-- exact writable test path;
-- exact new test name;
-- exact behavior/expected result;
-- preserve existing accepted tests;
-- add exactly one focused test;
-- no production reasoning/changes;
-- no speculative helpers/extra tests;
-- repository-relative path requirements.
-
-Developer prompt generation should reliably convey:
-
-- GREEN role;
-- exact writable production path;
-- focused test name;
-- full accumulated tests also run;
-- preserve prior behavior;
-- minimal implementation only;
-- no test edits;
-- no speculative abstraction/noise.
-
-Prompt quality is part of the decomposition output contract because weak prompts materially affected the PR15 live runs.
+Those remain future layers.
 
 ## Live proof
 
-Run the full local path on `gpurack` with the ReservationBook requirement.
+Run one full local ReservationBook Behavior Contract through the new lane.
 
-No hand-authored TDD behavior sequence is allowed in the live proof.
-
-The live flow must be:
+Expected shape:
 
 ```text
-ReservationBook requirement
- -> ATHBA Architect/decomposer
- -> generated structured behavior plan
- -> plan validation
- -> PR15 TDD coordinator
- -> RED through Rack AI/JCode/local model
- -> GREEN through Rack AI/JCode/local model
+component-level ReservationBook requirement
+ -> Behavior Contract generation
+ -> deterministic contract validation
+ -> tdd_ready
+ -> Tester chooses smallest missing RED step
+ -> Rack AI RED acceptance
+ -> Developer GREEN
  -> Rack AI candidate accepted revision
- -> ATHBA senior semantic review
- -> approve or bounded repair
- -> next generated behavior
- -> completed ReservationBook
+ -> review_ready
+ -> Senior Reviewer
+      -> approved -> next cycle
+      OR repair_ready -> repair -> review_ready
+      OR replan_ready -> stop
+ -> repeat until Behavior Contract completion criteria satisfied
+ -> completed
 ```
 
-The final repository must satisfy the original high-level ReservationBook requirement and the accumulated generated test suite.
+The live proof must not contain a hidden pre-authored list of all Tester/Developer cycle prompts.
 
-## What to record from the live proof
+## Contract validation
 
-Retain/report:
+Before execution, deterministically validate:
 
-- exact original requirement input;
-- generated behavior plan in order;
-- requirement-to-behavior traceability;
-- generated Tester/Developer objectives/prompts or reproducible prompt inputs;
-- RED/GREEN/candidate revisions;
-- semantic review decision for every GREEN candidate;
-- any repair work units and repaired revisions;
-- final semantically approved revision;
-- final full pytest result;
-- final source implementation;
-- evidence packet locations;
-- any redundant/already-satisfied behavior discovered;
-- any decomposition defect requiring replan;
-- which reasoning path/provider was used without exposing that choice as domain authority.
+- unique/non-empty contract id;
+- valid repository-relative paths;
+- non-empty observable requirements;
+- completion criteria present;
+- no physical resource-selection fields;
+- traceability to original component requirement;
+- no obviously contradictory invariants;
+- only supported pool/status values.
+
+Fail closed if malformed.
+
+## Persistence
+
+Persist enough to reconstruct:
+
+- original component requirement;
+- Behavior Contract;
+- current pool/state;
+- each Tester-selected cycle objective;
+- RED revision/evidence;
+- GREEN candidate revision/evidence;
+- senior review decision/findings;
+- repair attempts/revisions;
+- current semantically approved base;
+- fulfilled and remaining contract requirements;
+- final completion status.
 
 ## Tests required
 
 Add deterministic tests proving at least:
 
-1. decomposition output can be parsed into valid `TddBehavior` objects;
-2. malformed/missing behavior fields fail closed;
-3. duplicate ids/test names fail validation;
-4. invalid/cyclic dependencies fail validation;
-5. requirement traceability is retained;
-6. generated plan does not contain physical resource selection;
-7. TDD execution uses generated behaviors, not a hidden hard-coded fallback list;
-8. semantic review runs after accepted GREEN and before next behavior;
-9. reviewer approval advances the semantic base;
-10. `repair_required` prevents next behavior and creates a bounded repair step;
-11. repaired candidate is reviewed again;
-12. `replan_required` stops execution and surfaces the decomposition problem;
-13. semantically rejected candidate never becomes next behavior base;
-14. review/repair history persists;
-15. resume does not repeat already semantically approved behavior;
-16. existing PR11-PR15 tests remain green under Python 3.14.
-
-## Non-goals
-
-Do not add in PR16:
-
-- full Tiny Ticket application build;
-- broad multi-project planning;
-- PM/UI redesign;
-- rich dashboard;
-- parallel DAG execution;
-- generalized refactoring framework;
-- automatic cloud escalation;
-- OpenRouter as default reasoning path;
-- Rack AI scheduling redesign;
-- direct GPU/model/worker selection in ATHBA;
-- a huge universal software architecture engine.
-
-PR14 remains the broader roadmap/idea holder and should not be rewritten by this PR.
+1. a component requirement can produce a valid Behavior Contract;
+2. malformed contracts fail closed;
+3. no resource-selection fields leak into contracts or work requests;
+4. Tester selects a cycle objective from contract requirements rather than a hidden hard-coded behavior list;
+5. Developer operates from the accepted RED revision;
+6. mechanically accepted GREEN transitions to `review_ready`, not directly to next TDD cycle;
+7. reviewer approval moves work to approved progression;
+8. unreviewed candidate cannot become next semantic base;
+9. `repair_required` moves to `repair_ready` and blocks next cycle;
+10. repaired candidate returns to `review_ready`;
+11. `replan_required` moves to `replan_ready` and stops the lane;
+12. pool/state transitions persist and resume safely;
+13. completed contracts are not rerun;
+14. accumulated requirements/test evidence remains traceable;
+15. existing PR11-PR15 tests remain green under Python 3.14.
 
 ## Definition of done
 
 PR16 is complete when:
 
-1. ATHBA accepts the higher-level ReservationBook requirement without a hand-written behavior list;
-2. local Architect/decomposition produces a valid structured TDD behavior plan;
-3. the plan is validated and traceable to the input requirement;
-4. generated behaviors feed the existing PR15 TDD loop;
-5. every GREEN candidate passes through ATHBA senior semantic review before progression;
-6. repair-required candidates can be corrected through a bounded Rack AI repair loop and re-reviewed;
-7. semantically rejected/unreviewed code never advances the semantic base;
-8. final ReservationBook satisfies the original requirement and all accumulated tests;
-9. full ATHBA Python 3.14 suite and compile gate remain green;
-10. live proof uses local rack reasoning/execution without hard-coded physical identities in ATHBA;
-11. all decomposition/review/TDD evidence is durable enough to reconstruct what happened.
+1. ATHBA accepts the ReservationBook component requirement;
+2. a structured Behavior Contract is generated without a pre-written micro-behavior/prompt list;
+3. local Tester/Developer roles dynamically select and execute successive TDD cycles inside that contract;
+4. PR15 path/revision safety is preserved;
+5. every GREEN candidate enters `review_ready` before progression;
+6. senior reviewer can approve, request bounded repair, or require replan;
+7. pool/state transitions are durable and future-parallelism-friendly;
+8. only semantically approved revisions become next-cycle bases;
+9. the ReservationBook contract eventually reaches `completed` with original requirements satisfied;
+10. full ATHBA Python 3.14 tests and compile gate remain green;
+11. the live proof is local-first and does not hard-code physical resources into ATHBA.
 
-Report the final proof explicitly as:
+Report:
 
-`PR16_DECOMPOSITION = PASS|FAIL`
+`PR16_BEHAVIOR_CONTRACT = PASS|FAIL`
+
+`PR16_DYNAMIC_TDD_LANE = PASS|FAIL`
 
 `PR16_SEMANTIC_REVIEW = PASS|FAIL`
+
+`PR16_POOL_PROGRESSION = PASS|FAIL`
 
 `PR16_END_TO_END_COMPONENT = PASS|FAIL`
