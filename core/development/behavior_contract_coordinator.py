@@ -33,6 +33,7 @@ from core.development.tdd_progression import (
     red_work_unit_id,
     repair_work_unit_id,
 )
+from core.development.specification_gatekeeper import SpecificationGapTddAdapter, SpecificationGatekeeper
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
@@ -347,6 +348,8 @@ class BehaviorContractCoordinator:
         repair_factory: ContractRepairWorkUnitFactory | None = None,
         review_material_provider: ReviewMaterialProvider | None = None,
         max_semantic_repairs: int = 2,
+        gatekeeper: SpecificationGatekeeper | None = None,
+        gap_adapter: SpecificationGapTddAdapter | None = None,
     ):
         self.execution_gateway = execution_gateway
         self.reasoning_gateway = reasoning_gateway
@@ -360,6 +363,8 @@ class BehaviorContractCoordinator:
         self.repair_factory = repair_factory or ContractRepairWorkUnitFactory()
         self.review_material_provider = review_material_provider or _default_review_material_provider(repository_binding)
         self.max_semantic_repairs = max_semantic_repairs
+        self.gatekeeper = gatekeeper
+        self.gap_adapter = gap_adapter
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
         project_id = contract.project_id
@@ -385,6 +390,42 @@ class BehaviorContractCoordinator:
             if run_state.current_pool in {"tdd_ready", "approved"}:
                 decision = await self.step_planner.decide_next_step(contract, run_state)
                 if decision.status == "complete":
+                    if self.gatekeeper is not None:
+                        gatekeeper_state = await self.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
+                        gatekeeper_state = await self.gatekeeper.assess(contract, run_state, gatekeeper_state)
+                        if gatekeeper_state.is_complete():
+                            run_state = replace(
+                                run_state,
+                                current_pool="completed",
+                                completed_requirement_refs=_ordered_completed_requirement_refs(contract, run_state.completed_requirement_refs),
+                                contract=replace(contract, status="completed"),
+                                repository_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
+                                gatekeeper_state=gatekeeper_state,
+                            )
+                            snapshot = self._save_run_state(snapshot, run_state)
+                            return self._result_from_run_state(run_state)
+                        latest_assessment = gatekeeper_state.latest_assessment
+                        if self.gap_adapter is not None and latest_assessment is not None and latest_assessment.gaps:
+                            updated_contract = self.gap_adapter.extend_contract_for_gap(contract, latest_assessment.gaps[0])
+                            run_state = replace(
+                                run_state,
+                                current_pool="tdd_ready",
+                                contract=replace(updated_contract, status="tdd_ready"),
+                                blocked_reason="specification checklist incomplete",
+                                gatekeeper_state=gatekeeper_state,
+                            )
+                            snapshot = self._save_run_state(snapshot, run_state)
+                            contract = updated_contract
+                            continue
+                        run_state = replace(
+                            run_state,
+                            current_pool="approved",
+                            contract=replace(contract, status="approved"),
+                            blocked_reason="specification checklist incomplete",
+                            gatekeeper_state=gatekeeper_state,
+                        )
+                        snapshot = self._save_run_state(snapshot, run_state)
+                        return self._result_from_run_state(run_state)
                     run_state = replace(
                         run_state,
                         current_pool="completed",
@@ -492,6 +533,7 @@ class BehaviorContractCoordinator:
                         repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
                         completed_requirement_refs=completed_refs,
                         blocked_reason=None,
+                        gatekeeper_state=run_state.gatekeeper_state,
                         cycles=self._replace_current_cycle(run_state.cycles, cycle),
                     )
                     snapshot = self._save_run_state(snapshot, run_state)
@@ -662,14 +704,21 @@ def _source_clause_prompt(*, project_id: str, requirement_text: str) -> str:
                     {
                         "ref": "string",
                         "text": "string",
-                        "kind": "string",
+                        "kind": "behavior|validation|invariant|constraint|quality",
+                        "evidence_kind": "test|mechanical|review",
                     }
                 ]
             },
             "rules": [
                 "one source obligation per clause",
                 "do not bundle unrelated behaviors into one clause",
-                "preserve happy-path, failure, query, and state-preservation obligations from the source text",
+                "preserve happy-path, failure, query, and state-preservation obligations",
+                "preserve constraint and quality obligations from the source text",
+                "kind must be one of behavior, validation, invariant, constraint, quality",
+                "evidence_kind must be one of test, mechanical, review",
+                "use test for executable behavior and validation obligations by default",
+                "use review for readability and unnecessary-abstraction obligations",
+                "use mechanical for deterministic environment or dependency constraints",
                 "do not include implementation details",
                 "do not invent requirements beyond reasonable decomposition of the supplied text",
                 "keep the clause set complete enough that every meaningful behavioral obligation from the source text is represented",
@@ -699,7 +748,8 @@ def _contract_prompt(
             {
                 "ref": "string",
                 "text": "string",
-                "kind": "string",
+                "kind": "behavior|validation|invariant|constraint|quality",
+                "evidence_kind": "test|mechanical|review",
             }
         ],
         "observable_requirements": [
