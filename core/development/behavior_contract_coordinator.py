@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 import subprocess
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -53,6 +55,18 @@ class BehaviorContractCoordinationResult:
 
 class ReviewMaterialProvider(Protocol):
     def render(self, contract: BehaviorContract, run_state: BehaviorContractRunState, cycle: ContractCycleRecord) -> str:
+        ...
+
+
+class TesterRepositoryMaterialProvider(Protocol):
+    """Supply bounded, revision-pinned repository facts for TDD planning."""
+
+    def render(
+        self,
+        contract: BehaviorContract,
+        run_state: BehaviorContractRunState,
+        revision: str | None = None,
+    ) -> dict[str, object]:
         ...
 
 
@@ -118,6 +132,67 @@ class GitReviewMaterialProvider:
             detail = (result.stderr or result.stdout).strip()
             raise ValueError(f"git {' '.join(args)} failed: {detail}")
         return result.stdout.strip()
+
+
+class GitTesterRepositoryMaterialProvider:
+    """Read only the contract-relevant files from the target repository."""
+
+    _MAX_FILE_CHARS = 16_000
+
+    def __init__(self, repository_root: str | Path):
+        self.repository_root = Path(repository_root)
+
+    def render(
+        self,
+        contract: BehaviorContract,
+        run_state: BehaviorContractRunState,
+        revision: str | None = None,
+    ) -> dict[str, object]:
+        selected_revision = revision or run_state.semantic_base_revision or run_state.repository_binding.base_sha
+        if selected_revision is None:
+            raise ValueError("repository context requires a trusted revision")
+        self._verify_revision(selected_revision)
+        files = self._git("ls-tree", "-r", "--name-only", selected_revision).splitlines()
+        production_files = [self._file_material(selected_revision, path) for path in contract.production_paths]
+        test_files = [self._file_material(selected_revision, path) for path in contract.test_paths]
+        return {
+            "repository_kind": "external_registered_repository",
+            "trusted_revision": selected_revision,
+            "files": files[:200],
+            "production_files": production_files,
+            "test_files": test_files,
+            "known_pytest_nodes": [node for material in test_files for node in material["pytest_nodes"]],
+            "all_contract_files_empty": all(
+                not str(material["content"]).strip() for material in [*production_files, *test_files]
+            ),
+        }
+
+    def _file_material(self, revision: str, path: str) -> dict[str, object]:
+        normalized_path = _repository_relative_path(path, label="repository context path")
+        content = self._git("show", f"{revision}:{normalized_path}")
+        return {
+            "path": normalized_path,
+            "module_name": _python_module_name(normalized_path),
+            "content": content[: self._MAX_FILE_CHARS],
+            "truncated": len(content) > self._MAX_FILE_CHARS,
+            "pytest_nodes": _pytest_nodes(normalized_path, content),
+        }
+
+    def _verify_revision(self, revision: str) -> None:
+        self._git("rev-parse", "--verify", f"{revision}^{{commit}}")
+
+    def _git(self, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=self.repository_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise ValueError(f"git {' '.join(args)} failed: {detail}")
+        return result.stdout
 
 
 class RequirementClausePlanner:
@@ -215,13 +290,23 @@ class BehaviorContractPlanner:
 class DynamicTddPlanner:
     """Use reasoning to choose the next smallest useful RED step within a contract."""
 
-    def __init__(self, gateway: ReasoningGateway):
+    def __init__(
+        self,
+        gateway: ReasoningGateway,
+        repository_material_provider: TesterRepositoryMaterialProvider | None = None,
+    ):
         self.gateway = gateway
+        self.repository_material_provider = repository_material_provider
 
     async def decide_next_step(self, contract: BehaviorContract, run_state: BehaviorContractRunState) -> TddStepDecision:
+        repository_material = _repository_material_for_run_state(
+            contract,
+            run_state,
+            provider=self.repository_material_provider,
+        )
         request = ReasoningRequest(
             purpose="athba_tdd_step_selection",
-            prompt=_step_prompt(contract=contract, run_state=run_state),
+            prompt=_step_prompt(contract=contract, run_state=run_state, repository_material=repository_material),
             project_id=contract.project_id,
             requires_large_context=False,
         )
@@ -238,6 +323,7 @@ class DynamicTddPlanner:
                     run_state=run_state,
                     invalid_step_text=result.text,
                     validation_error=str(error),
+                    repository_material=repository_material,
                 ),
                 project_id=contract.project_id,
                 requires_large_context=False,
@@ -281,6 +367,8 @@ class DynamicTddPlanner:
             raise ValueError("step proposal production path is outside the contract")
         if not _is_valid_pytest_node_for_path(proposal.test_name, proposal.test_path):
             raise ValueError("step proposal test name must be a pytest node id within the selected test path")
+        if run_state.repository_binding.registered_root is not None and _has_athba_internal_leakage(proposal):
+            raise ValueError("step proposal leaked ATHBA-internal module or path assumptions into an external repository")
         return decision
 
 
@@ -321,12 +409,17 @@ class SeniorReviewer:
 
 
 class ContractTesterWorkUnitFactory:
-    def build(self, contract: BehaviorContract, step: TddStepProposal) -> DevelopmentWorkUnit:
+    def build(
+        self,
+        contract: BehaviorContract,
+        step: TddStepProposal,
+        repository_material: dict[str, object] | None = None,
+    ) -> DevelopmentWorkUnit:
         return DevelopmentWorkUnit(
             id=red_work_unit_id(step.step_id),
             project_id=contract.project_id,
             parent_ticket_id=contract.id,
-            objective=_tester_objective(contract, step),
+            objective=_tester_objective(contract, step, repository_material),
             allowed_paths=[step.test_path],
             acceptance=AcceptanceContract(
                 commands=[["python3", "scripts/assert_test_fails.py", step.test_name, "expected failure"]],
@@ -337,12 +430,17 @@ class ContractTesterWorkUnitFactory:
 
 
 class ContractDeveloperWorkUnitFactory:
-    def build(self, contract: BehaviorContract, step: TddStepProposal) -> DevelopmentWorkUnit:
+    def build(
+        self,
+        contract: BehaviorContract,
+        step: TddStepProposal,
+        repository_material: dict[str, object] | None = None,
+    ) -> DevelopmentWorkUnit:
         return DevelopmentWorkUnit(
             id=green_work_unit_id(step.step_id),
             project_id=contract.project_id,
             parent_ticket_id=contract.id,
-            objective=_developer_objective(contract, step),
+            objective=_developer_objective(contract, step, repository_material),
             allowed_paths=[step.production_path],
             acceptance=AcceptanceContract(
                 commands=[["python3", "-m", "pytest", "-q", step.test_name], ["python3", "-m", "pytest", "-q", step.test_path]],
@@ -391,6 +489,7 @@ class BehaviorContractCoordinator:
         developer_factory: ContractDeveloperWorkUnitFactory | None = None,
         repair_factory: ContractRepairWorkUnitFactory | None = None,
         review_material_provider: ReviewMaterialProvider | None = None,
+        repository_material_provider: TesterRepositoryMaterialProvider | None = None,
         max_semantic_repairs: int = 2,
         gatekeeper: SpecificationGatekeeper | None = None,
         gap_adapter: SpecificationGapTddAdapter | None = None,
@@ -400,7 +499,11 @@ class BehaviorContractCoordinator:
         self.repository_binding = repository_binding
         self.state_repo = state_repo or TddStateRepo()
         self.contract_planner = contract_planner or BehaviorContractPlanner(reasoning_gateway)
-        self.step_planner = step_planner or DynamicTddPlanner(reasoning_gateway)
+        self.repository_material_provider = repository_material_provider or _default_tester_repository_material_provider(repository_binding)
+        self.step_planner = step_planner or DynamicTddPlanner(
+            reasoning_gateway,
+            repository_material_provider=self.repository_material_provider,
+        )
         self.reviewer = reviewer or SeniorReviewer(reasoning_gateway)
         self.tester_factory = tester_factory or ContractTesterWorkUnitFactory()
         self.developer_factory = developer_factory or ContractDeveloperWorkUnitFactory()
@@ -495,7 +598,11 @@ class BehaviorContractCoordinator:
                 if cycle.red_phase is not None and cycle.red_phase.accepted_revision is None:
                     red_outcome = await self._execute_phase(
                         phase=TddPhase.RED,
-                        work_unit=self.tester_factory.build(contract, cycle.step),
+                        work_unit=self.tester_factory.build(
+                            contract,
+                            cycle.step,
+                            self._repository_material(contract, run_state),
+                        ),
                         base_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
                     )
                     if not red_outcome.accepted:
@@ -525,7 +632,11 @@ class BehaviorContractCoordinator:
                     base_binding = run_state.repository_binding.with_base_sha(cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision)
                     green_outcome = await self._execute_phase(
                         phase=TddPhase.GREEN,
-                        work_unit=self.developer_factory.build(contract, cycle.step),
+                        work_unit=self.developer_factory.build(
+                            contract,
+                            cycle.step,
+                            self._repository_material(contract, run_state, cycle.red_phase.accepted_revision if cycle.red_phase else None),
+                        ),
                         base_binding=base_binding,
                     )
                     if not green_outcome.accepted:
@@ -646,6 +757,16 @@ class BehaviorContractCoordinator:
                 snapshot = self._save_run_state(snapshot, run_state)
                 continue
             raise ValueError(f"unsupported contract run pool: {run_state.current_pool}")
+
+    def _repository_material(
+        self,
+        contract: BehaviorContract,
+        run_state: BehaviorContractRunState,
+        revision: str | None = None,
+    ) -> dict[str, object] | None:
+        if self.repository_material_provider is None:
+            return None
+        return self.repository_material_provider.render(contract, run_state, revision)
 
     def _save_run_state(self, snapshot: TddSnapshot, run_state: BehaviorContractRunState) -> TddSnapshot:
         updated_snapshot = replace(
@@ -963,21 +1084,27 @@ def _contract_repair_prompt(
     )
 
 
-def _step_prompt(contract: BehaviorContract, run_state: BehaviorContractRunState) -> str:
+def _step_prompt(
+    contract: BehaviorContract,
+    run_state: BehaviorContractRunState,
+    repository_material: dict[str, object] | None,
+) -> str:
     prior_steps = [cycle.step.to_dict() for cycle in run_state.cycles]
     return json.dumps(
         {
             "instruction": "Act as ATHBA's Tester planner. Return one JSON object only.",
             "contract": contract.to_dict(),
+            "allowed_requirement_refs": contract.requirement_refs(),
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
             "prior_steps": prior_steps,
+            "repository_material": repository_material,
             "required_output": {
                 "status": "propose|complete",
                 "rationale": "string",
                 "proposal": {
                     "step_id": "string",
-                    "requirement_refs": ["exactly one contract ref"],
+                    "requirement_refs": ["copy exactly one value from allowed_requirement_refs"],
                     "focused_behavior": "one smallest useful missing observable behavior",
                     "test_name": "pytest node id",
                     "expected_result": "exact observable result",
@@ -1002,8 +1129,12 @@ def _step_prompt(contract: BehaviorContract, run_state: BehaviorContractRunState
                 "do not combine unrelated new behaviors into one proposal",
                 "do not include implementation details",
                 "do not leak worker, GPU, model, endpoint, or port data",
-                "proposal.requirement_refs must copy exactly one existing contract requirement ref",
+                "proposal.requirement_refs must copy exactly one value from allowed_requirement_refs",
                 "proposal.test_name must be a full pytest node id that starts with proposal.test_path followed by ::",
+                "use only modules and files visible in repository_material; this is an external repository, not ATHBA",
+                "derive imports from the supplied production material and do not invent ATHBA imports or paths",
+                "propose one new test node, not a claim that an existing node already exists",
+                "when repository_material.all_contract_files_empty is true, choose a bootstrap behavior that establishes the contract component or one minimal public API operation; do not start with a downstream validation that assumes prior state",
                 "never declare completion unless all requirement refs are already semantically approved in persisted state",
             ],
         },
@@ -1030,6 +1161,7 @@ def _is_recoverable_step_error(error: ValueError) -> bool:
         "step decision response was not valid JSON",
         "step proposal referenced a requirement outside the contract",
         "step proposal test name must be a pytest node id within the selected test path",
+        "step proposal leaked ATHBA-internal module or path assumptions into an external repository",
     }
 
 
@@ -1039,14 +1171,17 @@ def _step_repair_prompt(
     run_state: BehaviorContractRunState,
     invalid_step_text: str,
     validation_error: str,
+    repository_material: dict[str, object] | None,
 ) -> str:
     return json.dumps(
         {
             "instruction": "Repair the invalid ATHBA Tester step decision. Return raw JSON only.",
             "contract": contract.to_dict(),
+            "allowed_requirement_refs": contract.requirement_refs(),
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
             "prior_steps": [cycle.step.to_dict() for cycle in run_state.cycles],
+            "repository_material": repository_material,
             "invalid_step_decision": invalid_step_text,
             "validation_error": validation_error,
             "required_output": {
@@ -1054,7 +1189,7 @@ def _step_repair_prompt(
                 "rationale": "string",
                 "proposal": {
                     "step_id": "string",
-                    "requirement_refs": ["exactly one contract ref"],
+                    "requirement_refs": ["copy exactly one value from allowed_requirement_refs"],
                     "focused_behavior": "one smallest useful missing observable behavior",
                     "test_name": "full pytest node id beginning with test_path::",
                     "expected_result": "exact observable result",
@@ -1075,8 +1210,11 @@ def _step_repair_prompt(
                 "do not add commentary before or after the JSON",
             ],
             "repair_rules": [
-                "proposal.requirement_refs must copy exactly one existing contract requirement ref",
+                "proposal.requirement_refs must copy exactly one value from allowed_requirement_refs",
                 "proposal.test_name must be a full pytest node id that starts with proposal.test_path followed by ::",
+                "use only modules and files visible in repository_material; this is an external repository, not ATHBA",
+                "derive imports from supplied production material and do not invent ATHBA imports or paths",
+                "when repository_material.all_contract_files_empty is true, choose a bootstrap behavior that establishes the contract component or one minimal public API operation",
                 "do not change the contract paths",
                 "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
             ],
@@ -1088,7 +1226,55 @@ def _step_repair_prompt(
 
 def _is_valid_pytest_node_for_path(test_name: str, test_path: str) -> bool:
     prefix = f"{test_path}::"
-    return test_name.startswith(prefix)
+    function_name = test_name.removeprefix(prefix)
+    return test_name.startswith(prefix) and bool(re.fullmatch(r"test_[A-Za-z0-9_]+", function_name))
+
+
+def _has_athba_internal_leakage(proposal: TddStepProposal) -> bool:
+    text = json.dumps(proposal.to_dict(), sort_keys=True).lower()
+    return any(fragment in text for fragment in ("athba.", "import athba", "from athba", "/athba/"))
+
+
+def _empty_source_red_guidance(contract: BehaviorContract, repository_material: dict[str, object] | None) -> str:
+    if not repository_material or not repository_material.get("all_contract_files_empty"):
+        return ""
+    production_files = repository_material.get("production_files", [])
+    if not isinstance(production_files, list):
+        return ""
+    module_names = [
+        item.get("module_name")
+        for item in production_files
+        if isinstance(item, dict) and isinstance(item.get("module_name"), str)
+    ]
+    if not module_names:
+        return ""
+    module_name = module_names[0]
+    return (
+        f"Visible contract files are empty. Use `import {module_name}` at module scope and resolve "
+        f"`getattr({module_name}, {contract.component_name!r})` only inside the proposed test body. "
+        f"Do not use `from {module_name} import {contract.component_name}`, because a missing component must fail as a test failure rather than a collection error. "
+    )
+
+
+def _python_module_name(path: str) -> str | None:
+    normalized = _repository_relative_path(path, label="repository context path")
+    if not normalized.endswith(".py"):
+        return None
+    return normalized[:-3].replace("/", ".")
+
+
+def _pytest_nodes(path: str, content: str) -> list[str]:
+    if not path.endswith(".py"):
+        return []
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return []
+    return [
+        f"{path}::{node.name}"
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")
+    ]
 
 
 def _review_prompt(
@@ -1131,7 +1317,11 @@ def _review_prompt(
     )
 
 
-def _tester_objective(contract: BehaviorContract, step: TddStepProposal) -> str:
+def _tester_objective(
+    contract: BehaviorContract,
+    step: TddStepProposal,
+    repository_material: dict[str, object] | None,
+) -> str:
     return (
         "Act in ATHBA's Tester role during RED. "
         f"Work only within {step.test_path}. Preserve accepted tests. Add exactly one focused new pytest test named {step.test_name}. "
@@ -1139,18 +1329,29 @@ def _tester_objective(contract: BehaviorContract, step: TddStepProposal) -> str:
         f"Requirement refs: {', '.join(step.requirement_refs)}. "
         "Do not edit production code. Do not try to make the test pass. "
         "Do not add helper functions, fixtures, comments, or docstrings unless strictly required. "
-        f"Contract component: {contract.component_name}. RED objective: {step.red_objective}"
+        "This target is a standalone external repository, not ATHBA. Use only modules and files visible in the supplied repository material. "
+        "Do not import ATHBA internals unless they are explicitly present in that material. "
+        "The proposed pytest node must be created exactly. Keep imports collection-safe: when a visible module lacks the target API, import the module and access the missing API inside the test so RED fails during test execution, not collection. "
+        f"{_empty_source_red_guidance(contract, repository_material)}"
+        f"Contract component: {contract.component_name}. RED objective: {step.red_objective}. "
+        f"Repository material: {json.dumps(repository_material, sort_keys=True)}"
     )
 
 
-def _developer_objective(contract: BehaviorContract, step: TddStepProposal) -> str:
+def _developer_objective(
+    contract: BehaviorContract,
+    step: TddStepProposal,
+    repository_material: dict[str, object] | None,
+) -> str:
     return (
         "Act in ATHBA's Developer role during GREEN. "
         f"Work only within {step.production_path}. Do not edit tests. The focused failing test is {step.test_name}. "
         f"Implement only enough code for this behavior: {step.focused_behavior}. Expected observable result: {step.expected_result}. "
         f"Requirement refs: {', '.join(step.requirement_refs)}. Preserve prior accepted behavior and keep the design small, direct, and readable. "
         "Do not introduce speculative abstractions, dead code, dead imports, noisy comments, or unrelated features. "
-        f"Contract component: {contract.component_name}. GREEN objective: {step.green_objective}"
+        "This target is a standalone external repository, not ATHBA. Use only modules and files visible in the supplied repository material. "
+        f"Contract component: {contract.component_name}. GREEN objective: {step.green_objective}. "
+        f"Repository material: {json.dumps(repository_material, sort_keys=True)}"
     )
 
 
@@ -1177,6 +1378,26 @@ def _default_review_material_provider(repository_binding: RepositoryBinding) -> 
     if repository_binding.registered_root is None:
         return None
     return GitReviewMaterialProvider(repository_binding.registered_root)
+
+
+def _default_tester_repository_material_provider(
+    repository_binding: RepositoryBinding,
+) -> TesterRepositoryMaterialProvider | None:
+    if repository_binding.registered_root is None:
+        return None
+    return GitTesterRepositoryMaterialProvider(repository_binding.registered_root)
+
+
+def _repository_material_for_run_state(
+    contract: BehaviorContract,
+    run_state: BehaviorContractRunState,
+    *,
+    provider: TesterRepositoryMaterialProvider | None,
+) -> dict[str, object] | None:
+    resolved_provider = provider or _default_tester_repository_material_provider(run_state.repository_binding)
+    if resolved_provider is None:
+        return None
+    return resolved_provider.render(contract, run_state)
 
 
 def _ordered_completed_requirement_refs(contract: BehaviorContract, completed_requirement_refs: list[str]) -> list[str]:

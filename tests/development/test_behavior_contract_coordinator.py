@@ -13,6 +13,7 @@ from core.development.behavior_contract_coordinator import (
     ContractTesterWorkUnitFactory,
     DynamicTddPlanner,
     GitReviewMaterialProvider,
+    GitTesterRepositoryMaterialProvider,
     RequirementClausePlanner,
     SeniorReviewer,
 )
@@ -629,6 +630,100 @@ async def test_tester_can_propose_one_next_focused_tdd_step_from_contract():
     assert decision.status == "propose"
     assert decision.proposal == step
     assert "Tester planner" in gateway.requests[0].prompt
+    assert '"allowed_requirement_refs": [' in gateway.requests[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_tester_planner_receives_bounded_external_repository_material(tmp_path: Path):
+    repo_root, base_revision, _ = create_review_repo(tmp_path)
+    step = proposal()
+    gateway = FakeReasoningGateway([
+        {
+            "status": "propose",
+            "rationale": "RB-1 is the smallest useful missing behavior.",
+            "proposal": step.to_dict(),
+            "completed_requirement_refs": [],
+        }
+    ])
+
+    decision = await DynamicTddPlanner(gateway).decide_next_step(
+        contract(),
+        run_state(semantic_base_revision=base_revision, registered_root=repo_root),
+    )
+
+    assert decision.proposal == step
+    prompt = json.loads(gateway.requests[0].prompt)
+    material = prompt["repository_material"]
+    assert material["repository_kind"] == "external_registered_repository"
+    assert material["trusted_revision"] == base_revision
+    assert material["production_files"][0]["path"] == "reservation_book.py"
+    assert material["production_files"][0]["module_name"] == "reservation_book"
+    assert "class ReservationBook" in material["production_files"][0]["content"]
+    assert material["known_pytest_nodes"] == ["tests/test_reservation_book.py::test_add_resource_sets_availability"]
+    assert "do not invent ATHBA imports or paths" in gateway.requests[0].prompt
+
+
+def test_tester_work_unit_receives_external_repository_context_without_athba_assumptions(tmp_path: Path):
+    repo_root, base_revision, _ = create_review_repo(tmp_path)
+    state = run_state(semantic_base_revision=base_revision, registered_root=repo_root)
+    material = GitTesterRepositoryMaterialProvider(repo_root).render(contract(), state)
+
+    work_unit = ContractTesterWorkUnitFactory().build(contract(), proposal(), material)
+
+    assert "standalone external repository, not ATHBA" in work_unit.objective
+    assert "Do not import ATHBA internals" in work_unit.objective
+    assert '"module_name": "reservation_book"' in work_unit.objective
+    assert "collection-safe" in work_unit.objective
+
+
+def test_empty_external_source_uses_collection_safe_module_access_in_red_objective():
+    material = {
+        "all_contract_files_empty": True,
+        "production_files": [{"module_name": "reservation_book", "content": ""}],
+    }
+
+    work_unit = ContractTesterWorkUnitFactory().build(contract(), proposal(), material)
+
+    assert "import reservation_book" in work_unit.objective
+    assert "getattr(reservation_book, 'ReservationBook')" in work_unit.objective
+    assert "Do not use `from reservation_book import ReservationBook`" in work_unit.objective
+
+
+@pytest.mark.asyncio
+async def test_step_planner_repairs_non_pytest_function_name():
+    invalid_step = proposal().to_dict()
+    invalid_step["test_name"] = "tests/test_reservation_book.py::resource_is_added"
+    repaired_step = proposal().to_dict()
+    gateway = FakeReasoningGateway([
+        {"status": "propose", "rationale": "bad node", "proposal": invalid_step, "completed_requirement_refs": []},
+        {"status": "propose", "rationale": "fixed node", "proposal": repaired_step, "completed_requirement_refs": []},
+    ])
+
+    decision = await DynamicTddPlanner(gateway).decide_next_step(contract(), run_state())
+
+    assert decision.proposal == proposal()
+    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
+    assert "pytest node id" in gateway.requests[1].prompt
+
+
+@pytest.mark.asyncio
+async def test_step_planner_repairs_athba_internal_leakage_for_external_repository(tmp_path: Path):
+    repo_root, base_revision, _ = create_review_repo(tmp_path)
+    invalid_step = proposal().to_dict()
+    invalid_step["red_objective"] = "Import ReservationBook from athba.models."
+    gateway = FakeReasoningGateway([
+        {"status": "propose", "rationale": "bad import", "proposal": invalid_step, "completed_requirement_refs": []},
+        {"status": "propose", "rationale": "fixed import", "proposal": proposal().to_dict(), "completed_requirement_refs": []},
+    ])
+
+    decision = await DynamicTddPlanner(gateway).decide_next_step(
+        contract(),
+        run_state(semantic_base_revision=base_revision, registered_root=repo_root),
+    )
+
+    assert decision.proposal == proposal()
+    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
+    assert "ATHBA-internal" in gateway.requests[1].prompt
 
 @pytest.mark.asyncio
 async def test_step_planner_repairs_fenced_json_and_short_test_name():
@@ -1619,3 +1714,44 @@ async def test_provider_reasoning_gateway_uses_provider_neutral_adapter():
     assert result.model == "local-reasoner"
     assert provider.calls[0]["model"] == "local-reasoner"
     assert provider.calls[0]["max_tokens"] == 123
+
+
+@pytest.mark.asyncio
+async def test_rejected_red_is_persisted_and_cannot_become_green_base():
+    step = proposal()
+    reasoner = FakeReasoningGateway([
+        {
+            "status": "propose",
+            "rationale": "Start with RB-1.",
+            "proposal": step.to_dict(),
+            "completed_requirement_refs": [],
+        }
+    ])
+    red_result = WorkUnitExecutionResult(
+        work_unit_id=step.step_id + "--red",
+        accepted=False,
+        status="checks_failed",
+        change_id="red-collection-failure",
+        evidence_location="/srv/rack-ai/state/changes/red-collection-failure/review-packet.json",
+        error="expected failure was not trustworthy: ERROR collecting test module",
+    )
+    execution = FakeExecutionGateway({step.step_id + "--red": red_result})
+    state_repo = MemoryStateRepo()
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=execution,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=state_repo,
+    ).run_contract(contract())
+
+    saved_cycle = state_repo.snapshot.contract_runs[contract().id].cycles[0]
+    assert result.current_pool == "replan_ready"
+    assert [call[0] for call in execution.calls] == [step.step_id + "--red"]
+    assert saved_cycle.red_phase is not None
+    assert saved_cycle.red_phase.status == "checks_failed"
+    assert saved_cycle.red_phase.change_id == "red-collection-failure"
+    assert saved_cycle.red_phase.evidence_location.endswith("review-packet.json")
+    assert saved_cycle.green_phase is not None
+    assert saved_cycle.green_phase.accepted_revision is None
+    assert saved_cycle.green_phase.base_sha is None
