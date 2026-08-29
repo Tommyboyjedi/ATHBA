@@ -77,3 +77,31 @@ PR19 does not:
 PR19 is complete when ATHBA can create one clean generated project, establish and persist its development environment, make that project available to Rack AI through a supported generic boundary, execute a minimal generic work-unit smoke, and then reuse the same project/environment identity without manual cross-repository intervention.
 
 After PR19 is complete, PR17 should resume and rerun the full architectural requirement -> Gatekeeper checklist + independent Behavior Planner -> TDD -> Senior Review -> test reconciliation proof.
+
+
+## Implemented ATHBA lifecycle
+
+`ProjectEnvironmentService` creates and persists generated projects below
+`state/projects/<project-id>/repository`. A project records its repository root,
+default ref, trusted base SHA, runtime descriptor, ATHBA runtime location, test
+command, generated paths, and lifecycle state (`created`, `prepared`, `ready`,
+or `retired`).
+
+For the current Python proof profile ATHBA supplies Python 3.14 and pytest from
+its owned runtime. Readiness deterministically verifies the Git repository,
+trusted revision, runtime executable, and `pytest --version`. Reloading the
+same project id returns the persisted ready project; it does not recreate the
+repository or runtime. Retirement is bounded to roots below ATHBA's project
+root.
+
+The resulting `RepositoryBinding` contains only generic repository identity,
+root, ref, and revision. Runtime details remain in ATHBA and are not added to
+Rack AI request fields.
+
+## PR28 integration dependency
+
+PR19 deliberately does not prescribe a Rack AI repository-registration
+mechanism. The live bounded-execution smoke remains blocked until Rack AI PR28
+provides its supported trusted dynamic-workspace interface. ATHBA will then use
+that generic interface without modifying Rack AI configuration or encoding
+language/framework meaning in Rack AI.
