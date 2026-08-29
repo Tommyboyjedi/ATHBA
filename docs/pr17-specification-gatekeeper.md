@@ -267,3 +267,43 @@ executable test result. The retained evidence packet is:
 `/srv/rack-ai/state/changes/athba-pr17-live-proof--BR-001-STEP-1--red/review-packet.json`
 
 This is not a Gatekeeper PASS claim. PR17 still needs a Rack AI Python 3.14 test
+
+
+## Repository-aware Tester checkpoint (2026-08-29)
+
+ATHBA now passes bounded, revision-pinned target-repository material to the
+dynamic Tester and RED/GREEN work-unit objectives: relevant source and test
+paths/content, module names, existing pytest nodes, the trusted revision and
+the active requirement reference. External repositories are explicitly kept
+free of ATHBA import/path assumptions. For an empty implementation, RED
+guidance requires module-level imports and API lookup inside the test body so a
+missing API fails during test execution rather than collection.
+
+The Gatekeeper can now select one traceable executable checklist gap and persist
+its supplemental `GK-*` requirement as the only active Tester target. A
+semantically approved targeted cycle re-assesses that checklist item; it may
+leave the component `approved` with further checklist debt, or become
+`completed` only if the whole checklist is proven. An untraceable executable
+checklist item fails closed instead of silently falling back to an unrelated
+ordinary requirement.
+
+### Real local attempt
+
+The fixture was clean at
+`f45f32cc847ce2c531c6847ff2276a6256f637ad`. Local `local-primary` produced a
+17-item component checklist and a repository-aware Tester proposal. The RED
+proposal used collection-safe access to the empty `reservation_book` module and
+the intended test executed with the expected `AttributeError` for the missing
+`ReservationBook` API.
+
+Rack AI rejected the RED before accepting a revision:
+
+- change id: `athba-pr17-targeted-live-proof--test_duplicate_resource_id--red`
+- evidence: `/srv/rack-ai/state/changes/athba-pr17-targeted-live-proof--test_duplicate_resource_id--red/review-packet.json`
+- status: `path_policy_failed`
+- reason: pytest generated `__pycache__/` and `tests/__pycache__/`, which Rack
+  AI treated as changed paths outside the allowed test path.
+
+ATHBA persisted the rejected RED and did not start GREEN. This is a Rack AI
+path-policy/runtime concern. ATHBA did not modify Rack AI and the live proof is
+blocked until the Rack AI worker resolves that external execution defect.

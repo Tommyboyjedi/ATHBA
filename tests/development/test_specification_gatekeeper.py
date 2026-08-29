@@ -768,3 +768,45 @@ async def test_coordinator_can_reenter_tdd_lane_for_targeted_gap():
     assert any(item.ref == "GK-SPEC-1-1" for item in saved_run.contract.observable_requirements)
     assert any(call[0] == red_work_unit_id("gap-step-1") for call in execution_gateway.calls)
     assert any(call[0] == green_work_unit_id("gap-step-1") for call in execution_gateway.calls)
+
+
+@pytest.mark.asyncio
+async def test_untraceable_executable_gap_blocks_before_ordinary_tdd():
+    gateway = FakeReasoningGateway([
+        {
+            "items": [
+                {
+                    "ref": "SPEC-UNTRACEABLE",
+                    "text": "An invented broad obligation.",
+                    "kind": "validation",
+                    "evidence_kind": "test",
+                }
+            ]
+        }
+    ])
+    execution_gateway = FakeExecutionGateway({})
+    coordinator = BehaviorContractCoordinator(
+        execution_gateway=execution_gateway,
+        reasoning_gateway=gateway,
+        repository_binding=binding("a" * 40),
+        state_repo=MemoryStateRepo(),
+        step_planner=SequenceStepPlanner([]),
+        reviewer=StubReviewer(
+            SemanticReviewResult(
+                verdict="approved",
+                rationale="unused",
+                findings=[],
+                candidate_revision="a" * 40,
+                step_id="unused",
+            )
+        ),
+        review_material_provider=StaticReviewMaterialProvider("unused"),
+        gatekeeper=SpecificationGatekeeper(gateway),
+        gap_adapter=SpecificationGapTddAdapter(),
+    )
+
+    result = await coordinator.run_contract(contract())
+
+    assert result.current_pool == "replan_ready"
+    assert result.blocked_reason == "specification checklist has no traceable executable gap"
+    assert execution_gateway.calls == []

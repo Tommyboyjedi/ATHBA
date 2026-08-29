@@ -1,5 +1,6 @@
 import json
 import subprocess
+from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from core.development.behavior_contract_coordinator import (
     GitTesterRepositoryMaterialProvider,
     RequirementClausePlanner,
     SeniorReviewer,
+    _first_executable_gap,
 )
 from core.development.tdd_progression import (
     BehaviorContract,
@@ -1755,3 +1757,44 @@ async def test_rejected_red_is_persisted_and_cannot_become_green_base():
     assert saved_cycle.green_phase is not None
     assert saved_cycle.green_phase.accepted_revision is None
     assert saved_cycle.green_phase.base_sha is None
+
+
+@pytest.mark.asyncio
+async def test_targeted_requirement_limits_planner_and_persists_across_resume():
+    target_state = replace(
+        run_state(),
+        targeted_requirement_ref="RB-2",
+        targeted_checklist_ref="SPEC-2",
+    )
+    invalid = proposal("RB-1").to_dict()
+    repaired = proposal("RB-2").to_dict()
+    gateway = FakeReasoningGateway([
+        {"status": "propose", "rationale": "wrong target", "proposal": invalid, "completed_requirement_refs": []},
+        {"status": "propose", "rationale": "targeted repair", "proposal": repaired, "completed_requirement_refs": []},
+    ])
+
+    decision = await DynamicTddPlanner(gateway).decide_next_step(contract(), target_state)
+    restored = BehaviorContractRunState.from_dict(target_state.to_dict())
+
+    assert decision.proposal == proposal("RB-2")
+    assert json.loads(gateway.requests[0].prompt)["allowed_requirement_refs"] == ["RB-2"]
+    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
+    assert restored.targeted_requirement_ref == "RB-2"
+    assert restored.targeted_checklist_ref == "SPEC-2"
+    assert restored.active_requirement_refs() == ["RB-2"]
+
+
+def test_targeted_gap_selection_skips_untraceable_checklist_item():
+    untraceable = SimpleNamespace(checklist_ref="SPEC-UNTRACEABLE", obligation_text="Broad invented item")
+    traceable = SimpleNamespace(checklist_ref="SRC-2", obligation_text="A resource capacity must be a positive integer.")
+    gatekeeper_state = SimpleNamespace(
+        checklist=SimpleNamespace(
+            items=[
+                SimpleNamespace(ref="SPEC-UNTRACEABLE", evidence_kind="test"),
+                SimpleNamespace(ref="SRC-2", evidence_kind="test"),
+            ]
+        ),
+        latest_assessment=SimpleNamespace(gaps=[untraceable, traceable]),
+    )
+
+    assert _first_executable_gap(contract(), gatekeeper_state) is traceable

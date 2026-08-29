@@ -337,7 +337,7 @@ class DynamicTddPlanner:
         run_state: BehaviorContractRunState,
         decision: TddStepDecision,
     ) -> TddStepDecision:
-        requirement_refs = contract.requirement_refs()
+        requirement_refs = run_state.active_requirement_refs()
         requirement_ref_set = set(requirement_refs)
         approved_ref_set = set(run_state.completed_requirement_refs)
         claimed_ref_set = set(decision.completed_requirement_refs)
@@ -535,6 +535,39 @@ class BehaviorContractCoordinator:
             if run_state.current_pool == "replan_ready":
                 return self._result_from_run_state(run_state)
             if run_state.current_pool in {"tdd_ready", "approved"}:
+                if (
+                    run_state.current_pool == "tdd_ready"
+                    and run_state.targeted_requirement_ref is None
+                    and self.gatekeeper is not None
+                    and self.gap_adapter is not None
+                ):
+                    gatekeeper_state = await self.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
+                    gatekeeper_state = await self.gatekeeper.assess(contract, run_state, gatekeeper_state)
+                    gap = _first_executable_gap(contract, gatekeeper_state)
+                    if gap is not None:
+                        updated_contract = self.gap_adapter.extend_contract_for_gap(contract, gap)
+                        targeted_requirement = _targeted_requirement_for_gap(updated_contract, gap)
+                        run_state = replace(
+                            run_state,
+                            contract=updated_contract,
+                            gatekeeper_state=gatekeeper_state,
+                            targeted_requirement_ref=targeted_requirement.ref,
+                            targeted_checklist_ref=gap.checklist_ref,
+                            blocked_reason="targeted specification gap selected",
+                        )
+                        snapshot = self._save_run_state(snapshot, run_state)
+                        contract = updated_contract
+                        continue
+                    if _has_untraceable_executable_gap(gatekeeper_state):
+                        run_state = replace(
+                            run_state,
+                            current_pool="replan_ready",
+                            contract=replace(contract, status="replan_ready"),
+                            gatekeeper_state=gatekeeper_state,
+                            blocked_reason="specification checklist has no traceable executable gap",
+                        )
+                        snapshot = self._save_run_state(snapshot, run_state)
+                        return self._result_from_run_state(run_state)
                 decision = await self.step_planner.decide_next_step(contract, run_state)
                 if decision.status == "complete":
                     if self.gatekeeper is not None:
@@ -680,6 +713,38 @@ class BehaviorContractCoordinator:
                 if review.verdict == "approved":
                     completed_refs = sorted(set(run_state.completed_requirement_refs).union(cycle.step.requirement_refs))
                     cycle = replace(cycle, semantic_revision=cycle.candidate_revision, pool="approved")
+                    approved_run_state = replace(
+                        run_state,
+                        current_pool="approved",
+                        contract=replace(contract, status="approved"),
+                        semantic_base_revision=cycle.candidate_revision,
+                        repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
+                        completed_requirement_refs=completed_refs,
+                        blocked_reason=None,
+                        cycles=self._replace_current_cycle(run_state.cycles, cycle),
+                    )
+                    if approved_run_state.targeted_checklist_ref is not None and self.gatekeeper is not None:
+                        gatekeeper_state = await self.gatekeeper.assess(
+                            contract,
+                            approved_run_state,
+                            approved_run_state.gatekeeper_state or await self.gatekeeper.ensure_state(contract, None),
+                        )
+                        target_assessment = _checklist_assessment(gatekeeper_state, approved_run_state.targeted_checklist_ref)
+                        target_proven = target_assessment is not None and target_assessment.status == "proven"
+                        checklist_complete = gatekeeper_state.is_complete()
+                        run_state = replace(
+                            approved_run_state,
+                            current_pool="completed" if checklist_complete else ("approved" if target_proven else "replan_ready"),
+                            contract=replace(contract, status="completed") if checklist_complete else approved_run_state.contract,
+                            blocked_reason=(
+                                None
+                                if checklist_complete
+                                else ("additional specification checklist items remain unproven" if target_proven else "targeted specification gap remains unproven")
+                            ),
+                            gatekeeper_state=gatekeeper_state,
+                        )
+                        snapshot = self._save_run_state(snapshot, run_state)
+                        return self._result_from_run_state(run_state)
                     run_state = replace(
                         run_state,
                         current_pool="approved",
@@ -1094,7 +1159,7 @@ def _step_prompt(
         {
             "instruction": "Act as ATHBA's Tester planner. Return one JSON object only.",
             "contract": contract.to_dict(),
-            "allowed_requirement_refs": contract.requirement_refs(),
+            "allowed_requirement_refs": run_state.active_requirement_refs(),
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
             "prior_steps": prior_steps,
@@ -1177,7 +1242,7 @@ def _step_repair_prompt(
         {
             "instruction": "Repair the invalid ATHBA Tester step decision. Return raw JSON only.",
             "contract": contract.to_dict(),
-            "allowed_requirement_refs": contract.requirement_refs(),
+            "allowed_requirement_refs": run_state.active_requirement_refs(),
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
             "prior_steps": [cycle.step.to_dict() for cycle in run_state.cycles],
@@ -1398,6 +1463,43 @@ def _repository_material_for_run_state(
     if resolved_provider is None:
         return None
     return resolved_provider.render(contract, run_state)
+
+
+def _first_executable_gap(contract: BehaviorContract, gatekeeper_state):
+    if gatekeeper_state.latest_assessment is None:
+        return None
+    source_by_ref = {clause.ref: clause for clause in contract.source_clauses}
+    evidence_kinds = {item.ref: item.evidence_kind for item in gatekeeper_state.checklist.items}
+    for gap in gatekeeper_state.latest_assessment.gaps:
+        if evidence_kinds.get(gap.checklist_ref) != "test":
+            continue
+        if gap.checklist_ref in source_by_ref:
+            return gap
+        normalized_gap = " ".join(gap.obligation_text.lower().split())
+        if any(" ".join(clause.text.lower().split()) == normalized_gap for clause in contract.source_clauses):
+            return gap
+    return None
+
+
+def _has_untraceable_executable_gap(gatekeeper_state) -> bool:
+    if gatekeeper_state.latest_assessment is None:
+        return False
+    evidence_kinds = {item.ref: item.evidence_kind for item in gatekeeper_state.checklist.items}
+    return any(evidence_kinds.get(gap.checklist_ref) == "test" for gap in gatekeeper_state.latest_assessment.gaps)
+
+
+def _targeted_requirement_for_gap(contract: BehaviorContract, gap):
+    prefix = f"GK-{gap.checklist_ref}-"
+    return next(requirement for requirement in contract.observable_requirements if requirement.ref.startswith(prefix))
+
+
+def _checklist_assessment(gatekeeper_state, checklist_ref: str):
+    if gatekeeper_state.latest_assessment is None:
+        return None
+    return next(
+        (assessment for assessment in gatekeeper_state.latest_assessment.item_assessments if assessment.checklist_ref == checklist_ref),
+        None,
+    )
 
 
 def _ordered_completed_requirement_refs(contract: BehaviorContract, completed_requirement_refs: list[str]) -> list[str]:

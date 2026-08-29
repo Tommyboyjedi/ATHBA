@@ -831,6 +831,8 @@ class BehaviorContractRunState:
     cycles: list[ContractCycleRecord] = field(default_factory=list)
     blocked_reason: str | None = None
     gatekeeper_state: SpecificationGatekeeperRunState | None = None
+    targeted_requirement_ref: str | None = None
+    targeted_checklist_ref: str | None = None
 
     def __post_init__(self) -> None:
         if self.current_pool not in CONTRACT_POOL_STATUSES:
@@ -839,10 +841,21 @@ class BehaviorContractRunState:
         unknown = set(self.completed_requirement_refs) - set(self.contract.requirement_refs())
         if unknown:
             raise ValueError(f"completed requirement refs not in contract: {sorted(unknown)}")
+        if self.targeted_requirement_ref is not None:
+            _require_text(self.targeted_requirement_ref, "targeted requirement ref")
+            if self.targeted_requirement_ref not in self.contract.requirement_refs():
+                raise ValueError("targeted requirement ref must be in contract")
+        if self.targeted_checklist_ref is not None:
+            _require_text(self.targeted_checklist_ref, "targeted checklist ref")
         if self.blocked_reason is not None:
             _require_text(self.blocked_reason, "blocked reason")
         if self.gatekeeper_state is not None and self.gatekeeper_state.checklist.project_id != self.contract.project_id:
             raise ValueError("gatekeeper checklist project id must match the contract project id")
+
+    def active_requirement_refs(self) -> list[str]:
+        if self.targeted_requirement_ref is not None:
+            return [self.targeted_requirement_ref]
+        return self.contract.requirement_refs()
 
     def current_cycle(self) -> ContractCycleRecord | None:
         return self.cycles[-1] if self.cycles else None
@@ -862,6 +875,8 @@ class BehaviorContractRunState:
             "cycles": [cycle.to_dict() for cycle in self.cycles],
             "blocked_reason": self.blocked_reason,
             "gatekeeper_state": None if self.gatekeeper_state is None else self.gatekeeper_state.to_dict(),
+            "targeted_requirement_ref": self.targeted_requirement_ref,
+            "targeted_checklist_ref": self.targeted_checklist_ref,
         }
 
     @classmethod
@@ -881,6 +896,8 @@ class BehaviorContractRunState:
             cycles=[ContractCycleRecord.from_dict(dict(item)) for item in payload.get("cycles", [])],
             blocked_reason=payload.get("blocked_reason"),
             gatekeeper_state=None if payload.get("gatekeeper_state") is None else SpecificationGatekeeperRunState.from_dict(dict(payload["gatekeeper_state"])),
+            targeted_requirement_ref=payload.get("targeted_requirement_ref"),
+            targeted_checklist_ref=payload.get("targeted_checklist_ref"),
         )
 
 
