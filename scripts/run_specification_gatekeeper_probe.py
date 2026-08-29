@@ -65,14 +65,11 @@ def default_output_path() -> Path:
 def structural_summary(items: list[dict[str, object]]) -> dict[str, object]:
     refs = [str(item["ref"]) for item in items]
     valid_kinds = {"behavior", "validation", "invariant", "constraint", "quality"}
-    valid_evidence_kinds = {"test", "mechanical", "review"}
     return {
         "item_count": len(items),
         "duplicate_refs": sorted({ref for ref in refs if refs.count(ref) > 1}),
         "invalid_kinds": sorted({str(item["kind"]) for item in items if item["kind"] not in valid_kinds}),
-        "invalid_evidence_kinds": sorted(
-            {str(item["evidence_kind"]) for item in items if item["evidence_kind"] not in valid_evidence_kinds}
-        ),
+        "invalid_evidence_kinds": [],
     }
 
 
@@ -142,10 +139,10 @@ async def run_probe() -> dict[str, object]:
         print(f"STRICT_PARSE: {run['strict_parse']}")
         if "error" in run:
             print(f"PARSE_ERROR: {run['error']}")
-        print("REF | KIND | EVIDENCE | TEXT")
+        print("REF | KIND | TEXT")
         display_items = run["items"] or run.get("raw_items", [])
         for item in display_items:
-            print(f"{item['ref']} | {item['kind']} | {item['evidence_kind']} | {item['text']}")
+            print(f"{item['ref']} | {item['kind']} | {item['text']}")
         print(f"STRUCTURAL: {json.dumps(run['structural'], sort_keys=True)}")
 
     return {

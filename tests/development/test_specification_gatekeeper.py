@@ -19,6 +19,7 @@ from core.development.tdd_progression import (
     SemanticReviewResult,
     SourceRequirementClause,
     SpecificationChecklist,
+    SpecificationChecklistItem,
     SpecificationGap,
     SpecificationGatekeeperRunState,
     TddPhase,
@@ -258,11 +259,10 @@ async def test_valid_component_requirement_can_produce_checklist():
     checklist = await planner.create_checklist(project_id="reservation-book", requirement_text=requirement_text())
 
     assert checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
-    assert checklist.items[0] == SourceRequirementClause(
+    assert checklist.items[0] == SpecificationChecklistItem(
         ref="SPEC-1",
         text="A resource has a unique id.",
         kind="validation",
-        evidence_kind="test",
     )
 
 
@@ -273,7 +273,7 @@ async def test_malformed_or_invalid_checklist_output_fails_closed():
         await planner.create_checklist(project_id="reservation-book", requirement_text=requirement_text())
 
     bad_kind = SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [{"ref": "SPEC-1", "text": "x", "kind": "string"}]}]))
-    with pytest.raises(ValueError, match="unsupported source clause kind"):
+    with pytest.raises(ValueError, match="unsupported checklist item kind"):
         await bad_kind.create_checklist(project_id="reservation-book", requirement_text=requirement_text())
 
 
@@ -402,7 +402,7 @@ async def test_gatekeeper_preserves_multiple_independent_obligation_classes():
     )
 
     assert {item.kind for item in checklist.items} == {"validation", "quality"}
-    assert {item.evidence_kind for item in checklist.items} == {"test", "review"}
+    assert all("evidence_kind" not in item.to_dict() for item in checklist.items)
 
 
 @pytest.mark.asyncio

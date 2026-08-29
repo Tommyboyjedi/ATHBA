@@ -1790,8 +1790,8 @@ def test_targeted_gap_selection_skips_untraceable_checklist_item():
     gatekeeper_state = SimpleNamespace(
         checklist=SimpleNamespace(
             items=[
-                SimpleNamespace(ref="SPEC-UNTRACEABLE", evidence_kind="test"),
-                SimpleNamespace(ref="SRC-2", evidence_kind="test"),
+                SimpleNamespace(ref="SPEC-UNTRACEABLE", kind="validation"),
+                SimpleNamespace(ref="SRC-2", kind="validation"),
             ]
         ),
         latest_assessment=SimpleNamespace(gaps=[untraceable, traceable]),

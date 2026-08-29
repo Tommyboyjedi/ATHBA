@@ -189,10 +189,32 @@ class SourceRequirementClause:
 
 
 @dataclass(frozen=True)
+class SpecificationChecklistItem:
+    """One atomic source-specification fact, independent of proof strategy."""
+
+    ref: str
+    text: str
+    kind: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.ref, "checklist item ref")
+        _require_text(self.text, "checklist item text")
+        if self.kind not in CHECKLIST_ITEM_KINDS:
+            raise ValueError(f"unsupported checklist item kind: {self.kind}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"ref": self.ref, "text": self.text, "kind": self.kind}
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "SpecificationChecklistItem":
+        return cls(ref=str(payload["ref"]), text=str(payload["text"]), kind=str(payload["kind"]))
+
+
+@dataclass(frozen=True)
 class SpecificationChecklist:
     project_id: str
     requirement_text: str
-    items: list[SourceRequirementClause]
+    items: list[SpecificationChecklistItem]
 
     def __post_init__(self) -> None:
         _require_text(self.project_id, "checklist project id")
@@ -219,7 +241,7 @@ class SpecificationChecklist:
         return cls(
             project_id=str(payload["project_id"]),
             requirement_text=str(payload["requirement_text"]),
-            items=[SourceRequirementClause.from_dict(dict(item)) for item in items],
+            items=[SpecificationChecklistItem.from_dict(dict(item)) for item in items],
         )
 
 

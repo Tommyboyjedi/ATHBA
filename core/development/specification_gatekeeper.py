@@ -12,6 +12,7 @@ from core.development.tdd_progression import (
     GatekeeperAssessmentRecord,
     SourceRequirementClause,
     SpecificationChecklist,
+    SpecificationChecklistItem,
     SpecificationGap,
     SpecificationGatekeeperRunState,
 )
@@ -39,7 +40,7 @@ class SpecificationChecklistPlanner:
         return SpecificationChecklist(
             project_id=project_id,
             requirement_text=requirement_text,
-            items=[SourceRequirementClause.from_dict(dict(item)) for item in raw_items],
+            items=[SpecificationChecklistItem.from_dict(dict(item)) for item in raw_items],
         )
 
 
@@ -117,11 +118,12 @@ class SpecificationGatekeeper:
 
     async def _assess_item(
         self,
-        item: SourceRequirementClause,
+        item: SpecificationChecklistItem,
         contract: BehaviorContract,
         run_state: BehaviorContractRunState,
     ) -> ChecklistItemAssessment:
-        if item.evidence_kind == "review":
+        evidence_kind = _assessment_evidence_kind(item)
+        if evidence_kind == "review":
             evidence = self._approved_review_candidates(contract, run_state, item.ref)
             if evidence:
                 return ChecklistItemAssessment(
@@ -136,7 +138,7 @@ class SpecificationGatekeeper:
                 rationale="No semantically approved review evidence was available for this quality obligation.",
                 evidence=[],
             )
-        if item.evidence_kind == "mechanical":
+        if evidence_kind == "mechanical":
             return ChecklistItemAssessment(
                 checklist_ref=item.ref,
                 status="uncertain",
@@ -204,7 +206,7 @@ class SpecificationGatekeeper:
         requirements = {requirement.ref: requirement for requirement in contract.observable_requirements}
         item = next((entry for entry in run_state.gatekeeper_state.checklist.items if entry.ref == checklist_ref), None) if run_state.gatekeeper_state is not None else None
         if item is None:
-            item = SourceRequirementClause(ref=checklist_ref, text=checklist_ref, kind="behavior")
+            item = SpecificationChecklistItem(ref=checklist_ref, text=checklist_ref, kind="behavior")
         matching_source_refs = _matching_contract_source_refs_for_clause(contract, item)
         if not matching_source_refs:
             return []
@@ -241,7 +243,7 @@ class SpecificationGatekeeper:
         requirements = {requirement.ref: requirement for requirement in contract.observable_requirements}
         item = next((entry for entry in run_state.gatekeeper_state.checklist.items if entry.ref == checklist_ref), None) if run_state.gatekeeper_state is not None else None
         if item is None:
-            item = SourceRequirementClause(ref=checklist_ref, text=checklist_ref, kind="behavior")
+            item = SpecificationChecklistItem(ref=checklist_ref, text=checklist_ref, kind="behavior")
         matching_source_refs = _matching_contract_source_refs_for_clause(contract, item)
         if not matching_source_refs:
             return []
@@ -296,7 +298,7 @@ def _matching_contract_source_refs_for_gap(contract: BehaviorContract, gap: Spec
     raise ValueError(f"unable to trace specification gap to contract source clauses: {gap.checklist_ref}")
 
 
-def _matching_contract_source_refs_for_clause(contract: BehaviorContract, item: SourceRequirementClause) -> set[str]:
+def _matching_contract_source_refs_for_clause(contract: BehaviorContract, item: SpecificationChecklistItem) -> set[str]:
     direct_match = {clause.ref for clause in contract.source_clauses if clause.ref == item.ref}
     if direct_match:
         return direct_match
@@ -347,7 +349,6 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
                         "ref": "string",
                         "text": "string",
                         "kind": "behavior|validation|invariant|constraint|quality",
-                        "evidence_kind": "test|mechanical|review",
                     }
                 ]
             },
@@ -361,10 +362,7 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
                 "do not invent unrelated requirements",
                 "do not merge distinct behaviors simply because they appear in the same sentence",
                 "kind must be one of behavior, validation, invariant, constraint, quality",
-                "evidence_kind must be one of test, mechanical, review",
-                "use test for executable behavior and validation obligations by default",
-                "use review for readability and unnecessary-abstraction obligations",
-                "use mechanical for deterministic environment and dependency constraints",
+                "return specification facts only; do not select tests, reviews, mechanical checks, or any proof method",
                 "do not include worker ids, model ids, GPU ids, endpoints, or ports",
             ],
         },
@@ -373,7 +371,15 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
     )
 
 
-def _evidence_mapping_prompt(*, item: SourceRequirementClause, candidates: list[ChecklistEvidence]) -> str:
+def _assessment_evidence_kind(item: SpecificationChecklistItem) -> str:
+    if item.kind == "quality":
+        return "review"
+    if item.kind == "constraint":
+        return "mechanical"
+    return "test"
+
+
+def _evidence_mapping_prompt(*, item: SpecificationChecklistItem, candidates: list[ChecklistEvidence]) -> str:
     return json.dumps(
         {
             "instruction": "Act as ATHBA's Specification Gatekeeper evidence mapper. Return raw JSON only.",

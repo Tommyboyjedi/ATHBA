@@ -1469,9 +1469,9 @@ def _first_executable_gap(contract: BehaviorContract, gatekeeper_state):
     if gatekeeper_state.latest_assessment is None:
         return None
     source_by_ref = {clause.ref: clause for clause in contract.source_clauses}
-    evidence_kinds = {item.ref: item.evidence_kind for item in gatekeeper_state.checklist.items}
+    item_kinds = {item.ref: item.kind for item in gatekeeper_state.checklist.items}
     for gap in gatekeeper_state.latest_assessment.gaps:
-        if evidence_kinds.get(gap.checklist_ref) != "test":
+        if item_kinds.get(gap.checklist_ref) not in {"behavior", "validation", "invariant"}:
             continue
         if gap.checklist_ref in source_by_ref:
             return gap
@@ -1484,8 +1484,8 @@ def _first_executable_gap(contract: BehaviorContract, gatekeeper_state):
 def _has_untraceable_executable_gap(gatekeeper_state) -> bool:
     if gatekeeper_state.latest_assessment is None:
         return False
-    evidence_kinds = {item.ref: item.evidence_kind for item in gatekeeper_state.checklist.items}
-    return any(evidence_kinds.get(gap.checklist_ref) == "test" for gap in gatekeeper_state.latest_assessment.gaps)
+    item_kinds = {item.ref: item.kind for item in gatekeeper_state.checklist.items}
+    return any(item_kinds.get(gap.checklist_ref) in {"behavior", "validation", "invariant"} for gap in gatekeeper_state.latest_assessment.gaps)
 
 
 def _targeted_requirement_for_gap(contract: BehaviorContract, gap):
