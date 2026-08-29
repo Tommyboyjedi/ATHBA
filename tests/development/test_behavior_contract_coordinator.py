@@ -1,0 +1,837 @@
+import json
+from dataclasses import replace
+
+import pytest
+
+from core.development.behavior_contract_coordinator import (
+    BehaviorContractCoordinator,
+    BehaviorContractPlanner,
+    ContractDeveloperWorkUnitFactory,
+    ContractRepairWorkUnitFactory,
+    ContractTesterWorkUnitFactory,
+    DynamicTddPlanner,
+    SeniorReviewer,
+)
+from core.development.tdd_progression import (
+    BehaviorContract,
+    BehaviorContractRequirement,
+    BehaviorContractRunState,
+    ContractCycleRecord,
+    SemanticReviewResult,
+    TddPhase,
+    TddPhaseState,
+    TddSnapshot,
+    TddStepProposal,
+)
+from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
+from core.execution.rack_ai_contract import RepositoryBinding, find_forbidden_resource_selection_keys, to_rack_ai_request
+from core.execution.reasoning_gateway import ReasoningRequest, ReasoningResult
+from core.execution.work_unit_gateway import WorkUnitExecutionResult
+from core.llm.contracts.provider import NormalizedResult, Provider
+
+
+class FakeReasoningGateway:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.requests = []
+
+    async def reason(self, request: ReasoningRequest) -> ReasoningResult:
+        self.requests.append(request)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        if isinstance(response, dict):
+            return ReasoningResult(text=json.dumps(response), provider="fake", model="fake-model")
+        return ReasoningResult(text=response, provider="fake", model="fake-model")
+
+
+class FakeExecutionGateway:
+    def __init__(self, results):
+        self.results = dict(results)
+        self.calls = []
+
+    async def execute(self, work_unit, repository_binding):
+        self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective))
+        return self.results[work_unit.id]
+
+
+class MemoryStateRepo:
+    def __init__(self, snapshot=None):
+        self.snapshot = snapshot
+        self.saved = []
+
+    def load(self, project_id: str):
+        return self.snapshot
+
+    def save(self, snapshot: TddSnapshot):
+        self.snapshot = snapshot
+        self.saved.append(snapshot)
+        return snapshot
+
+
+class StaticReviewMaterialProvider:
+    def __init__(self, text: str):
+        self.text = text
+
+    def render(self, contract, run_state, cycle):
+        return self.text
+
+
+class StubProvider(Provider):
+    def __init__(self):
+        self.calls = []
+
+    def invoke(self, prompt: str, *, model: str, temperature: float = 0.0, max_tokens: int = 16, response_schema=None):
+        self.calls.append({
+            "prompt": prompt,
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "response_schema": response_schema,
+        })
+        return NormalizedResult(
+            text="{\"ok\": true}",
+            usage={"input_tokens": 1, "output_tokens": 1},
+            raw={"provider": "stub", "model": model},
+        )
+
+
+def binding(base_sha="a" * 40):
+    return RepositoryBinding(repository_id="reservation-book-fixture", base_ref="main", base_sha=base_sha)
+
+
+def contract_payload():
+    return {
+        "id": "contract-reservation-book",
+        "project_id": "reservation-book",
+        "component_name": "ReservationBook",
+        "capability": "Manage in-memory reservations for resources.",
+        "requirement_source": "Build a small in-memory ReservationBook for reservable resources.",
+        "observable_requirements": [
+            {
+                "ref": "RB-1",
+                "summary": "Add a resource with a unique id and capacity.",
+                "observable_outcome": "add_resource stores a new resource and availability reflects full capacity.",
+                "test_hint": "test_add_resource_sets_availability",
+                "error_expectation": "duplicate resource ids raise ValueError",
+                "preserves_state_on_failure": True,
+            },
+            {
+                "ref": "RB-2",
+                "summary": "Create a reservation on a known resource.",
+                "observable_outcome": "reserve stores the reservation and decreases availability.",
+                "test_hint": "test_reserve_reduces_capacity",
+                "error_expectation": "unknown resources and over-capacity reservations raise ValueError",
+                "preserves_state_on_failure": True,
+            },
+        ],
+        "invariants": [
+            "resource ids are unique",
+            "reservation ids are unique",
+            "failed operations do not corrupt state",
+        ],
+        "production_paths": ["reservation_book.py"],
+        "test_paths": ["tests/test_reservation_book.py"],
+        "public_api": [
+            "add_resource(resource_id: str, capacity: int)",
+            "reserve(reservation_id: str, resource_id: str, quantity: int)",
+            "cancel(reservation_id: str)",
+            "available(resource_id: str)",
+        ],
+        "error_semantics": ["invalid operations raise ValueError"],
+        "non_goals": ["no persistence", "no concurrency", "no external dependencies"],
+        "completion_criteria": ["all observable requirements are covered by accepted tests and semantically approved code"],
+        "status": "tdd_ready",
+    }
+
+
+def contract() -> BehaviorContract:
+    return BehaviorContract.from_dict(contract_payload())
+
+
+def proposal(requirement_ref="RB-1", *, step_id="step-1"):
+    return TddStepProposal(
+        step_id=step_id,
+        requirement_refs=[requirement_ref],
+        focused_behavior="Adding a new resource reports the full remaining capacity.",
+        test_name="tests/test_reservation_book.py::test_add_resource_sets_availability",
+        expected_result="available('room-a') returns 5 after adding room-a with capacity 5.",
+        test_path="tests/test_reservation_book.py",
+        production_path="reservation_book.py",
+        red_objective="Add one failing pytest test proving add_resource stores capacity and exposes availability.",
+        green_objective="Implement only enough ReservationBook code to store a resource and report availability.",
+        reason_next_smallest="This establishes the base state every later reservation behavior depends on.",
+    )
+
+
+def accepted(work_unit_id: str, revision: str):
+    return WorkUnitExecutionResult(
+        work_unit_id=work_unit_id,
+        accepted=True,
+        status="checks_passed",
+        accepted_revision=revision,
+        change_id=f"change-{work_unit_id}",
+        evidence_location=f"/tmp/{work_unit_id}.json",
+    )
+
+
+def rejected(work_unit_id: str, *, error="acceptance failed", status="checks_failed"):
+    return WorkUnitExecutionResult(
+        work_unit_id=work_unit_id,
+        accepted=False,
+        status=status,
+        change_id=f"change-{work_unit_id}",
+        error=error,
+    )
+
+
+def run_state(current_pool="tdd_ready", completed_requirement_refs=None, cycles=None, semantic_base_revision="a" * 40):
+    return BehaviorContractRunState(
+        contract=contract(),
+        repository_binding=binding(semantic_base_revision),
+        semantic_base_revision=semantic_base_revision,
+        current_pool=current_pool,
+        completed_requirement_refs=completed_requirement_refs or [],
+        cycles=cycles or [],
+    )
+
+
+@pytest.mark.asyncio
+async def test_valid_component_requirement_becomes_valid_behavior_contract():
+    gateway = FakeReasoningGateway([contract_payload()])
+    planner = BehaviorContractPlanner(gateway)
+
+    result = await planner.create_contract(
+        project_id="reservation-book",
+        requirement_text="Build a small in-memory ReservationBook for reservable resources.",
+    )
+
+    assert result.component_name == "ReservationBook"
+    assert result.requirement_refs() == ["RB-1", "RB-2"]
+    assert find_forbidden_resource_selection_keys(result.to_dict()) == []
+
+
+@pytest.mark.asyncio
+async def test_malformed_contract_input_fails_closed():
+    gateway = FakeReasoningGateway(["not json"])
+    planner = BehaviorContractPlanner(gateway)
+
+    with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
+        await planner.create_contract(project_id="reservation-book", requirement_text="broken")
+
+
+def test_contract_requirement_refs_are_retained_through_round_trip():
+    restored = BehaviorContract.from_dict(contract().to_dict())
+
+    assert restored.requirement_refs() == ["RB-1", "RB-2"]
+
+
+def test_no_worker_model_or_gpu_fields_leak_into_contract_or_tdd_requests():
+    step = proposal()
+    red_request = to_rack_ai_request("reservation-book", binding(), ContractTesterWorkUnitFactory().build(contract(), step))
+    green_request = to_rack_ai_request("reservation-book", binding(), ContractDeveloperWorkUnitFactory().build(contract(), step))
+
+    assert find_forbidden_resource_selection_keys(contract().to_dict()) == []
+    assert find_forbidden_resource_selection_keys(red_request) == []
+    assert find_forbidden_resource_selection_keys(green_request) == []
+
+
+@pytest.mark.asyncio
+async def test_tester_can_propose_one_next_focused_tdd_step_from_contract():
+    step = proposal()
+    gateway = FakeReasoningGateway([
+        {
+            "status": "propose",
+            "rationale": "RB-1 is the smallest useful missing behavior.",
+            "proposal": step.to_dict(),
+            "completed_requirement_refs": [],
+        }
+    ])
+    planner = DynamicTddPlanner(gateway)
+
+    decision = await planner.decide_next_step(contract(), run_state())
+
+    assert decision.status == "propose"
+    assert decision.proposal == step
+    assert "Tester planner" in gateway.requests[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_step_proposal_cannot_include_multiple_unrelated_behaviors():
+    multi = proposal()
+    multi = replace(multi, requirement_refs=["RB-1", "RB-2"])
+    gateway = FakeReasoningGateway([
+        {
+            "status": "propose",
+            "rationale": "Do two things at once.",
+            "proposal": multi.to_dict(),
+            "completed_requirement_refs": [],
+        }
+    ])
+
+    with pytest.raises(ValueError, match="exactly one requirement ref"):
+        await DynamicTddPlanner(gateway).decide_next_step(contract(), run_state())
+
+
+@pytest.mark.asyncio
+async def test_already_covered_requirements_are_not_selected_again():
+    repeated = proposal("RB-1")
+    gateway = FakeReasoningGateway([
+        {
+            "status": "propose",
+            "rationale": "Repeat RB-1.",
+            "proposal": repeated.to_dict(),
+            "completed_requirement_refs": [],
+        }
+    ])
+
+    with pytest.raises(ValueError, match="already semantically covered"):
+        await DynamicTddPlanner(gateway).decide_next_step(contract(), run_state(completed_requirement_refs=["RB-1"]))
+
+
+@pytest.mark.asyncio
+async def test_tester_can_recognize_contract_completion_without_hard_coded_step_count():
+    gateway = FakeReasoningGateway([
+        {
+            "status": "complete",
+            "rationale": "All contract requirements are already semantically covered.",
+            "proposal": None,
+            "completed_requirement_refs": ["RB-1", "RB-2"],
+        }
+    ])
+
+    decision = await DynamicTddPlanner(gateway).decide_next_step(
+        contract(),
+        run_state(completed_requirement_refs=["RB-1", "RB-2"]),
+    )
+
+    assert decision.status == "complete"
+
+
+@pytest.mark.asyncio
+async def test_green_cannot_begin_before_accepted_red():
+    step = proposal()
+    reasoner = FakeReasoningGateway([
+        {
+            "status": "propose",
+            "rationale": "Start with RB-1.",
+            "proposal": step.to_dict(),
+            "completed_requirement_refs": [],
+        }
+    ])
+    gateway = FakeExecutionGateway({step.step_id + "--red": rejected(step.step_id + "--red")})
+    repo = MemoryStateRepo()
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    assert [call[0] for call in gateway.calls] == [step.step_id + "--red"]
+    assert result.current_pool == "replan_ready"
+
+
+@pytest.mark.asyncio
+async def test_mechanically_accepted_green_is_persisted_as_review_ready_before_review_progresses():
+    step = proposal()
+    reasoner = FakeReasoningGateway([
+        {
+            "status": "propose",
+            "rationale": "Start with RB-1.",
+            "proposal": step.to_dict(),
+            "completed_requirement_refs": [],
+        },
+        {
+            "verdict": "approved",
+            "rationale": "Looks good.",
+            "findings": ["minimal implementation"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:1"],
+            "repair_instructions": [],
+        },
+        {
+            "status": "complete",
+            "rationale": "Proof finished.",
+            "proposal": None,
+            "completed_requirement_refs": ["RB-1", "RB-2"],
+        },
+    ])
+    gateway = FakeExecutionGateway(
+        {
+            step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+            step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+        }
+    )
+    repo = MemoryStateRepo()
+
+    await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    pools = [snap.contract_runs[contract().id].current_pool for snap in repo.saved if contract().id in snap.contract_runs]
+    assert "review_ready" in pools
+
+
+@pytest.mark.asyncio
+async def test_next_tdd_cycle_cannot_start_before_semantic_approval():
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="b" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_passed", accepted_revision="c" * 40),
+        candidate_revision="c" * 40,
+        pool="review_ready",
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("b" * 40),
+        current_trusted_revision="b" * 40,
+        contract_runs={contract().id: run_state(current_pool="review_ready", cycles=[cycle], semantic_base_revision="b" * 40)},
+    )
+    reasoner = FakeReasoningGateway([
+        {
+            "verdict": "approved",
+            "rationale": "Looks good.",
+            "findings": ["minimal implementation"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:1"],
+            "repair_instructions": [],
+        },
+        {
+            "status": "complete",
+            "rationale": "Done.",
+            "proposal": None,
+            "completed_requirement_refs": ["RB-1", "RB-2"],
+        },
+    ])
+    gateway = FakeExecutionGateway({})
+
+    await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert gateway.calls == []
+    assert reasoner.requests[0].purpose == "athba_senior_review"
+
+
+@pytest.mark.asyncio
+async def test_approved_review_promotes_candidate_revision_to_semantic_base():
+    step = proposal()
+    reasoner = FakeReasoningGateway([
+        {"status": "propose", "rationale": "Start.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+        {
+            "verdict": "approved",
+            "rationale": "Looks good.",
+            "findings": ["minimal implementation"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:1"],
+            "repair_instructions": [],
+        },
+        {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": ["RB-1", "RB-2"]},
+    ])
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert result.semantic_revision == "c" * 40
+
+
+@pytest.mark.asyncio
+async def test_repair_required_moves_to_repair_ready():
+    step = proposal()
+    reasoner = FakeReasoningGateway([
+        {"status": "propose", "rationale": "Start.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+        {
+            "verdict": "repair_required",
+            "rationale": "Remove a noisy comment.",
+            "findings": ["comment is noisy"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:1"],
+            "repair_instructions": ["Remove the noisy comment and keep behavior unchanged."],
+        },
+    ])
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+    repo = MemoryStateRepo()
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert result.current_pool in {"repair_ready", "replan_ready"}
+    assert "repair_ready" in [snap.contract_runs[contract().id].current_pool for snap in repo.saved if contract().id in snap.contract_runs]
+
+
+@pytest.mark.asyncio
+async def test_repair_result_returns_to_review_ready_before_final_approval():
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="b" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_passed", accepted_revision="c" * 40),
+        candidate_revision="c" * 40,
+        pool="repair_ready",
+        review_result=SemanticReviewResult(
+            verdict="repair_required",
+            rationale="Remove a noisy comment.",
+            findings=["comment is noisy"],
+            candidate_revision="c" * 40,
+            step_id=step.step_id,
+            evidence_refs=["review:1"],
+            repair_instructions=["Remove the noisy comment and keep behavior unchanged."],
+        ),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("b" * 40),
+        current_trusted_revision="b" * 40,
+        contract_runs={contract().id: run_state(current_pool="repair_ready", cycles=[cycle], semantic_base_revision="b" * 40)},
+    )
+    reasoner = FakeReasoningGateway([
+        {
+            "verdict": "approved",
+            "rationale": "Repair is clean.",
+            "findings": ["comment removed"],
+            "candidate_revision": "d" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:2"],
+            "repair_instructions": [],
+        },
+        {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": ["RB-1", "RB-2"]},
+    ])
+    gateway = FakeExecutionGateway({step.step_id + "--repair-1": accepted(step.step_id + "--repair-1", "d" * 40)})
+    repo = MemoryStateRepo(snapshot)
+
+    await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    pools = [snap.contract_runs[contract().id].current_pool for snap in repo.saved if contract().id in snap.contract_runs]
+    assert "review_ready" in pools
+    assert gateway.calls[0][0] == step.step_id + "--repair-1"
+
+
+@pytest.mark.asyncio
+async def test_repair_attempts_are_bounded():
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="b" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_passed", accepted_revision="c" * 40),
+        candidate_revision="c" * 40,
+        pool="review_ready",
+        repair_attempts=2,
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("b" * 40),
+        current_trusted_revision="b" * 40,
+        contract_runs={contract().id: run_state(current_pool="review_ready", cycles=[cycle], semantic_base_revision="b" * 40)},
+    )
+    reasoner = FakeReasoningGateway([
+        {
+            "verdict": "repair_required",
+            "rationale": "Still noisy.",
+            "findings": ["comment remains"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:3"],
+            "repair_instructions": ["Remove the comment."],
+        }
+    ])
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({}),
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert result.current_pool == "replan_ready"
+    assert result.blocked_reason == "semantic repair budget exhausted"
+
+
+@pytest.mark.asyncio
+async def test_replan_required_moves_to_replan_ready_and_stops_lane():
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="b" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_passed", accepted_revision="c" * 40),
+        candidate_revision="c" * 40,
+        pool="review_ready",
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("b" * 40),
+        current_trusted_revision="b" * 40,
+        contract_runs={contract().id: run_state(current_pool="review_ready", cycles=[cycle], semantic_base_revision="b" * 40)},
+    )
+    reasoner = FakeReasoningGateway([
+        {
+            "verdict": "replan_required",
+            "rationale": "The contract missed a state invariant.",
+            "findings": ["state invariant missing"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:4"],
+            "repair_instructions": [],
+        }
+    ])
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({}),
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert result.current_pool == "replan_ready"
+    assert result.blocked_reason == "The contract missed a state invariant."
+
+
+@pytest.mark.asyncio
+async def test_semantically_rejected_candidate_never_becomes_next_cycle_base():
+    step = proposal()
+    reasoner = FakeReasoningGateway([
+        {"status": "propose", "rationale": "Start.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+        {
+            "verdict": "repair_required",
+            "rationale": "Need cleanup.",
+            "findings": ["cleanup"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:1"],
+            "repair_instructions": ["Clean up comments."],
+        },
+    ])
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert result.semantic_revision == "a" * 40
+
+
+def test_pool_state_transitions_persist_in_snapshot_round_trip():
+    cycle = replace(
+        ContractCycleRecord.from_step(proposal(), base_revision="a" * 40),
+        pool="review_ready",
+        candidate_revision="c" * 40,
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract().id: run_state(current_pool="review_ready", cycles=[cycle]),
+        },
+    )
+
+    restored = TddSnapshot.from_dict(snapshot.to_dict())
+
+    assert restored.contract_runs[contract().id].current_pool == "review_ready"
+    assert restored.contract_runs[contract().id].cycles[0].candidate_revision == "c" * 40
+
+
+@pytest.mark.asyncio
+async def test_resume_can_continue_from_review_ready_without_rerunning_green():
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="b" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_passed", accepted_revision="c" * 40),
+        candidate_revision="c" * 40,
+        pool="review_ready",
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("b" * 40),
+        current_trusted_revision="b" * 40,
+        contract_runs={contract().id: run_state(current_pool="review_ready", cycles=[cycle], semantic_base_revision="b" * 40)},
+    )
+    gateway = FakeExecutionGateway({})
+    reasoner = FakeReasoningGateway([
+        {
+            "verdict": "approved",
+            "rationale": "Looks good.",
+            "findings": ["minimal implementation"],
+            "candidate_revision": "c" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:1"],
+            "repair_instructions": [],
+        },
+        {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": ["RB-1", "RB-2"]},
+    ])
+
+    await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_resume_can_continue_from_repair_ready():
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="b" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_passed", accepted_revision="c" * 40),
+        candidate_revision="c" * 40,
+        pool="repair_ready",
+        review_result=SemanticReviewResult(
+            verdict="repair_required",
+            rationale="Cleanup.",
+            findings=["cleanup"],
+            candidate_revision="c" * 40,
+            step_id=step.step_id,
+            evidence_refs=["review:1"],
+            repair_instructions=["Remove comment noise."],
+        ),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("b" * 40),
+        current_trusted_revision="b" * 40,
+        contract_runs={contract().id: run_state(current_pool="repair_ready", cycles=[cycle], semantic_base_revision="b" * 40)},
+    )
+    gateway = FakeExecutionGateway({step.step_id + "--repair-1": accepted(step.step_id + "--repair-1", "d" * 40)})
+    reasoner = FakeReasoningGateway([
+        {
+            "verdict": "approved",
+            "rationale": "Clean now.",
+            "findings": ["clean"],
+            "candidate_revision": "d" * 40,
+            "step_id": step.step_id,
+            "evidence_refs": ["review:2"],
+            "repair_instructions": [],
+        },
+        {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": ["RB-1", "RB-2"]},
+    ])
+
+    await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract())
+
+    assert gateway.calls[0][0] == step.step_id + "--repair-1"
+
+
+@pytest.mark.asyncio
+async def test_completed_contract_is_not_rerun():
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("d" * 40),
+        current_trusted_revision="d" * 40,
+        contract_runs={
+            contract().id: run_state(
+                current_pool="completed",
+                completed_requirement_refs=["RB-1", "RB-2"],
+                semantic_base_revision="d" * 40,
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({})
+    reasoner = FakeReasoningGateway([])
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=reasoner,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+    ).run_contract(contract())
+
+    assert result.current_pool == "completed"
+    assert gateway.calls == []
+    assert reasoner.requests == []
+
+
+def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
+    step = proposal()
+    red = ContractTesterWorkUnitFactory().build(contract(), step)
+    green = ContractDeveloperWorkUnitFactory().build(contract(), step)
+    repair = ContractRepairWorkUnitFactory().build(
+        contract(),
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        SemanticReviewResult(
+            verdict="repair_required",
+            rationale="cleanup",
+            findings=["cleanup"],
+            candidate_revision="c" * 40,
+            step_id=step.step_id,
+            evidence_refs=["review:1"],
+            repair_instructions=["Remove the noisy comment."],
+        ),
+    )
+
+    assert red.allowed_paths == ["tests/test_reservation_book.py"]
+    assert green.allowed_paths == ["reservation_book.py"]
+    assert repair.allowed_paths == ["reservation_book.py"]
+    assert "Act in ATHBA's Tester role during RED" in red.objective
+    assert "Do not edit tests" in green.objective
+    assert "Reviewer instructions" in repair.objective
+
+
+@pytest.mark.asyncio
+async def test_provider_reasoning_gateway_uses_provider_neutral_adapter():
+    provider = StubProvider()
+    gateway = ProviderReasoningGateway(provider=provider, model="local-reasoner", max_tokens=123)
+
+    result = await gateway.reason(ReasoningRequest(purpose="athba_test", prompt="hello", project_id="p1"))
+
+    assert result.text == '{"ok": true}'
+    assert result.provider == "stub"
+    assert result.model == "local-reasoner"
+    assert provider.calls[0]["model"] == "local-reasoner"
+    assert provider.calls[0]["max_tokens"] == 123
