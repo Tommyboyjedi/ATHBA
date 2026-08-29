@@ -113,6 +113,19 @@ class ProjectEnvironmentService:
         self.repo.save(project)
         return project
 
+    def record_trusted_revision(self, project_id: str, revision: str) -> DevelopmentProject:
+        """Persist an accepted executor revision before project retirement."""
+        if not isinstance(revision, str) or not revision.strip():
+            raise ValueError("trusted revision must be non-empty")
+        project = self._required(project_id)
+        if project.status != "ready":
+            raise ValueError("only ready projects can record a trusted revision")
+        root = Path(project.repository_root)
+        self._git(root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+        updated = replace(project, trusted_base_sha=revision)
+        self.repo.save(updated)
+        return updated
+
     def retire(self, project_id: str, *, remove_workspace: bool = False) -> DevelopmentProject:
         project = self._required(project_id)
         if remove_workspace:

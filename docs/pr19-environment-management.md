@@ -121,9 +121,29 @@ PR28 dynamic projects use generic `repository.id`, `repository.root`,
 `base_ref`, and `base_sha` in the existing change request. No runtime,
 framework, or application semantics are sent to Rack AI.
 
-Live proof is currently deployment-blocked: the host Rack AI checkout is
-`f85b9a9` on `codex/python-pytest-runtime`, and its
-`config/repositories.json` has no `trusted_dynamic_roots` entry for
-`/srv/ATHBA/state/projects`. ATHBA did not modify that configuration. Deploy
-PR28 and have an administrator authorize that stable parent root before the
-generic dynamic-root smoke can run.
+## Live environment proof
+
+The earlier deployment prerequisite was resolved externally. At the time of
+this proof the deployed Rack AI checkout was `f425063` on
+`pr28-trusted-dynamic-workspaces`, and its administrator-owned configuration
+authorized `/srv/ATHBA/state/projects` as a trusted dynamic parent root.
+
+On 2026-08-29 ATHBA created
+`pr19-live-proof-20260829T210153Z` through `ProjectEnvironmentService` and
+submitted one generic, path-bounded marker-file work unit through
+`RackAiCliExecutionGateway`. Rack AI returned `checks_passed` for
+`pr19-environment-proof--create-marker`; its required-artifact and exact
+content acceptance command both passed.
+
+ATHBA persisted the returned accepted revision in `project.json`, reloaded the
+same ready project identity, then retired its disposable repository. The
+shared `/srv/ATHBA/.venv/bin/python` Python 3.14 runtime remained available.
+The ATHBA-owned evidence record is
+`state/projects/pr19-live-proof-20260829T210153Z/live-proof.json`.
+
+Rack AI's retained review packet records the marker as an uncommitted worktree
+change and reports the seed SHA as its accepted revision. ATHBA preserves that
+returned result verbatim and does not infer that the marker is contained in the
+revision. Revision materialization and evidence authority remain Rack AI's
+responsibility; this PR neither modifies Rack AI nor introduces a cross-repo
+workaround.

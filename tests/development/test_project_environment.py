@@ -1,4 +1,5 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,25 @@ def test_project_persists_reloads_and_reuses_runtime(tmp_path):
     assert first.workspace_lifetime == "disposable"
     assert (tmp_path / "projects" / "proof-one" / "project.json").exists()
     assert (tmp_path / "projects" / "proof-one" / "repository" / ".git").exists()
+
+
+def test_accepted_executor_revision_is_persisted(tmp_path):
+    project = service(tmp_path).create_or_load_python_project("accepted-revision")
+    root = Path(project.repository_root)
+    (root / "marker.txt").write_text("accepted\\n", encoding="utf-8")
+
+    subprocess.run(["git", "add", "marker.txt"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "accepted revision"],
+        cwd=root,
+        check=True,
+    )
+    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+    updated = service(tmp_path).record_trusted_revision(project.project_id, revision)
+
+    assert updated.trusted_base_sha == revision
+    assert service(tmp_path).create_or_load_python_project(project.project_id).trusted_base_sha == revision
 
 
 def test_invalid_or_missing_state_fails_closed(tmp_path):
