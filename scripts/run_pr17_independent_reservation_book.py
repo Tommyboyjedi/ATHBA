@@ -95,7 +95,7 @@ async def main() -> None:
     seed_sha, source_files = create_target(target)
     model = os.environ.get("ATHBA_REASONING_MODEL", "local-primary")
     gateway = RecordingGateway(
-        ProviderReasoningGateway(OpenAIProvider(timeout=90, max_retries=0), model=model, max_tokens=4096)
+        ProviderReasoningGateway(OpenAIProvider(timeout=300, max_retries=1), model=model, max_tokens=4096)
     )
     project_id = args.run_id
     evidence: dict[str, object] = {

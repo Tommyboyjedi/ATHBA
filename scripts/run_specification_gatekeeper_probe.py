@@ -89,7 +89,7 @@ def raw_items(raw_output: str | None) -> list[dict[str, object]]:
 async def run_probe() -> dict[str, object]:
     model = os.environ.get("ATHBA_REASONING_MODEL", "local-primary")
     live_gateway = ProviderReasoningGateway(
-        provider=OpenAIProvider(timeout=90, max_retries=0),
+        provider=OpenAIProvider(timeout=300, max_retries=1),
         model=model,
         max_tokens=4096,
     )
