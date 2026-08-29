@@ -147,3 +147,17 @@ returned result verbatim and does not infer that the marker is contained in the
 revision. Revision materialization and evidence authority remain Rack AI's
 responsibility; this PR neither modifies Rack AI nor introduces a cross-repo
 workaround.
+
+## Corrected accepted-revision proof
+
+After Rack AI PR28's accepted-revision materialization fix was deployed at
+`83d27086`, ATHBA reran the proof on 2026-08-29 using
+`pr19-live-proof-20260829T214439Z`. The seed SHA was
+`2ce16d8d37e49342ca486d6e6a42a61d9d217a25`; Rack AI accepted the distinct
+commit `abd529b5d0d28732ae153b116575dc33a7efe954`.
+
+The runner now fails closed unless the returned SHA differs from the seed,
+resolves as a Git commit, and contains `athba_pr19_marker.txt` with the exact
+accepted content. It records those checks in the ATHBA-owned evidence file
+before persisting and reloading the trusted revision, then retiring the
+disposable workspace. The shared Python 3.14 runtime remains intact.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,35 @@ from core.execution.rack_ai_contract import to_rack_ai_request
 PROJECTS_ROOT = Path("/srv/ATHBA/state/projects")
 MARKER_NAME = "athba_pr19_marker.txt"
 MARKER_CONTENT = "ATHBA environment integration proof\n"
+
+
+def verify_accepted_revision(repository_root: Path, seed_sha: str, accepted_sha: str) -> dict[str, object]:
+    """Fail closed unless Rack AI's accepted revision materializes the marker."""
+    if accepted_sha == seed_sha:
+        raise ValueError("accepted revision must differ from the project seed revision")
+    commit = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{accepted_sha}^{{commit}}"],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    marker = subprocess.run(
+        ["git", "show", f"{accepted_sha}:{MARKER_NAME}"],
+        cwd=repository_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if marker != MARKER_CONTENT:
+        raise ValueError("accepted revision does not contain the required marker content")
+    return {
+        "seed_sha": seed_sha,
+        "accepted_sha": accepted_sha,
+        "commit_sha": commit,
+        "marker_path": MARKER_NAME,
+        "marker_content_matches": True,
+    }
 
 
 async def run() -> int:
@@ -41,7 +71,8 @@ async def run() -> int:
         ),
         status=WorkUnitStatus.READY,
     )
-    request = to_rack_ai_request("pr19-environment-proof", project.binding(), unit)
+    workload_id = f"pr19-environment-proof-{project_id}"
+    request = to_rack_ai_request(workload_id, project.binding(), unit)
     evidence_path = PROJECTS_ROOT / project_id / "live-proof.json"
     evidence: dict[str, object] = {
         "project_before": project.to_dict(),
@@ -50,11 +81,13 @@ async def run() -> int:
     }
 
     try:
-        result = await RackAiCliExecutionGateway("pr19-environment-proof").execute(unit, project.binding())
+        result = await RackAiCliExecutionGateway(workload_id).execute(unit, project.binding())
         evidence["execution_result"] = asdict(result)
         if not result.accepted or result.accepted_revision is None:
             evidence["outcome"] = "execution_not_accepted"
             return 1
+        evidence["revision_proof"] = verify_accepted_revision(
+            Path(project.repository_root), project.trusted_base_sha, result.accepted_revision)
         updated = service.record_trusted_revision(project.project_id, result.accepted_revision)
         reloaded = service.create_or_load_python_project(project.project_id)
         retired = service.retire(project.project_id, remove_workspace=True)
