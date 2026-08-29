@@ -19,6 +19,7 @@ from core.development.behavior_contract_coordinator import (
     ContractRepairWorkUnitFactory,
     ContractTesterWorkUnitFactory,
 )
+from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
 from core.development.python_test_runtime import PythonPytestRuntime
 from core.development.specification_gatekeeper import SpecificationChecklistPlanner, _checklist_prompt
 from core.development.test_evidence_reconciliation import GitAcceptedTestCatalog, TestEvidenceReconciler
@@ -26,6 +27,7 @@ from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
+from core.execution.work_unit_gateway import WorkUnitExecutionResult
 from core.llm.providers.openai_provider import OpenAIProvider
 
 
@@ -55,10 +57,30 @@ class RecordingGateway(ReasoningGateway):
         return result
 
 
+@dataclass
+class PersistingExecutionGateway:
+    """Persist each Rack AI accepted revision through ATHBA's project lifecycle."""
+
+    delegate: RackAiCliExecutionGateway
+    environment: ProjectEnvironmentService
+    project_id: str
+    accepted_revisions: list[str] = field(default_factory=list)
+
+    async def execute(self, work_unit: object, repository_binding: RepositoryBinding) -> WorkUnitExecutionResult:
+        result = await self.delegate.execute(work_unit, repository_binding)
+        if result.accepted:
+            if result.accepted_revision is None:
+                raise RuntimeError("Rack AI accepted execution without a trusted revision")
+            self.environment.record_trusted_revision(self.project_id, result.accepted_revision)
+            self.accepted_revisions.append(result.accepted_revision)
+        return result
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id", default=f"pr17-independent-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}")
     parser.add_argument("--root", type=Path, default=Path("state/pr17-independent-runs"))
+    parser.add_argument("--projects-root", type=Path, default=Path("/srv/ATHBA/state/projects"))
     return parser.parse_args()
 
 
@@ -66,21 +88,19 @@ def run(command: list[str], *, cwd: Path) -> str:
     return subprocess.run(command, cwd=cwd, check=True, text=True, capture_output=True).stdout
 
 
-def create_target(target: Path) -> tuple[str, list[str]]:
-    if target.exists():
-        raise RuntimeError(f"refusing to reuse an existing proof target: {target}")
-    (target / "scripts").mkdir(parents=True)
-    (target / "tests").mkdir()
+def prepare_target(environment: ProjectEnvironmentService, project: DevelopmentProject) -> tuple[DevelopmentProject, list[str]]:
+    """Add only ATHBA-owned TDD seed material to a lifecycle-created repository."""
+    target = Path(project.repository_root)
+    (target / "scripts").mkdir(exist_ok=True)
     (target / "reservation_book.py").write_text("\"\"\"ReservationBook implementation is introduced through TDD.\"\"\"\n", encoding="utf-8")
     (target / "scripts" / "assert_test_fails.py").write_text(
         """import subprocess\nimport sys\n\ncommand = [sys.executable, '-B', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', sys.argv[1]]\nresult = subprocess.run(command)\nif result.returncode == 1:\n    raise SystemExit(0)\nraise SystemExit(result.returncode or 1)\n""",
         encoding="utf-8",
     )
-    run(["git", "init", "-q", "-b", "main"], cwd=target)
     run(["git", "add", "."], cwd=target)
-    run(["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "ATHBA clean ReservationBook seed"], cwd=target)
+    run(["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "ATHBA ReservationBook TDD seed"], cwd=target)
     sha = run(["git", "rev-parse", "HEAD"], cwd=target).strip()
-    return sha, ["reservation_book.py", "scripts/assert_test_fails.py"]
+    return environment.record_trusted_revision(project.project_id, sha), ["reservation_book.py", "scripts/assert_test_fails.py"]
 
 
 def git_show(root: Path, revision: str, path: str) -> str:
@@ -90,9 +110,11 @@ def git_show(root: Path, revision: str, path: str) -> str:
 async def main() -> None:
     args = parse_args()
     run_root = args.root / args.run_id
-    target = run_root / "reservation-book"
     run_root.mkdir(parents=True, exist_ok=False)
-    seed_sha, source_files = create_target(target)
+    environment = ProjectEnvironmentService(args.projects_root)
+    created_project = environment.create_or_load_python_project(args.run_id)
+    project, source_files = prepare_target(environment, created_project)
+    target = Path(project.repository_root)
     model = os.environ.get("ATHBA_REASONING_MODEL", "local-primary")
     gateway = RecordingGateway(
         ProviderReasoningGateway(OpenAIProvider(timeout=300, max_retries=1), model=model, max_tokens=4096)
@@ -102,8 +124,9 @@ async def main() -> None:
         "run_id": args.run_id,
         "architectural_requirement": REQUIREMENT,
         "target": {
-            "repository_path": str(target.resolve()),
-            "initial_sha": seed_sha,
+            "project": project.to_dict(),
+            "initial_sha": created_project.trusted_base_sha,
+            "prepared_base_sha": project.trusted_base_sha,
             "source_files": source_files,
             "test_files": [],
             "runtime": {"python_executable": "/srv/ATHBA/.venv/bin/python", "pytest": True},
@@ -128,15 +151,13 @@ async def main() -> None:
         evidence["behavior_contract"] = contract.to_dict()
         evidence["behavior_planner_received_checklist"] = False
 
-        binding = RepositoryBinding(
-            repository_id=args.run_id,
-            base_ref="main",
-            base_sha=seed_sha,
-            registered_root=str(target.resolve()),
+        binding = project.binding()
+        runtime = PythonPytestRuntime(project.runtime.environment_path)
+        execution_gateway = PersistingExecutionGateway(
+            RackAiCliExecutionGateway(workload_id=args.run_id), environment, project.project_id
         )
-        runtime = PythonPytestRuntime("/srv/ATHBA/.venv/bin/python")
         coordinator = BehaviorContractCoordinator(
-            execution_gateway=RackAiCliExecutionGateway(workload_id=args.run_id),
+            execution_gateway=execution_gateway,
             reasoning_gateway=gateway,
             repository_binding=binding,
             state_repo=TddStateRepo(run_root / "tdd-state"),
@@ -154,6 +175,8 @@ async def main() -> None:
             "blocked_reason": result.blocked_reason,
             "cycles": [cycle.to_dict() for cycle in result.cycles],
             "run_state": None if state is None else state.to_dict(),
+            "persisted_accepted_revisions": execution_gateway.accepted_revisions,
+            "project_after_development": environment.repo.load(project.project_id).to_dict(),
         }
 
         if result.current_pool == "completed" and state is not None and result.semantic_revision is not None:

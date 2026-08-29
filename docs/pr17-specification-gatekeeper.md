@@ -356,3 +356,26 @@ No Rack AI work unit was submitted in those retries, and no Rack AI files,
 configuration, or runtime images were modified. The end-to-end proof remains
 incomplete until the local reasoning service can return the Behavior Planner
 response reliably.
+
+## PR19 lifecycle end-to-end attempt (2026-08-29)
+
+The PR17 proof runner now creates its ReservationBook project through
+`ProjectEnvironmentService` under `/srv/ATHBA/state/projects`, records the
+prepared seed revision, and persists every accepted Rack AI revision before the
+TDD lane progresses. It retains the project and evidence rather than retiring
+the proof target.
+
+Run `pr17-e2e-20260829T221000Z` independently generated a Gatekeeper
+checklist and a Behavior Contract from the same requirement. The Behavior
+Planner was not given the checklist. Its first RED proposal targeted
+`tests/test_reservation_book.py::test_add_duplicate_resource_id`.
+
+Rack AI rejected the generic acceptance request before worktree execution:
+`acceptance command must use an approved program name`. The command began with
+the ATHBA-owned project runtime `/srv/ATHBA/.venv/bin/python`. No RED revision
+was accepted, so ATHBA correctly did not start GREEN, Senior Review, or final
+test-evidence reconciliation. The retained ATHBA evidence is
+`state/pr17-independent-runs/pr17-e2e-20260829T221000Z/evidence.json`.
+
+This is a Rack AI generic execution capability handoff, not a reason to change
+Rack AI from ATHBA or to weaken the project runtime/readiness contract.
