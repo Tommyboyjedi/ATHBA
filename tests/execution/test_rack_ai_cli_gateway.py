@@ -47,7 +47,7 @@ def write_packet(path: Path, *, status: str, verdict: str, head_sha: str = "b" *
     payload = {
         "change_id": "p1--wu-1",
         "repository_id": "repo-1",
-        "registered_root": "/srv/projects/repo-1",
+        "root": "/srv/projects/repo-1",
         "base_ref": "main",
         "base_sha": "a" * 40,
         "branch": "rack/change/p1--wu-1",
@@ -114,7 +114,7 @@ async def test_gateway_returns_structured_success_and_uses_argument_array(monkey
             "id": "repo-1",
             "base_ref": "main",
             "base_sha": "a" * 40,
-            "registered_root": "/srv/projects/repo-1",
+            "root": "/srv/projects/repo-1",
         },
         "task": "Implement one bounded behavior.",
         "allowed_paths": ["src/app.py"],

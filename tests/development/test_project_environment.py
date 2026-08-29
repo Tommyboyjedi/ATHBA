@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -18,6 +19,8 @@ def test_project_persists_reloads_and_reuses_runtime(tmp_path):
     assert first == second
     assert first.status == "ready"
     assert first.runtime.kind == "python"
+    assert first.runtime.lifetime == "shared"
+    assert first.workspace_lifetime == "disposable"
     assert (tmp_path / "projects" / "proof-one" / "project.json").exists()
     assert (tmp_path / "projects" / "proof-one" / "repository" / ".git").exists()
 
@@ -38,6 +41,7 @@ def test_retirement_only_removes_athba_owned_workspace(tmp_path):
 
     assert retired.status == "retired"
     assert not (tmp_path / "projects" / "retire-me" / "repository").exists()
+    assert Path("/srv/ATHBA/.venv").exists()
     with pytest.raises(ValueError, match="retired"):
         service(tmp_path).create_or_load_python_project(project.project_id)
 
@@ -52,6 +56,6 @@ def test_generic_execution_request_has_no_runtime_or_framework_fields(tmp_path):
 
     request = to_rack_ai_request("environment-proof", project.binding(), unit)
 
-    assert request["repository"] == {"id": project.project_id, "base_ref": "main", "base_sha": project.trusted_base_sha, "registered_root": project.repository_root}
+    assert request["repository"] == {"id": project.project_id, "base_ref": "main", "base_sha": project.trusted_base_sha, "root": project.repository_root}
     assert find_forbidden_resource_selection_keys(request) == []
     assert "python" not in json.dumps(request).lower()

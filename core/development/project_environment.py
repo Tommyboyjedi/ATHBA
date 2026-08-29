@@ -13,6 +13,7 @@ from core.execution.rack_ai_contract import RepositoryBinding
 
 
 LIFECYCLE_STATES = {"created", "prepared", "ready", "retired"}
+ENVIRONMENT_LIFETIMES = {"shared", "project_persistent", "disposable"}
 
 
 @dataclass(frozen=True)
@@ -22,16 +23,17 @@ class ProjectRuntime:
     environment_path: str
     test_command: list[str]
     build_command: list[str] | None = None
+    lifetime: str = "shared"
 
     def to_dict(self) -> dict[str, object]:
         return {"kind": self.kind, "version": self.version, "environment_path": self.environment_path,
-                "test_command": self.test_command, "build_command": self.build_command}
+                "test_command": self.test_command, "build_command": self.build_command, "lifetime": self.lifetime}
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "ProjectRuntime":
         return cls(str(data["kind"]), str(data["version"]), str(data["environment_path"]),
                    [str(value) for value in data["test_command"]],
-                   None if data.get("build_command") is None else [str(value) for value in data["build_command"]])
+                   None if data.get("build_command") is None else [str(value) for value in data["build_command"]], str(data.get("lifetime", "shared")))
 
 
 @dataclass(frozen=True)
@@ -43,9 +45,10 @@ class DevelopmentProject:
     runtime: ProjectRuntime
     generated_paths: list[str]
     status: str
+    workspace_lifetime: str = "project_persistent"
 
     def __post_init__(self) -> None:
-        if not self.project_id or self.status not in LIFECYCLE_STATES:
+        if not self.project_id or self.status not in LIFECYCLE_STATES or self.workspace_lifetime not in ENVIRONMENT_LIFETIMES or self.runtime.lifetime not in ENVIRONMENT_LIFETIMES:
             raise ValueError("invalid project lifecycle state")
 
     def binding(self) -> RepositoryBinding:
@@ -54,13 +57,13 @@ class DevelopmentProject:
     def to_dict(self) -> dict[str, object]:
         return {"project_id": self.project_id, "repository_root": self.repository_root, "default_ref": self.default_ref,
                 "trusted_base_sha": self.trusted_base_sha, "runtime": self.runtime.to_dict(),
-                "generated_paths": self.generated_paths, "status": self.status}
+                "generated_paths": self.generated_paths, "status": self.status, "workspace_lifetime": self.workspace_lifetime}
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "DevelopmentProject":
         return cls(str(data["project_id"]), str(data["repository_root"]), str(data["default_ref"]),
                    str(data["trusted_base_sha"]), ProjectRuntime.from_dict(dict(data["runtime"])),
-                   [str(value) for value in data.get("generated_paths", [])], str(data["status"]))
+                   [str(value) for value in data.get("generated_paths", [])], str(data["status"]), str(data.get("workspace_lifetime", "project_persistent")))
 
 
 class ProjectEnvironmentRepo:
@@ -103,8 +106,8 @@ class ProjectEnvironmentService:
         sha = self._git(project_root, "rev-parse", "HEAD").strip()
         runtime = PythonPytestRuntime(self.python_executable)
         project = DevelopmentProject(project_id, str(project_root), "main", sha,
-            ProjectRuntime("python", "3.14", self.python_executable, runtime.pytest_command(".")),
-            ["__pycache__", ".pytest_cache"], "prepared")
+            ProjectRuntime("python", "3.14", self.python_executable, runtime.pytest_command("."), lifetime="shared"),
+            ["__pycache__", ".pytest_cache"], "prepared", "disposable")
         self._assert_ready(project)
         project = replace(project, status="ready")
         self.repo.save(project)
@@ -113,6 +116,8 @@ class ProjectEnvironmentService:
     def retire(self, project_id: str, *, remove_workspace: bool = False) -> DevelopmentProject:
         project = self._required(project_id)
         if remove_workspace:
+            if project.workspace_lifetime == "shared":
+                raise ValueError("shared project workspaces cannot be removed")
             root = Path(project.repository_root).resolve()
             if self.root not in root.parents:
                 raise ValueError("refusing to remove a non-ATHBA project root")

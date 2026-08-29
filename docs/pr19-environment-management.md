@@ -105,3 +105,25 @@ mechanism. The live bounded-execution smoke remains blocked until Rack AI PR28
 provides its supported trusted dynamic-workspace interface. ATHBA will then use
 that generic interface without modifying Rack AI configuration or encoding
 language/framework meaning in Rack AI.
+
+
+## Environment lifetime and PR28 dynamic roots
+
+ATHBA owns environment lifetime. `ProjectRuntime.lifetime` distinguishes shared
+tooling from future project-persistent or disposable runtimes; the current
+`/srv/ATHBA/.venv/bin/python` profile is shared and cannot be removed by
+project retirement. `DevelopmentProject.workspace_lifetime` records the
+repository/workspace policy. The current generated proof workspace is
+disposable and may be explicitly removed only after canonical containment under
+ATHBA's project root is verified.
+
+PR28 dynamic projects use generic `repository.id`, `repository.root`,
+`base_ref`, and `base_sha` in the existing change request. No runtime,
+framework, or application semantics are sent to Rack AI.
+
+Live proof is currently deployment-blocked: the host Rack AI checkout is
+`f85b9a9` on `codex/python-pytest-runtime`, and its
+`config/repositories.json` has no `trusted_dynamic_roots` entry for
+`/srv/ATHBA/state/projects`. ATHBA did not modify that configuration. Deploy
+PR28 and have an administrator authorize that stable parent root before the
+generic dynamic-root smoke can run.

@@ -68,7 +68,7 @@ def to_rack_ai_request(workload_id: str, binding: RepositoryBinding, unit: Devel
     if binding.base_sha is not None:
         repository["base_sha"] = binding.base_sha
     if binding.registered_root is not None:
-        repository["registered_root"] = binding.registered_root
+        repository["root"] = binding.registered_root
 
     return {
         "change_id": f"{workload_id}--{unit.id}",
