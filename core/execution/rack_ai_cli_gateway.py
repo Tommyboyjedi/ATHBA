@@ -1,4 +1,4 @@
-"""CLI adapter for Rack AI's machine-readable work-unit entry point."""
+"""CLI adapter for Rack AI's current change-request entry point."""
 
 from __future__ import annotations
 
@@ -52,13 +52,12 @@ class RackAiCliExecutionGateway:
                 "-p",
                 "rack_ai_cli",
                 "--",
-                "work-unit",
+                "change",
                 str(spec_path),
                 "--repo-root",
                 self.config.rack_ai_root,
                 "--state-root",
                 self.config.state_root,
-                "--emit-json",
                 cwd=self.config.rack_ai_root,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -68,11 +67,24 @@ class RackAiCliExecutionGateway:
             stderr_text = stderr.decode("utf-8", errors="replace")
 
             if not stdout_text.strip():
-                raise RackAiCliTransportError(_build_error_message("Rack AI returned no JSON", stderr_text))
+                raise RackAiCliTransportError(_build_error_message("Rack AI returned no command summary", stderr_text))
 
             try:
-                attempt = parse_rack_ai_result(json.loads(stdout_text))
-            except (json.JSONDecodeError, TypeError, ValueError) as error:
+                summary = _parse_change_command_output(stdout_text)
+                packet_path = Path(_required_summary_value(summary, "packet"))
+                packet_payload = json.loads(packet_path.read_text(encoding="utf-8"))
+                attempt_payload = {
+                    **packet_payload,
+                    "work_unit_id": work_unit.id,
+                    "change_id": summary.get("change_id", packet_payload.get("change_id")),
+                    "branch": summary.get("branch", packet_payload.get("branch")),
+                    "worktree_path": summary.get("worktree", packet_payload.get("worktree_path")),
+                    "status": summary.get("status", packet_payload.get("status")),
+                    "acceptance_verdict": summary.get("acceptance_verdict", packet_payload.get("acceptance_verdict")),
+                    "packet_path": str(packet_path),
+                }
+                attempt = parse_rack_ai_result(attempt_payload)
+            except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
                 raise RackAiCliTransportError(
                     _build_error_message(f"Rack AI returned untrustworthy output: {error}", stderr_text, stdout_text)
                 ) from error
@@ -93,6 +105,28 @@ class RackAiCliExecutionGateway:
         finally:
             if spec_path is not None:
                 spec_path.unlink(missing_ok=True)
+
+
+def _parse_change_command_output(text: str) -> dict[str, str]:
+    summary: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        key, separator, value = line.partition(":")
+        if not separator:
+            continue
+        summary[key.strip()] = value.strip()
+    if not summary:
+        raise ValueError("Rack AI command summary was empty")
+    return summary
+
+
+def _required_summary_value(summary: dict[str, str], key: str) -> str:
+    value = summary.get(key)
+    if value is None or not value.strip():
+        raise ValueError(f"Rack AI command summary missing field: {key}")
+    return value
 
 
 def _build_error_message(message: str, stderr_text: str, stdout_text: str | None = None) -> str:

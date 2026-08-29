@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from core.datastore.repos.tdd_state_repo import TddStateRepo
@@ -52,6 +54,70 @@ class ReviewMaterialProvider(Protocol):
         ...
 
 
+class GitReviewMaterialProvider:
+    """Read-only Git-backed review evidence for semantic review."""
+
+    def __init__(self, repository_root: str | Path):
+        self.repository_root = Path(repository_root)
+
+    def render(self, contract: BehaviorContract, run_state: BehaviorContractRunState, cycle: ContractCycleRecord) -> str:
+        candidate_revision = cycle.candidate_revision
+        prior_semantic_revision = run_state.semantic_base_revision
+        if candidate_revision is None:
+            raise ValueError("review material requires a candidate revision")
+        if prior_semantic_revision is None:
+            raise ValueError("review material requires a prior semantic revision")
+
+        production_path = _repository_relative_path(cycle.step.production_path, label="production path")
+        test_path = _repository_relative_path(cycle.step.test_path, label="test path")
+        self._verify_revision(candidate_revision)
+        self._verify_revision(prior_semantic_revision)
+
+        payload = {
+            "candidate_revision": candidate_revision,
+            "prior_semantic_revision": prior_semantic_revision,
+            "focused_tdd_step": cycle.step.to_dict(),
+            "production_diff": self._git(
+                "diff",
+                "--unified=3",
+                prior_semantic_revision,
+                candidate_revision,
+                "--",
+                production_path,
+                test_path,
+            ),
+            "production_source": {
+                "path": production_path,
+                "content": self._git("show", f"{candidate_revision}:{production_path}"),
+            },
+            "test_source": {
+                "path": test_path,
+                "content": self._git("show", f"{candidate_revision}:{test_path}"),
+            },
+            "rack_ai_evidence": {
+                "evidence_location": cycle.green_phase.evidence_location if cycle.green_phase else None,
+                "change_id": cycle.green_phase.change_id if cycle.green_phase else None,
+            },
+        }
+        return json.dumps(payload, indent=2, sort_keys=True)
+
+    def _verify_revision(self, revision: str) -> None:
+        self._git("rev-parse", "--verify", f"{revision}^{{commit}}")
+
+    def _git(self, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=self.repository_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise ValueError(f"git {' '.join(args)} failed: {detail}")
+        return result.stdout.strip()
+
+
 class BehaviorContractPlanner:
     """Turn one component requirement into a structured provider-neutral contract."""
 
@@ -84,35 +150,43 @@ class DynamicTddPlanner:
         )
         result = await self.gateway.reason(request)
         decision = TddStepDecision.from_dict(_json_object(result.text, label="step decision"))
-        self._validate_decision(contract, run_state, decision)
-        return decision
+        return self._validate_decision(contract, run_state, decision)
 
     def _validate_decision(
         self,
         contract: BehaviorContract,
         run_state: BehaviorContractRunState,
         decision: TddStepDecision,
-    ) -> None:
-        requirement_refs = set(contract.requirement_refs())
-        completed_refs = set(run_state.completed_requirement_refs)
+    ) -> TddStepDecision:
+        requirement_refs = contract.requirement_refs()
+        requirement_ref_set = set(requirement_refs)
+        approved_ref_set = set(run_state.completed_requirement_refs)
+        claimed_ref_set = set(decision.completed_requirement_refs)
+        unknown_claimed_refs = claimed_ref_set - requirement_ref_set
+        if unknown_claimed_refs:
+            raise ValueError("completion decisions cannot reference requirements outside the contract")
         if decision.status == "complete":
-            if set(decision.completed_requirement_refs) != requirement_refs:
-                raise ValueError("completion decisions must account for every contract requirement ref")
-            return
+            if approved_ref_set != requirement_ref_set:
+                raise ValueError("completion requires every contract requirement to be semantically approved")
+            return replace(
+                decision,
+                completed_requirement_refs=[ref for ref in requirement_refs if ref in approved_ref_set],
+            )
 
         assert decision.proposal is not None
         proposal = decision.proposal
         if len(proposal.requirement_refs) != 1:
             raise ValueError("each TDD step proposal must target exactly one requirement ref")
         proposal_ref = proposal.requirement_refs[0]
-        if proposal_ref not in requirement_refs:
+        if proposal_ref not in requirement_ref_set:
             raise ValueError("step proposal referenced a requirement outside the contract")
-        if proposal_ref in completed_refs:
+        if proposal_ref in approved_ref_set:
             raise ValueError("step proposal repeated a requirement that is already semantically covered")
         if proposal.test_path not in contract.test_paths:
             raise ValueError("step proposal test path is outside the contract")
         if proposal.production_path not in contract.production_paths:
             raise ValueError("step proposal production path is outside the contract")
+        return decision
 
 
 class SeniorReviewer:
@@ -160,7 +234,7 @@ class ContractTesterWorkUnitFactory:
             objective=_tester_objective(contract, step),
             allowed_paths=[step.test_path],
             acceptance=AcceptanceContract(
-                commands=[["python", "scripts/assert_test_fails.py", step.test_name, "expected failure"]],
+                commands=[["python3", "scripts/assert_test_fails.py", step.test_name, "expected failure"]],
                 required_artifacts=[step.test_path],
             ),
             status=WorkUnitStatus.READY,
@@ -176,7 +250,7 @@ class ContractDeveloperWorkUnitFactory:
             objective=_developer_objective(contract, step),
             allowed_paths=[step.production_path],
             acceptance=AcceptanceContract(
-                commands=[["pytest", "-q", step.test_name], ["pytest", "-q", step.test_path]],
+                commands=[["python3", "-m", "pytest", "-q", step.test_name], ["python3", "-m", "pytest", "-q", step.test_path]],
                 required_artifacts=[step.production_path],
             ),
             status=WorkUnitStatus.READY,
@@ -198,7 +272,7 @@ class ContractRepairWorkUnitFactory:
             objective=_repair_objective(contract, cycle.step, review),
             allowed_paths=[cycle.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[["pytest", "-q", cycle.step.test_name], ["pytest", "-q", cycle.step.test_path]],
+                commands=[["python3", "-m", "pytest", "-q", cycle.step.test_name], ["python3", "-m", "pytest", "-q", cycle.step.test_path]],
                 required_artifacts=[cycle.step.production_path],
             ),
             status=WorkUnitStatus.READY,
@@ -234,7 +308,7 @@ class BehaviorContractCoordinator:
         self.tester_factory = tester_factory or ContractTesterWorkUnitFactory()
         self.developer_factory = developer_factory or ContractDeveloperWorkUnitFactory()
         self.repair_factory = repair_factory or ContractRepairWorkUnitFactory()
-        self.review_material_provider = review_material_provider
+        self.review_material_provider = review_material_provider or _default_review_material_provider(repository_binding)
         self.max_semantic_repairs = max_semantic_repairs
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
@@ -264,7 +338,7 @@ class BehaviorContractCoordinator:
                     run_state = replace(
                         run_state,
                         current_pool="completed",
-                        completed_requirement_refs=decision.completed_requirement_refs,
+                        completed_requirement_refs=_ordered_completed_requirement_refs(contract, run_state.completed_requirement_refs),
                         contract=replace(contract, status="completed"),
                         repository_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
                     )
@@ -505,14 +579,7 @@ class BehaviorContractCoordinator:
         cycle: ContractCycleRecord,
     ) -> str:
         if self.review_material_provider is None:
-            evidence_location = None
-            if cycle.green_phase is not None:
-                evidence_location = cycle.green_phase.evidence_location
-            return (
-                f"candidate_revision={cycle.candidate_revision}\n"
-                f"evidence_location={evidence_location}\n"
-                f"prior_semantic_revision={run_state.semantic_base_revision}\n"
-            )
+            raise ValueError("semantic review requires a repository review material provider or registered repository root")
         return self.review_material_provider.render(contract, run_state, cycle)
 
 
@@ -570,13 +637,14 @@ def _step_prompt(contract: BehaviorContract, run_state: BehaviorContractRunState
                     "exception_type": "optional",
                     "exception_message": "optional"
                 },
-                "completed_requirement_refs": ["all contract refs only when complete"]
+                "completed_requirement_refs": ["optional consistency echo only; does not grant completion authority"]
             },
             "rules": [
                 "do not repeat already covered requirements",
                 "do not combine unrelated new behaviors into one proposal",
                 "do not include implementation details",
                 "do not leak worker, GPU, model, endpoint, or port data",
+                "never declare completion unless all requirement refs are already semantically approved in persisted state",
             ],
         },
         indent=2,
@@ -656,6 +724,27 @@ def _repair_objective(contract: BehaviorContract, step: TddStepProposal, review:
         f"Reviewer instructions: {' | '.join(review.repair_instructions)}. "
         f"Component: {contract.component_name}."
     )
+
+
+def _default_review_material_provider(repository_binding: RepositoryBinding) -> ReviewMaterialProvider | None:
+    if repository_binding.registered_root is None:
+        return None
+    return GitReviewMaterialProvider(repository_binding.registered_root)
+
+
+def _ordered_completed_requirement_refs(contract: BehaviorContract, completed_requirement_refs: list[str]) -> list[str]:
+    completed_ref_set = set(completed_requirement_refs)
+    return [ref for ref in contract.requirement_refs() if ref in completed_ref_set]
+
+
+def _repository_relative_path(path: str, *, label: str) -> str:
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError(f"{label} must be non-empty")
+    normalized = path.replace("\\", "/")
+    candidate = PurePosixPath(normalized)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError(f"{label} must be repository-relative")
+    return candidate.as_posix()
 
 
 def _is_red_already_satisfied_from_phase(outcome: _PhaseOutcome) -> bool:

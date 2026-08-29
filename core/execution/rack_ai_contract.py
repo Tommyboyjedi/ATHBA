@@ -1,4 +1,4 @@
-"""Strict Rack AI work-unit v1 mapping."""
+"""Strict Rack AI change-request mapping for ATHBA work units."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ from typing import Any
 from core.development.work_unit import DevelopmentWorkUnit, ExecutionAttempt
 
 
-CONTRACT_VERSION = "rack-ai/work-unit/v1"
-WORKLOAD_KIND = "application-development"
 SUPPORTED_ACCEPTANCE_VERDICTS = {"approved", "rejected"}
 FORBIDDEN_RESOURCE_SELECTION_KEYS = {
     "backend",
@@ -73,28 +71,18 @@ def to_rack_ai_request(workload_id: str, binding: RepositoryBinding, unit: Devel
         repository["registered_root"] = binding.registered_root
 
     return {
-        "version": CONTRACT_VERSION,
-        "workload": {"id": workload_id, "kind": WORKLOAD_KIND},
+        "change_id": f"{workload_id}--{unit.id}",
         "repository": repository,
-        "work_unit": {
-            "id": unit.id,
-            "objective": unit.objective,
-            "allowed_paths": list(unit.allowed_paths),
-            "acceptance": {
-                "commands": [list(command) for command in unit.acceptance.commands],
-                "required_artifacts": list(unit.acceptance.required_artifacts),
-            },
-            "readiness": {"ready": True, "depends_on": list(unit.depends_on)},
-            "requirements": {
-                "capability": unit.capability,
-                "complexity": unit.complexity,
-                "requires_large_context": unit.requires_large_context,
-            },
-            "limits": {
-                "max_implementation_attempts": unit.max_implementation_attempts,
-                "timeout_seconds": unit.timeout_seconds,
-                "network": unit.network,
-            },
+        "task": unit.objective,
+        "allowed_paths": list(unit.allowed_paths),
+        "acceptance": {
+            "commands": [list(command) for command in unit.acceptance.commands],
+            "required_artifacts": list(unit.acceptance.required_artifacts),
+        },
+        "limits": {
+            "max_implementation_attempts": unit.max_implementation_attempts,
+            "timeout_seconds": unit.timeout_seconds,
+            "network": unit.network,
         },
     }
 
@@ -110,9 +98,10 @@ def parse_rack_ai_result(payload: Mapping[str, Any]) -> ExecutionAttempt:
     accepted = verdict == "approved"
     accepted_revision = None
     if accepted:
-        accepted_revision = _optional_string(payload, "accepted_head_sha") or _optional_string(
-            payload,
-            "accepted_revision",
+        accepted_revision = (
+            _optional_string(payload, "accepted_head_sha")
+            or _optional_string(payload, "accepted_revision")
+            or _optional_string(payload, "head_sha")
         )
 
     return ExecutionAttempt(
@@ -125,7 +114,7 @@ def parse_rack_ai_result(payload: Mapping[str, Any]) -> ExecutionAttempt:
         branch=_optional_string(payload, "branch"),
         accepted_revision=accepted_revision,
         packet_path=_optional_string(payload, "packet_path"),
-        worktree_path=_optional_string(payload, "worktree_path"),
+        worktree_path=_optional_string(payload, "worktree_path") or _optional_string(payload, "worktree"),
         error=_optional_string(payload, "last_error"),
     )
 
