@@ -86,7 +86,7 @@ def test_rack_ai_request_matches_current_change_contract_shape():
             "id": "adaptos",
             "base_ref": "main",
             "base_sha": "a" * 40,
-            "registered_root": "/srv/projects/adaptos",
+            "root": "/srv/projects/adaptos",
         },
         "task": "Implement TicketStore::save(path) for one open ticket.",
         "allowed_paths": ["src/lib.rs"],
