@@ -1,0 +1,240 @@
+# PR17 — Specification Gatekeeper and executable-specification coverage
+
+## Goal
+
+Add the next ATHBA development-semantics layer identified by PR16: an independent **Specification Gatekeeper** that maintains a meticulous checklist of individually verifiable specification obligations and refuses requirement completion until each applicable item is proven by accepted test evidence.
+
+PR17 builds on PR16. It does not redesign Rack AI and does not implement the future full Project Manager, Solution Architect, or generalized application-design layers.
+
+## Why PR17 exists
+
+PR16 proved that the local 12B model can understand bounded component requirements, obey strict schemas, and operate usefully inside a TDD-oriented lane. It also showed a repeatable limitation: when asked to independently compress a complete requirement into a Behavior Contract, the model can omit source obligations even while producing structurally valid output.
+
+PR16's source-requirement traceability correctly detects that semantic loss and fails closed.
+
+PR17 therefore separates implementation planning from independent specification-completeness verification.
+
+## Core architecture
+
+```text
+higher-level design / component requirement
+        |
+        +------------------------------+
+        |                              |
+        v                              v
+Behavior Planner                Specification Gatekeeper
+        |                              |
+        |                       independent checklist
+        v                              |
+Tester RED <-> Developer GREEN         |
+        |                              |
+        v                              |
+Senior Reviewer                       |
+        |                              |
+        +-------------> Gatekeeper verification
+                                |
+                    +-----------+-----------+
+                    |                       |
+                    v                       v
+             all checklist             missing test
+             items proven              evidence
+                    |                       |
+                    v                       v
+               requirement            targeted gap
+                complete              back to TDD lane
+```
+
+The Behavior Planner should initially receive the component requirement, not the complete Gatekeeper checklist. The checklist is an independent acceptance ledger intended to reduce correlated planning and verification blind spots.
+
+## Specification atomization
+
+For each component-level requirement, the Gatekeeper first creates a detailed checklist of individually verifiable obligations.
+
+A sentence such as:
+
+> A resource has a unique id and a positive integer capacity.
+
+may atomize into obligations equivalent to:
+
+- a resource has an id;
+- the resource id is unique;
+- a resource has capacity;
+- capacity is an integer;
+- capacity is positive.
+
+This process must be generic and must not hard-code ReservationBook-specific requirements into ATHBA.
+
+The existing `SourceRequirementClause` work from PR16 is expected to be reused or evolved rather than discarded without reason.
+
+## Test suite as executable specification
+
+The Gatekeeper should not primarily inspect production source and decide that code appears to implement a checklist item.
+
+The central verification question is:
+
+> Which accepted test or tests prove this specification item?
+
+A checklist item cannot be marked complete from an LLM's bare assertion.
+
+`proven` must be backed by concrete evidence such as:
+
+- test/node identity;
+- TDD step or requirement reference;
+- accepted RED/GREEN history;
+- semantically approved revision;
+- Rack AI evidence reference where available.
+
+Where evidence is absent, the item remains unresolved even if production code appears likely to satisfy it.
+
+## Gatekeeper outcomes
+
+A minimal assessment vocabulary should support concepts equivalent to:
+
+- `proven`
+- `missing_test_evidence`
+- `uncertain`
+
+A missing item should yield a structured targeted gap that can be fed back into the existing TDD lane.
+
+A gap should identify at least:
+
+- checklist item ref;
+- obligation text;
+- why current accepted test evidence is insufficient;
+- expected proof target;
+- traceability to the component requirement.
+
+The gap is not itself a pre-authored implementation prompt. The existing Tester/Developer lane decides how to establish the missing executable proof.
+
+## Relationship to Senior Reviewer
+
+The Senior Reviewer and Specification Gatekeeper have different jobs.
+
+Senior Reviewer asks:
+
+> Is this mechanically accepted candidate good implementation code for the intended behavior/design?
+
+Specification Gatekeeper asks:
+
+> Does the accepted executable test suite prove every obligation in the component specification?
+
+A candidate may be clean, idiomatic and semantically approved while the overall requirement still remains incomplete because checklist evidence is missing.
+
+## Relationship to Rack AI
+
+Rack AI remains unchanged in responsibility.
+
+Rack AI owns:
+
+- physical worker/model/GPU selection;
+- repository registration and isolated worktrees;
+- path policy;
+- command execution and limits;
+- deterministic acceptance;
+- trusted revisions and evidence.
+
+ATHBA owns the Gatekeeper, checklist, TDD semantics and completion logic.
+
+No Gatekeeper domain/application object should contain physical worker/model/GPU selection.
+
+## PR17 proving target
+
+Continue using the disposable Python 3.14 ReservationBook component as a proving fixture, because its original component requirement contains both happy-path, validation, invariant and state-preservation obligations.
+
+PR17 should prove that a checklist can represent obligations such as:
+
+- successful resource addition;
+- resource-id uniqueness;
+- positive integer capacity;
+- successful reservation creation;
+- reservation-id uniqueness;
+- known-resource validation;
+- positive reservation quantity;
+- capacity limit;
+- cancellation;
+- unknown cancellation;
+- availability query;
+- cancellation restoring capacity;
+- state preservation on failed operations.
+
+Do not hard-code this exact list into the generic implementation.
+
+## Persistence
+
+Persist enough to reconstruct:
+
+- original component requirement;
+- checklist and checklist refs;
+- current assessment status per checklist item;
+- accepted test evidence mapped to each item;
+- unresolved/uncertain items;
+- targeted gaps emitted back toward TDD;
+- requirement-level completion status.
+
+## Completion rule
+
+A component requirement may only be considered complete when every applicable Gatekeeper checklist item is `proven` by concrete accepted executable-specification evidence.
+
+Do not allow:
+
+- an LLM assertion alone to close an item;
+- a production-code inspection alone to close an item;
+- Behavior Contract completion alone to close the component requirement;
+- missing or uncertain checklist items to be silently ignored.
+
+## Scope
+
+PR17 should implement the smallest vertical slice necessary to prove:
+
+1. component requirement -> independent atomic checklist;
+2. checklist persistence;
+3. accepted TDD test evidence -> checklist mapping;
+4. deterministic refusal to mark an item proven without concrete evidence;
+5. unresolved item -> structured targeted gap;
+6. targeted gap can re-enter the existing TDD lane without changing Rack AI;
+7. requirement completion only when every applicable checklist item is proven.
+
+## Non-goals
+
+Do not add in PR17:
+
+- Project Manager / Master Designer;
+- Solution Architect;
+- generalized Component Designer;
+- broad user prompt -> full application architecture;
+- cloud reasoning as mandatory default;
+- Rack AI semantic interpretation;
+- full parallel scheduling;
+- generalized Kanban/dashboard UI;
+- arbitrary production-source semantic proof as a substitute for tests.
+
+## Validation principle
+
+Prefer deterministic evidence mapping wherever possible. Reasoning may assist with checklist atomization and matching candidate tests to obligations, but final `proven` state must be grounded in accepted test/revision evidence and fail closed when evidence cannot be established.
+
+## Definition of done
+
+PR17 is complete when:
+
+- a component requirement can produce a validated independent checklist;
+- checklist items are individually verifiable and traceable;
+- the checklist remains independent from initial Behavior Planner implementation guidance;
+- accepted TDD history can be mapped to checklist items;
+- missing proof remains visible;
+- missing proof produces a targeted TDD gap;
+- a later accepted test can satisfy that gap;
+- requirement completion is deterministically blocked until all applicable items are proven;
+- existing PR11-PR16 behavior remains green;
+- Rack AI's boundary remains unchanged.
+
+Final proof should report:
+
+`PR17_SPECIFICATION_ATOMIZATION = PASS|FAIL`
+
+`PR17_TEST_EVIDENCE_MAPPING = PASS|FAIL`
+
+`PR17_TARGETED_GAP_LOOP = PASS|FAIL`
+
+`PR17_REQUIREMENT_COMPLETION_GATE = PASS|FAIL`
+
+`PR17_LOCAL_GATEKEEPER_VIABLE = YES|NO`
