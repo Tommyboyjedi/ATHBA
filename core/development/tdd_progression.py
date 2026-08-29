@@ -150,8 +150,36 @@ class TddBehaviorProgress:
 
 
 @dataclass(frozen=True)
+class SourceRequirementClause:
+    ref: str
+    text: str
+    kind: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.ref, "source clause ref")
+        _require_text(self.text, "source clause text")
+        _require_text(self.kind, "source clause kind")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ref": self.ref,
+            "text": self.text,
+            "kind": self.kind,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "SourceRequirementClause":
+        return cls(
+            ref=str(payload["ref"]),
+            text=str(payload["text"]),
+            kind=str(payload["kind"]),
+        )
+
+
+@dataclass(frozen=True)
 class BehaviorContractRequirement:
     ref: str
+    source_refs: list[str]
     summary: str
     observable_outcome: str
     test_hint: str
@@ -160,6 +188,9 @@ class BehaviorContractRequirement:
 
     def __post_init__(self) -> None:
         _require_text(self.ref, "requirement ref")
+        if not self.source_refs:
+            raise ValueError("requirement source refs must not be empty")
+        _validate_list_of_strings(self.source_refs, "requirement source refs")
         _require_text(self.summary, "requirement summary")
         _require_text(self.observable_outcome, "requirement observable outcome")
         _require_text(self.test_hint, "requirement test hint")
@@ -169,6 +200,7 @@ class BehaviorContractRequirement:
     def to_dict(self) -> dict[str, Any]:
         return {
             "ref": self.ref,
+            "source_refs": list(self.source_refs),
             "summary": self.summary,
             "observable_outcome": self.observable_outcome,
             "test_hint": self.test_hint,
@@ -180,6 +212,7 @@ class BehaviorContractRequirement:
     def from_dict(cls, payload: dict[str, Any]) -> "BehaviorContractRequirement":
         return cls(
             ref=str(payload["ref"]),
+            source_refs=_list_of_strings(payload.get("source_refs"), "requirement source refs"),
             summary=str(payload["summary"]),
             observable_outcome=str(payload["observable_outcome"]),
             test_hint=str(payload["test_hint"]),
@@ -195,6 +228,7 @@ class BehaviorContract:
     component_name: str
     capability: str
     requirement_source: str
+    source_clauses: list[SourceRequirementClause]
     observable_requirements: list[BehaviorContractRequirement]
     invariants: list[str]
     production_paths: list[str]
@@ -211,8 +245,13 @@ class BehaviorContract:
         _require_text(self.component_name, "component name")
         _require_text(self.capability, "component capability")
         _require_text(self.requirement_source, "requirement source")
+        if not self.source_clauses:
+            raise ValueError("source clauses must not be empty")
         if not self.observable_requirements:
             raise ValueError("observable requirements must not be empty")
+        _validate_unique_refs(self.source_clause_refs(), "source clause refs")
+        _validate_unique_refs(self.requirement_refs(), "requirement refs")
+        _validate_contract_source_coverage(self)
         _validate_list_of_strings(self.invariants, "invariants")
         _validate_repository_relative_paths(self.production_paths, "production paths")
         _validate_repository_relative_paths(self.test_paths, "test paths")
@@ -223,12 +262,19 @@ class BehaviorContract:
         if self.status not in CONTRACT_POOL_STATUSES:
             raise ValueError(f"unsupported contract status: {self.status}")
 
+    def source_clause_refs(self) -> list[str]:
+        return [clause.ref for clause in self.source_clauses]
+
     def requirement_refs(self) -> list[str]:
         return [requirement.ref for requirement in self.observable_requirements]
 
     def uncovered_requirement_refs(self, completed_refs: list[str]) -> list[str]:
         completed = set(completed_refs)
         return [ref for ref in self.requirement_refs() if ref not in completed]
+
+    def uncovered_source_clause_refs(self) -> list[str]:
+        covered = {ref for requirement in self.observable_requirements for ref in requirement.source_refs}
+        return [ref for ref in self.source_clause_refs() if ref not in covered]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -237,6 +283,7 @@ class BehaviorContract:
             "component_name": self.component_name,
             "capability": self.capability,
             "requirement_source": self.requirement_source,
+            "source_clauses": [item.to_dict() for item in self.source_clauses],
             "observable_requirements": [item.to_dict() for item in self.observable_requirements],
             "invariants": list(self.invariants),
             "production_paths": list(self.production_paths),
@@ -256,6 +303,9 @@ class BehaviorContract:
         allowed_production_paths: list[str] | None = None,
         allowed_test_paths: list[str] | None = None,
     ) -> "BehaviorContract":
+        source_clauses = payload.get("source_clauses")
+        if not isinstance(source_clauses, list):
+            raise ValueError("source_clauses must be a list")
         requirements = payload.get("observable_requirements")
         if not isinstance(requirements, list):
             raise ValueError("observable_requirements must be a list")
@@ -265,6 +315,7 @@ class BehaviorContract:
             component_name=str(payload["component_name"]),
             capability=str(payload["capability"]),
             requirement_source=str(payload["requirement_source"]),
+            source_clauses=[SourceRequirementClause.from_dict(dict(item)) for item in source_clauses],
             observable_requirements=[BehaviorContractRequirement.from_dict(dict(item)) for item in requirements],
             invariants=_list_of_strings(payload.get("invariants"), "invariants"),
             production_paths=_list_of_strings(payload.get("production_paths"), "production_paths"),
@@ -664,6 +715,26 @@ def _validate_allowed_path_subset(values: list[str], allowed: list[str] | None, 
     disallowed = [value for value in values if value not in allowed]
     if disallowed:
         raise ValueError(f"{label} must be selected from the allowed path set")
+
+
+def _validate_unique_refs(refs: list[str], label: str) -> None:
+    duplicates = sorted({ref for ref in refs if refs.count(ref) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate {label} are not allowed: {duplicates}")
+
+
+def _validate_contract_source_coverage(contract: BehaviorContract) -> None:
+    clause_refs = contract.source_clause_refs()
+    clause_ref_set = set(clause_refs)
+    seen_source_refs: set[str] = set()
+    for requirement in contract.observable_requirements:
+        for source_ref in requirement.source_refs:
+            if source_ref not in clause_ref_set:
+                raise ValueError(f"requirement source refs must exist in source clauses: {source_ref}")
+            seen_source_refs.add(source_ref)
+    uncovered = [ref for ref in clause_refs if ref not in seen_source_refs]
+    if uncovered:
+        raise ValueError(f"source clauses must be covered by observable requirements: {uncovered}")
 
 
 def _validate_repository_relative_path(value: str, label: str) -> None:

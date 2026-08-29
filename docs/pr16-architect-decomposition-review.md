@@ -592,4 +592,182 @@ Current viability assessment:
 
 `PR16_READY_FOR_LIVE_TDD_RUN = YES`
 
+## 2026-08-29 source-clause traceability pass
+
+The earlier hardening pass succeeded at structural correctness:
+
+- raw JSON only;
+- repository-relative production and test paths;
+- `public_api` emitted as `list[str]`;
+- `error_semantics` emitted as `list[str]`;
+- exact `status == "tdd_ready"`;
+- no Markdown fences;
+- no GPU/model/worker/endpoint leakage;
+- materially improved atomic requirement refs.
+
+That structural success was insufficient because PR16 determines completion from semantically approved observable requirement refs.
+
+Independent post-hardening probes showed that the model could still emit structurally valid contracts while silently omitting meaningful source obligations from `observable_requirements`.
+
+That would allow ATHBA to declare a contract completed even if some original component requirements never became a TDD cycle.
+
+### Traceability design added in this pass
+
+PR16 now introduces explicit source-clause traceability:
+
+- `SourceRequirementClause` is a canonical domain type with:
+  - `ref`
+  - `text`
+  - `kind`
+- `BehaviorContractRequirement` now requires non-empty `source_refs`
+- `BehaviorContract` now persists `source_clauses`
+- deterministic validation now rejects:
+  - empty source-clause sets
+  - duplicate source-clause refs
+  - duplicate observable requirement refs
+  - empty `source_refs`
+  - unknown `source_refs`
+  - uncovered source clauses
+
+Deterministic completeness rule:
+
+```text
+set(all source clause refs)
+==
+union(all observable requirement source_refs)
+```
+
+This validation runs before a contract can be accepted into `tdd_ready`.
+
+### New tests
+
+`tests/development/test_behavior_contract_coordinator.py` now covers:
+
+1. valid source-clause extraction parses;
+2. malformed clause output fails closed;
+3. empty clause sets fail closed;
+4. duplicate source-clause refs are rejected;
+5. observable requirements require non-empty `source_refs`;
+6. unknown `source_refs` are rejected;
+7. uncovered source clauses are rejected;
+8. a fully covered contract is accepted;
+9. one source clause can map to multiple observable requirements;
+10. multiple source clauses can map to one coherent observable requirement;
+11. completion-criteria-only mention does not satisfy coverage;
+12. source refs persist through round trip;
+13. dynamic TDD steps retain traceability back to source clauses;
+14. prior path/schema/status/resource-boundary checks remain green.
+
+Validation on `2026-08-29`:
+
+- `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q tests/development/test_behavior_contract_coordinator.py`
+  - result: `47 passed`
+- `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q`
+  - result: `143 passed`
+- `./.venv/bin/python -m compileall athba core llm_service tests`
+  - result: pass
+
+### Three-run local semantic probe
+
+Probe setup:
+
+- model id: `local-primary`
+- endpoint env: `OPENAI_API_BASE=http://127.0.0.1:8017/v1`
+- key env: `OPENAI_API_KEY=local-test-key`
+- production path: `reservation_book.py`
+- test path: `tests/test_reservation_book.py`
+- sequence per run:
+  - component requirement
+  - source clause generation
+  - Behavior Contract generation from those clauses
+  - deterministic coverage validation
+- no fence stripping
+- no type coercion
+- no manual repair
+- no cloud fallback
+
+Total wall time for 3 runs: `310.885s`
+
+Per-run timing:
+
+1. clauses `24.718s`, contract `79.507s`
+2. clauses `24.490s`, contract `78.823s`
+3. clauses `24.503s`, contract `78.843s`
+
+#### Source clause outputs
+
+All 3 runs produced the same 16 clause refs:
+
+- `REQ-001` in-memory ReservationBook exists
+- `REQ-002` resource has unique id and positive integer capacity
+- `REQ-003` resource addition succeeds
+- `REQ-004` uniquely identified reservation creation succeeds
+- `REQ-005` reservation cancellation succeeds
+- `REQ-006` remaining availability can be queried
+- `REQ-007` duplicate resource id rejected
+- `REQ-008` duplicate reservation id rejected
+- `REQ-009` unknown resource rejected
+- `REQ-010` unknown cancellation rejected
+- `REQ-011` zero or negative quantity rejected
+- `REQ-012` over-capacity reservation rejected
+- `REQ-013` failed operations preserve existing state
+- `REQ-014` cancellation restores capacity
+- `REQ-015` implementation remains in-memory and dependency-free
+- `REQ-016` implementation remains Python 3.14
+
+Assessment:
+
+- all major original ReservationBook obligations were represented at the source-clause layer
+- clause `kind` quality was poor: the model emitted the placeholder value `string` for every clause
+- clause extraction was structurally usable but semantically not polished
+
+#### Behavior Contract outputs
+
+All 3 runs produced the same observable requirement set:
+
+- `REQ-003` source refs `REQ-002`, `REQ-003`
+- `REQ-007` source ref `REQ-007`
+- `REQ-004` source ref `REQ-004`
+- `REQ-008` source ref `REQ-008`
+- `REQ-009` source ref `REQ-009`
+- `REQ-011` source ref `REQ-011`
+- `REQ-012` source ref `REQ-012`
+- `REQ-005` source refs `REQ-005`, `REQ-014`
+- `REQ-010` source ref `REQ-010`
+- `REQ-006` source ref `REQ-006`
+- `REQ-015` source refs `REQ-015`, `REQ-016`
+
+Repeated deterministic result across all 3 runs:
+
+- coverage validation: fail
+- uncovered source clauses: `REQ-001`, `REQ-013`
+
+Meaning:
+
+- the contract still omitted the top-level behavioral existence clause for the ReservationBook
+- the contract still omitted the state-preservation clause from observable requirements
+- the model continued to push some source obligations into higher-level framing/invariants instead of TDD-addressable observable requirements
+
+Atomicity assessment:
+
+- most emitted observable requirements were acceptably focused
+- the model still bundled some clauses together, but that was not the blocking defect
+- the blocking defect was semantic incompleteness despite structurally valid output
+
+Conclusion:
+
+- PR16 now has machine-checkable source-to-contract traceability
+- structural validity alone is no longer trusted
+- the local planner now fails closed instead of silently accepting incomplete contracts
+- however `local-primary` still did not produce a contract with complete observable coverage in any of the 3 fresh runs
+- under the stopping rule, this is sufficient evidence to stop prompt escalation and report that the current local planner is not yet reliable enough for the live ReservationBook TDD lane
+
+`PR16_SOURCE_REQUIREMENT_TRACEABILITY = PASS`
+
+`PR16_CONTRACT_SEMANTIC_COMPLETENESS = FAIL`
+
+`PR16_LOCAL_PLANNER_VIABLE = NO`
+
+`PR16_READY_FOR_LIVE_TDD_RUN = NO`
+
 `PR16_END_TO_END_COMPONENT = PASS|FAIL`

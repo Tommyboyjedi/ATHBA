@@ -13,6 +13,7 @@ from core.development.behavior_contract_coordinator import (
     ContractTesterWorkUnitFactory,
     DynamicTddPlanner,
     GitReviewMaterialProvider,
+    RequirementClausePlanner,
     SeniorReviewer,
 )
 from core.development.tdd_progression import (
@@ -21,6 +22,7 @@ from core.development.tdd_progression import (
     BehaviorContractRunState,
     ContractCycleRecord,
     SemanticReviewResult,
+    SourceRequirementClause,
     TddPhase,
     TddPhaseState,
     TddSnapshot,
@@ -108,25 +110,53 @@ def binding(base_sha="a" * 40, *, registered_root=None):
     )
 
 
+def requirement_text() -> str:
+    return (
+        "Build a small in-memory ReservationBook for reservable resources. "
+        "A resource has a unique id and a positive integer capacity. "
+        "Clients can add resources, create uniquely identified reservations for a number of units on a resource, "
+        "cancel reservations, and query remaining availability. "
+        "Reject duplicate resource ids, duplicate reservation ids, reservations for unknown resources, "
+        "cancellation of unknown reservations, zero or negative quantities, and reservations exceeding remaining capacity. "
+        "Failed operations must not corrupt existing state. Cancelling a reservation restores that capacity. "
+        "The implementation must be in-memory only, dependency-free, small, direct, readable Python 3.14, "
+        "suitable for pytest, and free of unnecessary abstractions."
+    )
+
+
+def source_clause_payload():
+    return {
+        "clauses": [
+            {"ref": "SRC-1", "text": "A resource can be added with a unique id.", "kind": "behavior"},
+            {"ref": "SRC-2", "text": "A resource capacity must be a positive integer.", "kind": "validation"},
+            {"ref": "SRC-3", "text": "A reservation can be created for a known resource.", "kind": "behavior"},
+            {"ref": "SRC-4", "text": "A reservation quantity must not exceed remaining capacity.", "kind": "validation"},
+        ]
+    }
+
+
 def contract_payload():
     return {
         "id": "contract-reservation-book",
         "project_id": "reservation-book",
         "component_name": "ReservationBook",
         "capability": "Manage in-memory reservations for resources.",
-        "requirement_source": "Build a small in-memory ReservationBook for reservable resources.",
+        "requirement_source": requirement_text(),
+        "source_clauses": source_clause_payload()["clauses"],
         "observable_requirements": [
             {
                 "ref": "RB-1",
-                "summary": "Add a resource with a unique id and capacity.",
+                "source_refs": ["SRC-1", "SRC-2"],
+                "summary": "Add a resource with a unique id and positive capacity.",
                 "observable_outcome": "add_resource stores a new resource and availability reflects full capacity.",
                 "test_hint": "test_add_resource_sets_availability",
-                "error_expectation": "duplicate resource ids raise ValueError",
+                "error_expectation": "duplicate resource ids and non-positive capacity raise ValueError",
                 "preserves_state_on_failure": True,
             },
             {
                 "ref": "RB-2",
-                "summary": "Create a reservation on a known resource.",
+                "source_refs": ["SRC-3", "SRC-4"],
+                "summary": "Create a reservation on a known resource within remaining capacity.",
                 "observable_outcome": "reserve stores the reservation and decreases availability.",
                 "test_hint": "test_reserve_reduces_capacity",
                 "error_expectation": "unknown resources and over-capacity reservations raise ValueError",
@@ -148,7 +178,7 @@ def contract_payload():
         ],
         "error_semantics": ["invalid operations raise ValueError"],
         "non_goals": ["no persistence", "no concurrency", "no external dependencies"],
-        "completion_criteria": ["all observable requirements are covered by accepted tests and semantically approved code"],
+        "completion_criteria": ["all source clauses are covered by observable requirements and accepted tests"],
         "status": "tdd_ready",
     }
 
@@ -159,6 +189,7 @@ def contract() -> BehaviorContract:
 
 def single_requirement_contract() -> BehaviorContract:
     payload = contract_payload()
+    payload["source_clauses"] = payload["source_clauses"][:2]
     payload["observable_requirements"] = [payload["observable_requirements"][0]]
     return BehaviorContract.from_dict(payload)
 
@@ -265,26 +296,71 @@ def create_review_repo(tmp_path: Path) -> tuple[Path, str, str]:
 
 @pytest.mark.asyncio
 async def test_valid_component_requirement_becomes_valid_behavior_contract():
-    gateway = FakeReasoningGateway([contract_payload()])
+    gateway = FakeReasoningGateway([source_clause_payload(), contract_payload()])
     planner = BehaviorContractPlanner(gateway)
 
     result = await planner.create_contract(
         project_id="reservation-book",
-        requirement_text="Build a small in-memory ReservationBook for reservable resources.",
+        requirement_text=requirement_text(),
         production_paths=["reservation_book.py"],
         test_paths=["tests/test_reservation_book.py"],
     )
 
     assert result.component_name == "ReservationBook"
+    assert result.source_clause_refs() == ["SRC-1", "SRC-2", "SRC-3", "SRC-4"]
     assert result.requirement_refs() == ["RB-1", "RB-2"]
+    assert result.observable_requirements[0].source_refs == ["SRC-1", "SRC-2"]
     assert result.production_paths == ["reservation_book.py"]
     assert result.test_paths == ["tests/test_reservation_book.py"]
     assert find_forbidden_resource_selection_keys(result.to_dict()) == []
 
 
 @pytest.mark.asyncio
+async def test_valid_source_requirement_clause_extraction_parses():
+    planner = RequirementClausePlanner(FakeReasoningGateway([source_clause_payload()]))
+
+    clauses = await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+    assert [clause.ref for clause in clauses] == ["SRC-1", "SRC-2", "SRC-3", "SRC-4"]
+    assert clauses[0] == SourceRequirementClause(ref="SRC-1", text="A resource can be added with a unique id.", kind="behavior")
+
+
+@pytest.mark.asyncio
+async def test_malformed_source_requirement_clause_input_fails_closed():
+    planner = RequirementClausePlanner(FakeReasoningGateway(["not json"]))
+
+    with pytest.raises(ValueError, match="source requirement clauses response was not valid JSON"):
+        await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+
+@pytest.mark.asyncio
+async def test_empty_source_clauses_are_rejected():
+    planner = RequirementClausePlanner(FakeReasoningGateway([{"clauses": []}]))
+
+    with pytest.raises(ValueError, match="source requirement clauses must not be empty"):
+        await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+
+@pytest.mark.asyncio
+async def test_duplicate_source_clause_refs_are_rejected():
+    planner = RequirementClausePlanner(
+        FakeReasoningGateway([
+            {
+                "clauses": [
+                    {"ref": "SRC-1", "text": "Add a resource.", "kind": "behavior"},
+                    {"ref": "SRC-1", "text": "Reject duplicate ids.", "kind": "validation"},
+                ]
+            }
+        ])
+    )
+
+    with pytest.raises(ValueError, match="duplicate source clause refs"):
+        await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+
+@pytest.mark.asyncio
 async def test_malformed_contract_input_fails_closed():
-    gateway = FakeReasoningGateway(["not json"])
+    gateway = FakeReasoningGateway([source_clause_payload(), "not json"])
     planner = BehaviorContractPlanner(gateway)
 
     with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
@@ -293,7 +369,7 @@ async def test_malformed_contract_input_fails_closed():
 
 @pytest.mark.asyncio
 async def test_fenced_json_contract_output_fails_closed():
-    gateway = FakeReasoningGateway(["```json\n{}\n```"])
+    gateway = FakeReasoningGateway([source_clause_payload(), "```json\n{}\n```"])
     planner = BehaviorContractPlanner(gateway)
 
     with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
@@ -303,7 +379,7 @@ async def test_fenced_json_contract_output_fails_closed():
 @pytest.mark.asyncio
 async def test_prose_before_json_contract_output_fails_closed():
     payload = json.dumps(contract_payload())
-    gateway = FakeReasoningGateway([f"Here is the JSON you asked for:\n{payload}"])
+    gateway = FakeReasoningGateway([source_clause_payload(), f"Here is the JSON you asked for:\n{payload}"])
     planner = BehaviorContractPlanner(gateway)
 
     with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
@@ -318,6 +394,8 @@ def test_contract_requirement_refs_are_retained_through_round_trip():
     )
 
     assert restored.requirement_refs() == ["RB-1", "RB-2"]
+    assert restored.source_clause_refs() == ["SRC-1", "SRC-2", "SRC-3", "SRC-4"]
+    assert restored.observable_requirements[0].source_refs == ["SRC-1", "SRC-2"]
 
 
 def test_contract_rejects_wrong_field_types_invalid_status_and_invalid_paths():
@@ -354,17 +432,98 @@ def test_contract_rejects_wrong_field_types_invalid_status_and_invalid_paths():
         BehaviorContract.from_dict(parent_escape)
 
 
+def test_contract_rejects_traceability_gaps_and_unknown_refs():
+    base = contract_payload()
+
+    empty_source_refs = dict(base)
+    empty_source_refs["observable_requirements"] = [dict(base["observable_requirements"][0]), dict(base["observable_requirements"][1])]
+    empty_source_refs["observable_requirements"][0]["source_refs"] = []
+    with pytest.raises(ValueError, match="requirement source refs must not be empty"):
+        BehaviorContract.from_dict(empty_source_refs)
+
+    unknown_source_ref = dict(base)
+    unknown_source_ref["observable_requirements"] = [dict(base["observable_requirements"][0]), dict(base["observable_requirements"][1])]
+    unknown_source_ref["observable_requirements"][0]["source_refs"] = ["SRC-999"]
+    with pytest.raises(ValueError, match="must exist in source clauses"):
+        BehaviorContract.from_dict(unknown_source_ref)
+
+    uncovered_clause = dict(base)
+    uncovered_clause["observable_requirements"] = [dict(base["observable_requirements"][0]), dict(base["observable_requirements"][1])]
+    uncovered_clause["observable_requirements"][1]["source_refs"] = ["SRC-3"]
+    with pytest.raises(ValueError, match="source clauses must be covered"):
+        BehaviorContract.from_dict(uncovered_clause)
+
+    duplicate_clause_refs = dict(base)
+    duplicate_clause_refs["source_clauses"] = list(base["source_clauses"]) + [dict(base["source_clauses"][0])]
+    with pytest.raises(ValueError, match="duplicate source clause refs"):
+        BehaviorContract.from_dict(duplicate_clause_refs)
+
+    duplicate_requirement_refs = dict(base)
+    duplicate_requirement_refs["observable_requirements"] = [dict(base["observable_requirements"][0]), dict(base["observable_requirements"][0])]
+    with pytest.raises(ValueError, match="duplicate requirement refs"):
+        BehaviorContract.from_dict(duplicate_requirement_refs)
+
+
+def test_source_clause_only_in_completion_criteria_still_fails_coverage():
+    payload = contract_payload()
+    payload["completion_criteria"] = payload["completion_criteria"] + ["SRC-4 capacity enforcement remains required"]
+    payload["observable_requirements"] = [dict(payload["observable_requirements"][0]), dict(payload["observable_requirements"][1])]
+    payload["observable_requirements"][1]["source_refs"] = ["SRC-3"]
+
+    with pytest.raises(ValueError, match="source clauses must be covered"):
+        BehaviorContract.from_dict(payload)
+
+
+def test_one_source_clause_can_map_to_multiple_observable_requirements():
+    payload = contract_payload()
+    payload["source_clauses"] = [
+        {"ref": "SRC-1", "text": "Reservation quantity must be positive.", "kind": "validation"},
+    ]
+    payload["observable_requirements"] = [
+        {
+            "ref": "RB-1",
+            "source_refs": ["SRC-1"],
+            "summary": "Reject zero reservation quantity.",
+            "observable_outcome": "reserve rejects quantity 0 without changing state.",
+            "test_hint": "test_reject_zero_quantity",
+            "error_expectation": "ValueError",
+            "preserves_state_on_failure": True,
+        },
+        {
+            "ref": "RB-2",
+            "source_refs": ["SRC-1"],
+            "summary": "Reject negative reservation quantity.",
+            "observable_outcome": "reserve rejects negative quantity without changing state.",
+            "test_hint": "test_reject_negative_quantity",
+            "error_expectation": "ValueError",
+            "preserves_state_on_failure": True,
+        },
+    ]
+
+    contract_state = BehaviorContract.from_dict(payload)
+
+    assert contract_state.uncovered_source_clause_refs() == []
+
+
+def test_multiple_source_clauses_can_map_to_one_requirement_when_behavior_is_coherent():
+    payload = contract_payload()
+
+    contract_state = BehaviorContract.from_dict(payload)
+
+    assert contract_state.observable_requirements[0].source_refs == ["SRC-1", "SRC-2"]
+
+
 @pytest.mark.asyncio
 async def test_contract_output_paths_must_match_allowed_path_sets():
     payload = contract_payload()
     payload["production_paths"] = ["other.py"]
     payload["test_paths"] = ["tests/other_test.py"]
-    planner = BehaviorContractPlanner(FakeReasoningGateway([payload]))
+    planner = BehaviorContractPlanner(FakeReasoningGateway([source_clause_payload(), payload]))
 
     with pytest.raises(ValueError, match="allowed path set"):
         await planner.create_contract(
             project_id="reservation-book",
-            requirement_text="Build a small in-memory ReservationBook for reservable resources.",
+            requirement_text=requirement_text(),
             production_paths=["reservation_book.py"],
             test_paths=["tests/test_reservation_book.py"],
         )
@@ -380,25 +539,47 @@ def test_no_worker_model_or_gpu_fields_leak_into_contract_or_tdd_requests():
     assert find_forbidden_resource_selection_keys(green_request) == []
 
 
+def test_dynamic_tdd_step_retains_traceability_back_to_source_clauses():
+    step = proposal("RB-1")
+    contract_state = contract()
+    requirement = next(item for item in contract_state.observable_requirements if item.ref == step.requirement_refs[0])
+
+    assert requirement.source_refs == ["SRC-1", "SRC-2"]
+    assert [clause.text for clause in contract_state.source_clauses if clause.ref in requirement.source_refs] == [
+        "A resource can be added with a unique id.",
+        "A resource capacity must be a positive integer.",
+    ]
+
+
 @pytest.mark.asyncio
-async def test_contract_prompt_explicitly_constrains_raw_json_types_paths_and_atomicity():
-    gateway = FakeReasoningGateway([contract_payload()])
+async def test_contract_prompt_explicitly_constrains_raw_json_types_paths_atomicity_and_traceability():
+    gateway = FakeReasoningGateway([source_clause_payload(), contract_payload()])
     planner = BehaviorContractPlanner(gateway)
 
     await planner.create_contract(
         project_id="reservation-book",
-        requirement_text="Build a small in-memory ReservationBook for reservable resources.",
+        requirement_text=requirement_text(),
         production_paths=["reservation_book.py"],
         test_paths=["tests/test_reservation_book.py"],
     )
 
-    prompt = gateway.requests[0].prompt
+    clause_prompt = gateway.requests[0].prompt
+    assert "Produce ATHBA PR16 source requirement clauses as raw JSON only." in clause_prompt
+    assert "one source obligation per clause" in clause_prompt
+    assert "preserve happy-path, failure, query, and state-preservation obligations" in clause_prompt
+    assert "do not invent requirements beyond reasonable decomposition of the supplied text" in clause_prompt
+
+    prompt = gateway.requests[1].prompt
     assert "return raw JSON only" in prompt
     assert "do not use code fences" in prompt
     assert "do not add commentary before or after the JSON" in prompt
     assert "\"status\": \"tdd_ready\"" in prompt
     assert "\"public_api\": [" in prompt
     assert "\"error_semantics\": [" in prompt
+    assert "\"source_refs\": [" in prompt
+    assert "\"source_clauses\": [" in prompt
+    assert "copy source clause refs exactly into source_refs" in prompt
+    assert "every supplied source clause must be covered" in prompt
     assert "allowed_production_paths" in prompt
     assert "reservation_book.py" in prompt
     assert "allowed_test_paths" in prompt

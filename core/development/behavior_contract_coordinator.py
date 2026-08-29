@@ -24,6 +24,7 @@ from core.development.tdd_progression import (
     CONTRACT_POOL_STATUSES,
     ContractCycleRecord,
     SemanticReviewResult,
+    SourceRequirementClause,
     TddPhase,
     TddSnapshot,
     TddStepDecision,
@@ -118,11 +119,40 @@ class GitReviewMaterialProvider:
         return result.stdout.strip()
 
 
-class BehaviorContractPlanner:
-    """Turn one component requirement into a structured provider-neutral contract."""
+class RequirementClausePlanner:
+    """Turn one component requirement into machine-checkable source clauses."""
 
     def __init__(self, gateway: ReasoningGateway):
         self.gateway = gateway
+
+    async def create_clauses(self, *, project_id: str, requirement_text: str) -> list[SourceRequirementClause]:
+        request = ReasoningRequest(
+            purpose="athba_source_requirement_clauses",
+            prompt=_source_clause_prompt(project_id=project_id, requirement_text=requirement_text),
+            project_id=project_id,
+            requires_large_context=False,
+        )
+        result = await self.gateway.reason(request)
+        payload = _json_object(result.text, label="source requirement clauses")
+        raw_clauses = payload.get("clauses")
+        if not isinstance(raw_clauses, list):
+            raise ValueError("source requirement clauses response must include a clauses list")
+        clauses = [SourceRequirementClause.from_dict(dict(item)) for item in raw_clauses]
+        if not clauses:
+            raise ValueError("source requirement clauses must not be empty")
+        refs = [clause.ref for clause in clauses]
+        duplicates = sorted({ref for ref in refs if refs.count(ref) > 1})
+        if duplicates:
+            raise ValueError(f"duplicate source clause refs are not allowed: {duplicates}")
+        return clauses
+
+
+class BehaviorContractPlanner:
+    """Turn one component requirement into a structured provider-neutral contract."""
+
+    def __init__(self, gateway: ReasoningGateway, clause_planner: RequirementClausePlanner | None = None):
+        self.gateway = gateway
+        self.clause_planner = clause_planner or RequirementClausePlanner(gateway)
 
     async def create_contract(
         self,
@@ -134,11 +164,13 @@ class BehaviorContractPlanner:
     ) -> BehaviorContract:
         normalized_production_paths = _normalize_allowed_paths(production_paths, label="allowed production paths")
         normalized_test_paths = _normalize_allowed_paths(test_paths, label="allowed test paths")
+        source_clauses = await self.clause_planner.create_clauses(project_id=project_id, requirement_text=requirement_text)
         request = ReasoningRequest(
             purpose="athba_behavior_contract",
             prompt=_contract_prompt(
                 project_id=project_id,
                 requirement_text=requirement_text,
+                source_clauses=source_clauses,
                 production_paths=normalized_production_paths,
                 test_paths=normalized_test_paths,
             ),
@@ -611,10 +643,49 @@ def _json_object(text: str, *, label: str) -> dict[str, object]:
     return payload
 
 
+def _source_clause_prompt(*, project_id: str, requirement_text: str) -> str:
+    return json.dumps(
+        {
+            "instruction": "Produce ATHBA PR16 source requirement clauses as raw JSON only.",
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+                "include one top-level clauses array",
+                "do not add extra fields outside the required schema",
+            ],
+            "project_id": project_id,
+            "requirement_text": requirement_text,
+            "required_json_schema": {
+                "clauses": [
+                    {
+                        "ref": "string",
+                        "text": "string",
+                        "kind": "string",
+                    }
+                ]
+            },
+            "rules": [
+                "one source obligation per clause",
+                "do not bundle unrelated behaviors into one clause",
+                "preserve happy-path, failure, query, and state-preservation obligations from the source text",
+                "do not include implementation details",
+                "do not invent requirements beyond reasonable decomposition of the supplied text",
+                "keep the clause set complete enough that every meaningful behavioral obligation from the source text is represented",
+                "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
 def _contract_prompt(
     *,
     project_id: str,
     requirement_text: str,
+    source_clauses: list[SourceRequirementClause],
     production_paths: list[str],
     test_paths: list[str],
 ) -> str:
@@ -624,9 +695,17 @@ def _contract_prompt(
         "component_name": "string",
         "capability": "string",
         "requirement_source": "string",
+        "source_clauses": [
+            {
+                "ref": "string",
+                "text": "string",
+                "kind": "string",
+            }
+        ],
         "observable_requirements": [
             {
                 "ref": "string",
+                "source_refs": ["string"],
                 "summary": "string",
                 "observable_outcome": "string",
                 "test_hint": "string",
@@ -656,6 +735,7 @@ def _contract_prompt(
             ],
             "project_id": project_id,
             "requirement_text": requirement_text,
+            "source_clauses": [clause.to_dict() for clause in source_clauses],
             "allowed_production_paths": production_paths,
             "allowed_test_paths": test_paths,
             "path_rules": [
@@ -673,7 +753,15 @@ def _contract_prompt(
                 "one requirement ref must be completable by one focused semantic TDD slice",
                 "if two cases require distinct tests or distinct failure conditions, give them separate refs",
                 "do not bundle unrelated failure modes under one requirement ref",
+                "multiple observable requirements may reference the same source clause when that improves TDD granularity",
                 "do not pre-author a future Tester step list",
+            ],
+            "traceability_rules": [
+                "every supplied source clause must be covered by at least one observable requirement source_refs entry",
+                "copy source clause refs exactly into source_refs",
+                "do not invent source refs",
+                "do not leave a source clause represented only in invariants, completion_criteria, or error_semantics",
+                "each observable requirement must include a non-empty source_refs array",
             ],
             "domain_rules": [
                 "status must be exactly tdd_ready",
