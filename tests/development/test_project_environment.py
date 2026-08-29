@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from core.execution.rack_ai_contract import find_forbidden_resource_selection_ke
 
 
 def service(tmp_path):
-    return ProjectEnvironmentService(tmp_path / "projects", python_executable="/srv/ATHBA/.venv/bin/python")
+    return ProjectEnvironmentService(tmp_path / "projects", python_executable=sys.executable)
 
 
 def test_project_persists_reloads_and_reuses_runtime(tmp_path):
@@ -61,7 +62,7 @@ def test_retirement_only_removes_athba_owned_workspace(tmp_path):
 
     assert retired.status == "retired"
     assert not (tmp_path / "projects" / "retire-me" / "repository").exists()
-    assert Path("/srv/ATHBA/.venv").exists()
+    assert Path(project.runtime.environment_path).is_file()
     with pytest.raises(ValueError, match="retired"):
         service(tmp_path).create_or_load_python_project(project.project_id)
 
