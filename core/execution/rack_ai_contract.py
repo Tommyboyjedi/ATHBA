@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from core.development.work_unit import DevelopmentWorkUnit, ExecutionAttempt
@@ -40,6 +40,7 @@ class RepositoryBinding:
     base_ref: str
     base_sha: str | None = None
     registered_root: str | None = None
+    environment_resources: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         _require_text(self.repository_id, "repository id")
@@ -48,6 +49,8 @@ class RepositoryBinding:
             _require_text(self.base_sha, "base sha")
         if self.registered_root is not None:
             _require_text(self.registered_root, "registered root")
+        for resource in self.environment_resources:
+            _require_text(resource, "environment resource")
 
     def with_base_sha(self, base_sha: str | None) -> "RepositoryBinding":
         if base_sha is None:
@@ -70,7 +73,7 @@ def to_rack_ai_request(workload_id: str, binding: RepositoryBinding, unit: Devel
     if binding.registered_root is not None:
         repository["root"] = binding.registered_root
 
-    return {
+    request: dict[str, Any] = {
         "change_id": f"{workload_id}--{unit.id}",
         "repository": repository,
         "task": unit.objective,
@@ -85,6 +88,9 @@ def to_rack_ai_request(workload_id: str, binding: RepositoryBinding, unit: Devel
             "network": unit.network,
         },
     }
+    if binding.environment_resources:
+        request["environment_resources"] = list(binding.environment_resources)
+    return request
 
 
 def parse_rack_ai_result(payload: Mapping[str, Any]) -> ExecutionAttempt:

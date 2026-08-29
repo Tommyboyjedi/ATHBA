@@ -22,6 +22,7 @@ def test_project_persists_reloads_and_reuses_runtime(tmp_path):
     assert first.status == "ready"
     assert first.runtime.kind == "python"
     assert first.runtime.lifetime == "shared"
+    assert first.runtime.environment_resources == [str(Path(sys.executable).parent.parent)]
     assert first.workspace_lifetime == "disposable"
     assert (tmp_path / "projects" / "proof-one" / "project.json").exists()
     assert (tmp_path / "projects" / "proof-one" / "repository" / ".git").exists()
@@ -78,5 +79,6 @@ def test_generic_execution_request_has_no_runtime_or_framework_fields(tmp_path):
     request = to_rack_ai_request("environment-proof", project.binding(), unit)
 
     assert request["repository"] == {"id": project.project_id, "base_ref": "main", "base_sha": project.trusted_base_sha, "root": project.repository_root}
+    assert request["environment_resources"] == [str(Path(sys.executable).parent.parent)]
     assert find_forbidden_resource_selection_keys(request) == []
     assert "python" not in json.dumps(request).lower()

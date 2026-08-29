@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from core.development.python_test_runtime import PythonPytestRuntime
@@ -24,16 +24,19 @@ class ProjectRuntime:
     test_command: list[str]
     build_command: list[str] | None = None
     lifetime: str = "shared"
+    environment_resources: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {"kind": self.kind, "version": self.version, "environment_path": self.environment_path,
-                "test_command": self.test_command, "build_command": self.build_command, "lifetime": self.lifetime}
+                "test_command": self.test_command, "build_command": self.build_command, "lifetime": self.lifetime,
+                "environment_resources": self.environment_resources}
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "ProjectRuntime":
         return cls(str(data["kind"]), str(data["version"]), str(data["environment_path"]),
                    [str(value) for value in data["test_command"]],
-                   None if data.get("build_command") is None else [str(value) for value in data["build_command"]], str(data.get("lifetime", "shared")))
+                   None if data.get("build_command") is None else [str(value) for value in data["build_command"]], str(data.get("lifetime", "shared")),
+                   [str(value) for value in data.get("environment_resources", [])])
 
 
 @dataclass(frozen=True)
@@ -52,7 +55,13 @@ class DevelopmentProject:
             raise ValueError("invalid project lifecycle state")
 
     def binding(self) -> RepositoryBinding:
-        return RepositoryBinding(self.project_id, self.default_ref, self.trusted_base_sha, self.repository_root)
+        return RepositoryBinding(
+            self.project_id,
+            self.default_ref,
+            self.trusted_base_sha,
+            self.repository_root,
+            list(self.runtime.environment_resources),
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {"project_id": self.project_id, "repository_root": self.repository_root, "default_ref": self.default_ref,
@@ -106,7 +115,14 @@ class ProjectEnvironmentService:
         sha = self._git(project_root, "rev-parse", "HEAD").strip()
         runtime = PythonPytestRuntime(self.python_executable)
         project = DevelopmentProject(project_id, str(project_root), "main", sha,
-            ProjectRuntime("python", "3.14", self.python_executable, runtime.pytest_command("."), lifetime="shared"),
+            ProjectRuntime(
+                "python",
+                "3.14",
+                self.python_executable,
+                runtime.pytest_command("."),
+                lifetime="shared",
+                environment_resources=[str(Path(self.python_executable).parent.parent)],
+            ),
             ["__pycache__", ".pytest_cache"], "prepared", "disposable")
         self._assert_ready(project)
         project = replace(project, status="ready")

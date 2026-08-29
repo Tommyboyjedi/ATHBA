@@ -379,3 +379,27 @@ test-evidence reconciliation. The retained ATHBA evidence is
 
 This is a Rack AI generic execution capability handoff, not a reason to change
 Rack AI from ATHBA or to weaken the project runtime/readiness contract.
+
+## Environment-resource retry (2026-08-30)
+
+Rack AI PR28 then deployed generic `environment_resources` handoff and trusted
+the ATHBA-owned `/srv/ATHBA/.venv` resource. ATHBA records this resource on the
+project runtime and forwards it through the generic change request without
+encoding Python or pytest semantics in the Rack AI adapter.
+
+Fresh run `pr17-e2e-20260830T000100Z` created its project through PR19,
+generated an independent 18-item Gatekeeper checklist and an independent
+11-requirement Behavior Contract, then submitted the first Tester RED step.
+The earlier approved-program failure did not recur: Rack AI mounted the declared
+runtime resource and began isolated execution of the ATHBA runtime.
+
+Rack AI rejected that RED before acceptance with `path_policy_failed` because
+the implementation created `tests/`, reported as outside the single allowed
+test-file path. No RED revision was accepted, so ATHBA did not begin GREEN,
+Senior Review, or reconciliation. Evidence is retained at
+`state/pr17-independent-runs/pr17-e2e-20260830T000100Z/evidence.json`; the
+Rack AI packet is
+`/srv/rack-ai/state/changes/pr17-e2e-20260830T000100Z--test_add_duplicate_resource_id--red/review-packet.json`.
+
+This is a further Rack AI generic execution-policy handoff. ATHBA did not alter
+Rack AI, weaken allowed-path semantics, or fabricate an accepted revision.

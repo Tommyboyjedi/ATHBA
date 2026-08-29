@@ -77,6 +77,7 @@ def test_rack_ai_request_matches_current_change_contract_shape():
             base_ref="main",
             base_sha="a" * 40,
             registered_root="/srv/projects/adaptos",
+            environment_resources=["/srv/environments/adaptos"],
         ),
         unit,
     )
@@ -99,6 +100,7 @@ def test_rack_ai_request_matches_current_change_contract_shape():
             "timeout_seconds": 900,
             "network": "disabled",
         },
+        "environment_resources": ["/srv/environments/adaptos"],
     }
 
 
