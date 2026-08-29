@@ -179,11 +179,37 @@ class BehaviorContractPlanner:
             requires_large_context=False,
         )
         result = await self.gateway.reason(request)
-        return BehaviorContract.from_dict(
-            _json_object(result.text, label="behavior contract"),
-            allowed_production_paths=normalized_production_paths,
-            allowed_test_paths=normalized_test_paths,
-        )
+        try:
+            return _contract_from_response(
+                result.text,
+                label="behavior contract",
+                allowed_production_paths=normalized_production_paths,
+                allowed_test_paths=normalized_test_paths,
+            )
+        except ValueError as error:
+            if not _is_recoverable_contract_error(error):
+                raise
+            repair_request = ReasoningRequest(
+                purpose="athba_behavior_contract_repair",
+                prompt=_contract_repair_prompt(
+                    project_id=project_id,
+                    requirement_text=requirement_text,
+                    source_clauses=source_clauses,
+                    production_paths=normalized_production_paths,
+                    test_paths=normalized_test_paths,
+                    invalid_contract_text=result.text,
+                    validation_error=str(error),
+                ),
+                project_id=project_id,
+                requires_large_context=False,
+            )
+            repair_result = await self.gateway.reason(repair_request)
+            return _contract_from_response(
+                repair_result.text,
+                label="behavior contract repair",
+                allowed_production_paths=normalized_production_paths,
+                allowed_test_paths=normalized_test_paths,
+            )
 
 
 class DynamicTddPlanner:
@@ -200,8 +226,24 @@ class DynamicTddPlanner:
             requires_large_context=False,
         )
         result = await self.gateway.reason(request)
-        decision = TddStepDecision.from_dict(_json_object(result.text, label="step decision"))
-        return self._validate_decision(contract, run_state, decision)
+        try:
+            return _decision_from_response(contract, run_state, result.text, label="step decision")
+        except ValueError as error:
+            if not _is_recoverable_step_error(error):
+                raise
+            repair_request = ReasoningRequest(
+                purpose="athba_tdd_step_selection_repair",
+                prompt=_step_repair_prompt(
+                    contract=contract,
+                    run_state=run_state,
+                    invalid_step_text=result.text,
+                    validation_error=str(error),
+                ),
+                project_id=contract.project_id,
+                requires_large_context=False,
+            )
+            repair_result = await self.gateway.reason(repair_request)
+            return _decision_from_response(contract, run_state, repair_result.text, label="step decision repair")
 
     def _validate_decision(
         self,
@@ -237,6 +279,8 @@ class DynamicTddPlanner:
             raise ValueError("step proposal test path is outside the contract")
         if proposal.production_path not in contract.production_paths:
             raise ValueError("step proposal production path is outside the contract")
+        if not _is_valid_pytest_node_for_path(proposal.test_name, proposal.test_path):
+            raise ValueError("step proposal test name must be a pytest node id within the selected test path")
         return decision
 
 
@@ -718,6 +762,7 @@ def _source_clause_prompt(*, project_id: str, requirement_text: str) -> str:
                 "evidence_kind must be one of test, mechanical, review",
                 "use test for executable behavior and validation obligations by default",
                 "use review for readability and unnecessary-abstraction obligations",
+                "for quality clauses, evidence_kind must be review and must never be quality",
                 "use mechanical for deterministic environment or dependency constraints",
                 "do not include implementation details",
                 "do not invent requirements beyond reasonable decomposition of the supplied text",
@@ -825,6 +870,99 @@ def _contract_prompt(
     )
 
 
+
+def _contract_from_response(
+    text: str,
+    *,
+    label: str,
+    allowed_production_paths: list[str],
+    allowed_test_paths: list[str],
+) -> BehaviorContract:
+    return BehaviorContract.from_dict(
+        _json_object(text, label=label),
+        allowed_production_paths=allowed_production_paths,
+        allowed_test_paths=allowed_test_paths,
+    )
+
+
+def _is_recoverable_contract_error(error: ValueError) -> bool:
+    message = str(error)
+    return message.startswith("source clauses must be covered by observable requirements:")
+
+
+def _contract_repair_prompt(
+    *,
+    project_id: str,
+    requirement_text: str,
+    source_clauses: list[SourceRequirementClause],
+    production_paths: list[str],
+    test_paths: list[str],
+    invalid_contract_text: str,
+    validation_error: str,
+) -> str:
+    return json.dumps(
+        {
+            "instruction": "Repair the invalid ATHBA behavior contract. Return raw JSON only.",
+            "project_id": project_id,
+            "requirement_text": requirement_text,
+            "source_clauses": [clause.to_dict() for clause in source_clauses],
+            "production_paths": production_paths,
+            "test_paths": test_paths,
+            "invalid_contract_draft": invalid_contract_text,
+            "validation_error": validation_error,
+            "required_json_schema": {
+                "id": "string",
+                "project_id": "string",
+                "component_name": "string",
+                "capability": "string",
+                "requirement_source": "string",
+                "source_clauses": [
+                    {
+                        "ref": "string",
+                        "text": "string",
+                        "kind": "behavior|validation|invariant|constraint|quality",
+                        "evidence_kind": "test|mechanical|review",
+                    }
+                ],
+                "observable_requirements": [
+                    {
+                        "ref": "string",
+                        "source_refs": ["string"],
+                        "summary": "string",
+                        "observable_outcome": "string",
+                        "test_hint": "string",
+                        "error_expectation": "string|null",
+                        "preserves_state_on_failure": "boolean",
+                    }
+                ],
+                "invariants": ["string"],
+                "production_paths": ["string"],
+                "test_paths": ["string"],
+                "public_api": ["string"],
+                "error_semantics": ["string"],
+                "non_goals": ["string"],
+                "completion_criteria": ["string"],
+                "status": "tdd_ready|cycle_active|review_ready|repair_ready|replan_ready|approved|completed",
+            },
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+            ],
+            "repair_rules": [
+                "keep the contract within the supplied repository-relative production and test paths",
+                "preserve valid existing fields where possible",
+                "every source clause ref must appear in at least one observable_requirements[].source_refs entry",
+                "do not drop source clauses to hide coverage problems",
+                "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
 def _step_prompt(contract: BehaviorContract, run_state: BehaviorContractRunState) -> str:
     prior_steps = [cycle.step.to_dict() for cycle in run_state.cycles]
     return json.dumps(
@@ -853,17 +991,104 @@ def _step_prompt(contract: BehaviorContract, run_state: BehaviorContractRunState
                 },
                 "completed_requirement_refs": ["optional consistency echo only; does not grant completion authority"]
             },
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+            ],
             "rules": [
                 "do not repeat already covered requirements",
                 "do not combine unrelated new behaviors into one proposal",
                 "do not include implementation details",
                 "do not leak worker, GPU, model, endpoint, or port data",
+                "proposal.requirement_refs must copy exactly one existing contract requirement ref",
+                "proposal.test_name must be a full pytest node id that starts with proposal.test_path followed by ::",
                 "never declare completion unless all requirement refs are already semantically approved in persisted state",
             ],
         },
         indent=2,
         sort_keys=True,
     )
+
+
+
+def _decision_from_response(
+    contract: BehaviorContract,
+    run_state: BehaviorContractRunState,
+    text: str,
+    *,
+    label: str,
+) -> TddStepDecision:
+    decision = TddStepDecision.from_dict(_json_object(text, label=label))
+    return DynamicTddPlanner(None)._validate_decision(contract, run_state, decision)  # type: ignore[arg-type]
+
+
+def _is_recoverable_step_error(error: ValueError) -> bool:
+    message = str(error)
+    return message in {
+        "step decision response was not valid JSON",
+        "step proposal referenced a requirement outside the contract",
+        "step proposal test name must be a pytest node id within the selected test path",
+    }
+
+
+def _step_repair_prompt(
+    *,
+    contract: BehaviorContract,
+    run_state: BehaviorContractRunState,
+    invalid_step_text: str,
+    validation_error: str,
+) -> str:
+    return json.dumps(
+        {
+            "instruction": "Repair the invalid ATHBA Tester step decision. Return raw JSON only.",
+            "contract": contract.to_dict(),
+            "current_pool": run_state.current_pool,
+            "completed_requirement_refs": run_state.completed_requirement_refs,
+            "prior_steps": [cycle.step.to_dict() for cycle in run_state.cycles],
+            "invalid_step_decision": invalid_step_text,
+            "validation_error": validation_error,
+            "required_output": {
+                "status": "propose|complete",
+                "rationale": "string",
+                "proposal": {
+                    "step_id": "string",
+                    "requirement_refs": ["exactly one contract ref"],
+                    "focused_behavior": "one smallest useful missing observable behavior",
+                    "test_name": "full pytest node id beginning with test_path::",
+                    "expected_result": "exact observable result",
+                    "test_path": "one allowed test path",
+                    "production_path": "one allowed production path",
+                    "red_objective": "Tester RED prompt material",
+                    "green_objective": "Developer GREEN prompt material",
+                    "reason_next_smallest": "why this is the next smallest useful step",
+                    "exception_type": "optional",
+                    "exception_message": "optional"
+                },
+                "completed_requirement_refs": ["optional consistency echo only; does not grant completion authority"]
+            },
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+            ],
+            "repair_rules": [
+                "proposal.requirement_refs must copy exactly one existing contract requirement ref",
+                "proposal.test_name must be a full pytest node id that starts with proposal.test_path followed by ::",
+                "do not change the contract paths",
+                "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _is_valid_pytest_node_for_path(test_name: str, test_path: str) -> bool:
+    prefix = f"{test_path}::"
+    return test_name.startswith(prefix)
 
 
 def _review_prompt(

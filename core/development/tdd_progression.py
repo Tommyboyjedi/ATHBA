@@ -184,7 +184,7 @@ class SourceRequirementClause:
             ref=str(payload["ref"]),
             text=str(payload["text"]),
             kind=kind,
-            evidence_kind=str(payload.get("evidence_kind", _default_evidence_kind(kind))),
+            evidence_kind=_normalize_evidence_kind(kind, payload.get("evidence_kind")),
         )
 
 
@@ -1024,6 +1024,17 @@ def _default_evidence_kind(kind: str) -> str:
     if kind == "constraint":
         return "mechanical"
     return "test"
+
+
+def _normalize_evidence_kind(kind: str, value: object) -> str:
+    if value is None:
+        return _default_evidence_kind(kind)
+    normalized = str(value).strip()
+    if not normalized:
+        return _default_evidence_kind(kind)
+    if normalized == "quality":
+        return "review"
+    return normalized
 
 
 def _validate_repository_relative_path(value: str, label: str) -> None:

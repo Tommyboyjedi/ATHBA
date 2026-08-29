@@ -303,6 +303,97 @@ def test_checklist_round_trip_defaults_and_duplicates_are_validated():
         )
 
 
+def test_quality_evidence_kind_alias_normalizes_to_review():
+    clause = SourceRequirementClause.from_dict(
+        {"ref": "SPEC-10", "text": "Readable code.", "kind": "quality", "evidence_kind": "quality"}
+    )
+
+    assert clause.evidence_kind == "review"
+
+
+@pytest.mark.asyncio
+async def test_semantically_unapproved_green_cannot_close_checklist_item():
+    active_contract = contract()
+    step = TddStepProposal(
+        step_id="step-unapproved",
+        requirement_refs=["BC-1"],
+        focused_behavior="Adding a resource keeps the identifier unique.",
+        test_name="tests/test_reservation_book.py::test_add_resource_unique_and_positive_capacity",
+        expected_result="Duplicate ids fail and a valid resource can be added.",
+        test_path="tests/test_reservation_book.py",
+        production_path="reservation_book.py",
+        red_objective="Add one failing pytest test for add_resource uniqueness and positive capacity.",
+        green_objective="Implement only enough add_resource logic to satisfy the focused test.",
+        reason_next_smallest="This proves the first accepted resource behavior.",
+    )
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        red_phase=TddPhaseState(
+            phase=TddPhase.RED.value,
+            work_unit_id=red_work_unit_id(step.step_id),
+            status="checks_passed",
+            accepted_revision="b" * 40,
+        ),
+        green_phase=TddPhaseState(
+            phase=TddPhase.GREEN.value,
+            work_unit_id=green_work_unit_id(step.step_id),
+            status="checks_passed",
+            accepted_revision="c" * 40,
+            evidence_location="/tmp/step-unapproved.json",
+        ),
+        candidate_revision="c" * 40,
+        pool="review_ready",
+    )
+    checklist = single_item_checklist()
+    gatekeeper = SpecificationGatekeeper(FakeReasoningGateway([]))
+
+    state = await gatekeeper.assess(
+        active_contract,
+        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
+        SpecificationGatekeeperRunState(checklist=checklist),
+    )
+
+    assert state.latest_assessment is not None
+    assert state.latest_assessment.item_assessments[0].status == "missing_test_evidence"
+
+
+@pytest.mark.asyncio
+async def test_completed_checklist_item_does_not_reopen_without_changed_evidence():
+    active_contract = contract()
+    cycle = approved_cycle()
+    checklist = single_item_checklist()
+    gateway = FakeReasoningGateway(
+        [
+            {
+                "status": "proven",
+                "rationale": "The accepted add_resource test proves unique resource ids.",
+                "selected_test_names": [cycle.step.test_name],
+            },
+            {
+                "status": "proven",
+                "rationale": "The accepted add_resource test proves unique resource ids.",
+                "selected_test_names": [cycle.step.test_name],
+            },
+        ]
+    )
+    gatekeeper = SpecificationGatekeeper(gateway)
+    initial = await gatekeeper.assess(
+        active_contract,
+        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
+        SpecificationGatekeeperRunState(checklist=checklist),
+    )
+    repeated = await gatekeeper.assess(
+        active_contract,
+        run_state(cycles=[cycle], gatekeeper_state=initial, contract_state=active_contract),
+        initial,
+    )
+
+    assert initial.latest_assessment is not None
+    assert repeated.latest_assessment is not None
+    assert initial.latest_assessment.item_assessments[0].status == "proven"
+    assert repeated.latest_assessment.item_assessments[0].status == "proven"
+
+
 @pytest.mark.asyncio
 async def test_gatekeeper_preserves_multiple_independent_obligation_classes():
     checklist = await SpecificationChecklistPlanner(FakeReasoningGateway([checklist_payload()])).create_checklist(
@@ -417,6 +508,128 @@ def test_gatekeeper_records_explicit_evidence_and_assessment_round_trip():
 
     assert restored.status == "complete"
     assert restored.item_assessments[0].evidence[0].test_name == evidence.test_name
+
+@pytest.mark.asyncio
+async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
+    payload = contract_payload()
+    payload["source_clauses"] = [
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}
+    ]
+    payload["observable_requirements"] = [
+        {
+            "ref": "BC-10",
+            "source_refs": ["REQ-010"],
+            "summary": "Reject duplicate reservation ids.",
+            "observable_outcome": "Duplicate reservation ids raise ValueError.",
+            "test_hint": "test_duplicate_reservation_ids_are_rejected",
+            "error_expectation": "duplicate reservation ids raise ValueError",
+            "preserves_state_on_failure": True,
+        }
+    ]
+    active_contract = BehaviorContract.from_dict(payload)
+    step = TddStepProposal(
+        step_id="step-drift",
+        requirement_refs=["BC-10"],
+        focused_behavior="Duplicate reservation ids are rejected.",
+        test_name="tests/test_reservation_book.py::test_duplicate_reservation_ids_are_rejected",
+        expected_result="A second reservation with the same id raises ValueError.",
+        test_path="tests/test_reservation_book.py",
+        production_path="reservation_book.py",
+        red_objective="Add one failing pytest test for duplicate reservation ids.",
+        green_objective="Implement only enough logic to reject duplicate reservation ids.",
+        reason_next_smallest="This is a single observable validation rule.",
+    )
+    review = SemanticReviewResult(
+        verdict="approved",
+        rationale="Readable and small.",
+        findings=["clean"],
+        candidate_revision="d" * 40,
+        step_id=step.step_id,
+        evidence_refs=["review:drift"],
+        repair_instructions=[],
+    )
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        red_phase=TddPhaseState(
+            phase=TddPhase.RED.value,
+            work_unit_id=red_work_unit_id(step.step_id),
+            status="checks_passed",
+            accepted_revision="b" * 40,
+        ),
+        green_phase=TddPhaseState(
+            phase=TddPhase.GREEN.value,
+            work_unit_id=green_work_unit_id(step.step_id),
+            status="checks_passed",
+            accepted_revision="d" * 40,
+            evidence_location="/tmp/step-drift.json",
+        ),
+        candidate_revision="d" * 40,
+        semantic_revision="d" * 40,
+        review_result=review,
+        review_history=[review],
+        pool="approved",
+    )
+    checklist = SpecificationChecklist.from_dict(
+        {
+            "project_id": "reservation-book",
+            "requirement_text": requirement_text(),
+            "items": [{"ref": "REQ-08", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}],
+        }
+    )
+    gatekeeper = SpecificationGatekeeper(
+        FakeReasoningGateway(
+            [
+                {
+                    "status": "proven",
+                    "rationale": "The accepted duplicate-reservation test proves the obligation.",
+                    "selected_test_names": [step.test_name],
+                }
+            ]
+        )
+    )
+
+    state = await gatekeeper.assess(
+        active_contract,
+        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract, completed_requirement_refs=["BC-10"]),
+        SpecificationGatekeeperRunState(checklist=checklist),
+    )
+
+    assert state.latest_assessment is not None
+    assert state.latest_assessment.item_assessments[0].status == "proven"
+
+
+def test_gap_adapter_uses_contract_source_ref_when_checklist_ref_drifts():
+    payload = contract_payload()
+    payload["source_clauses"] = [
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}
+    ]
+    payload["observable_requirements"] = [
+        {
+            "ref": "BC-10",
+            "source_refs": ["REQ-010"],
+            "summary": "Reject duplicate reservation ids.",
+            "observable_outcome": "Duplicate reservation ids raise ValueError.",
+            "test_hint": "test_duplicate_reservation_ids_are_rejected",
+            "error_expectation": "duplicate reservation ids raise ValueError",
+            "preserves_state_on_failure": True,
+        }
+    ]
+    active_contract = BehaviorContract.from_dict(payload)
+    gap = SpecificationGap(
+        checklist_ref="REQ-08",
+        obligation_text="Reject duplicate reservation ids.",
+        item_kind="validation",
+        reason="No accepted executable proof yet.",
+        desired_proof="Add accepted executable proof for duplicate reservation ids.",
+        related_test_names=[],
+    )
+
+    updated = SpecificationGapTddAdapter().extend_contract_for_gap(active_contract, gap)
+    supplemental = next(item for item in updated.observable_requirements if item.ref.startswith("GK-REQ-08-"))
+
+    assert supplemental.source_refs == ["REQ-010"]
+
+
 
 
 def test_gap_adapter_adds_supplemental_requirement_without_suppressing_existing_source_ref():
@@ -555,11 +768,3 @@ async def test_coordinator_can_reenter_tdd_lane_for_targeted_gap():
     assert any(item.ref == "GK-SPEC-1-1" for item in saved_run.contract.observable_requirements)
     assert any(call[0] == red_work_unit_id("gap-step-1") for call in execution_gateway.calls)
     assert any(call[0] == green_work_unit_id("gap-step-1") for call in execution_gateway.calls)
-
-
-def main() -> None:
-    Path("/srv/ATHBA/tests/development/test_specification_gatekeeper.py").write_text(CONTENT)
-
-
-if __name__ == "__main__":
-    main()

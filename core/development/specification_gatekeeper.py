@@ -52,7 +52,7 @@ class SpecificationGapTddAdapter:
             return contract
         requirement = BehaviorContractRequirement(
             ref=_next_gap_requirement_ref(contract, gap.checklist_ref),
-            source_refs=[gap.checklist_ref],
+            source_refs=_matching_contract_source_refs_for_gap(contract, gap),
             summary=gap.obligation_text,
             observable_outcome=gap.desired_proof,
             test_hint=gap.desired_proof,
@@ -202,13 +202,19 @@ class SpecificationGatekeeper:
         checklist_ref: str,
     ) -> list[ChecklistEvidence]:
         requirements = {requirement.ref: requirement for requirement in contract.observable_requirements}
+        item = next((entry for entry in run_state.gatekeeper_state.checklist.items if entry.ref == checklist_ref), None) if run_state.gatekeeper_state is not None else None
+        if item is None:
+            item = SourceRequirementClause(ref=checklist_ref, text=checklist_ref, kind="behavior")
+        matching_source_refs = _matching_contract_source_refs_for_clause(contract, item)
+        if not matching_source_refs:
+            return []
         candidates: list[ChecklistEvidence] = []
         for cycle in run_state.cycles:
             if cycle.semantic_revision is None or cycle.red_phase is None or cycle.green_phase is None:
                 continue
             for requirement_ref in cycle.step.requirement_refs:
                 requirement = requirements.get(requirement_ref)
-                if requirement is None or checklist_ref not in requirement.source_refs:
+                if requirement is None or not matching_source_refs.intersection(requirement.source_refs):
                     continue
                 candidates.append(
                     ChecklistEvidence(
@@ -233,13 +239,19 @@ class SpecificationGatekeeper:
         checklist_ref: str,
     ) -> list[ChecklistEvidence]:
         requirements = {requirement.ref: requirement for requirement in contract.observable_requirements}
+        item = next((entry for entry in run_state.gatekeeper_state.checklist.items if entry.ref == checklist_ref), None) if run_state.gatekeeper_state is not None else None
+        if item is None:
+            item = SourceRequirementClause(ref=checklist_ref, text=checklist_ref, kind="behavior")
+        matching_source_refs = _matching_contract_source_refs_for_clause(contract, item)
+        if not matching_source_refs:
+            return []
         evidence: list[ChecklistEvidence] = []
         for cycle in run_state.cycles:
             if cycle.semantic_revision is None or cycle.review_result is None:
                 continue
             for requirement_ref in cycle.step.requirement_refs:
                 requirement = requirements.get(requirement_ref)
-                if requirement is None or checklist_ref not in requirement.source_refs:
+                if requirement is None or not matching_source_refs.intersection(requirement.source_refs):
                     continue
                 evidence.append(
                     ChecklistEvidence(
@@ -253,6 +265,47 @@ class SpecificationGatekeeper:
                     )
                 )
         return evidence
+
+
+
+def _matching_contract_source_refs_for_item(contract: BehaviorContract, *, checklist_ref: str) -> set[str]:
+    direct_match = {clause.ref for clause in contract.source_clauses if clause.ref == checklist_ref}
+    if direct_match:
+        return direct_match
+    checklist_clause = next((clause for clause in contract.source_clauses if clause.ref == checklist_ref), None)
+    if checklist_clause is not None:
+        return {checklist_clause.ref}
+    checklist_text = None
+    for clause in getattr(contract, "source_clauses", []):
+        if clause.ref == checklist_ref:
+            checklist_text = clause.text
+            break
+    if checklist_text is None:
+        checklist_text = checklist_ref
+    return set()
+
+
+def _matching_contract_source_refs_for_gap(contract: BehaviorContract, gap: SpecificationGap) -> list[str]:
+    direct_match = [clause.ref for clause in contract.source_clauses if clause.ref == gap.checklist_ref]
+    if direct_match:
+        return direct_match
+    normalized_gap_text = _normalize_clause_text(gap.obligation_text)
+    text_matches = [clause.ref for clause in contract.source_clauses if _normalize_clause_text(clause.text) == normalized_gap_text]
+    if text_matches:
+        return text_matches
+    raise ValueError(f"unable to trace specification gap to contract source clauses: {gap.checklist_ref}")
+
+
+def _matching_contract_source_refs_for_clause(contract: BehaviorContract, item: SourceRequirementClause) -> set[str]:
+    direct_match = {clause.ref for clause in contract.source_clauses if clause.ref == item.ref}
+    if direct_match:
+        return direct_match
+    normalized_item_text = _normalize_clause_text(item.text)
+    return {clause.ref for clause in contract.source_clauses if _normalize_clause_text(clause.text) == normalized_item_text}
+
+
+def _normalize_clause_text(text: str) -> str:
+    return " ".join(text.lower().split())
 
 
 def _next_gap_requirement_ref(contract: BehaviorContract, checklist_ref: str) -> str:

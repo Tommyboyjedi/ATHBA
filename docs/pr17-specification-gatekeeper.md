@@ -238,3 +238,32 @@ Final proof should report:
 `PR17_REQUIREMENT_COMPLETION_GATE = PASS|FAIL`
 
 `PR17_LOCAL_GATEKEEPER_VIABLE = YES|NO`
+
+## Live vertical-slice checkpoint (2026-08-29)
+
+The unit-level gatekeeper proof is green. A real local-provider vertical-slice
+attempt was also started against the disposable ReservationBook fixture at
+`/home/tomp/projects/reservation-book-pr16-fixture`, beginning from
+`f45f32cc847ce2c531c6847ff2276a6256f637ad`.
+
+The live path surfaced three ATHBA robustness defects, now covered by focused
+regression tests:
+
+- local reasoning can label a quality clause with `evidence_kind: quality`; ATHBA
+  now normalizes that compatible alias to review evidence;
+- independently generated checklist and contract references can differ despite
+  equivalent obligation text; evidence mapping and targeted-gap traceability now
+  resolve matching contract clauses without treating ref spelling as semantics;
+- local reasoning can return fenced JSON, short pytest names, uncovered contract
+  clauses, or a stale requirement ref; the affected planners now make one bounded
+  repair request and require a valid, path-bounded pytest node id.
+
+The proof did reach a real Rack AI RED work unit, but it did not produce an
+accepted RED revision. Rack AI executed `python3` as `/usr/bin/python3` in the
+isolated worktree, where Python 3.14.4 has no `pytest` installed. The deterministic
+RED wrapper rejected that environment failure before it could establish an
+executable test result. The retained evidence packet is:
+
+`/srv/rack-ai/state/changes/athba-pr17-live-proof--BR-001-STEP-1--red/review-packet.json`
+
+This is not a Gatekeeper PASS claim. PR17 still needs a Rack AI Python 3.14 test

@@ -366,6 +366,28 @@ async def test_malformed_contract_input_fails_closed():
     with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
         await planner.create_contract(project_id="reservation-book", requirement_text="broken")
 
+@pytest.mark.asyncio
+async def test_contract_planner_repairs_uncovered_source_clauses_once():
+    invalid_payload = contract_payload()
+    invalid_payload["observable_requirements"] = [invalid_payload["observable_requirements"][0]]
+    gateway = FakeReasoningGateway([source_clause_payload(), invalid_payload, contract_payload()])
+    planner = BehaviorContractPlanner(gateway)
+
+    restored = await planner.create_contract(
+        project_id="reservation-book",
+        requirement_text=requirement_text(),
+        production_paths=["reservation_book.py"],
+        test_paths=["tests/test_reservation_book.py"],
+    )
+
+    assert restored.requirement_refs() == ["RB-1", "RB-2"]
+    assert len(gateway.requests) == 3
+    assert gateway.requests[1].purpose == "athba_behavior_contract"
+    assert gateway.requests[2].purpose == "athba_behavior_contract_repair"
+    assert "source clauses must be covered by observable requirements" in gateway.requests[2].prompt
+
+
+
 
 @pytest.mark.asyncio
 async def test_fenced_json_contract_output_fails_closed():
@@ -607,6 +629,88 @@ async def test_tester_can_propose_one_next_focused_tdd_step_from_contract():
     assert decision.status == "propose"
     assert decision.proposal == step
     assert "Tester planner" in gateway.requests[0].prompt
+
+@pytest.mark.asyncio
+async def test_step_planner_repairs_fenced_json_and_short_test_name():
+    invalid_step = {
+        "status": "propose",
+        "rationale": "Start with resource creation.",
+        "proposal": {
+            "step_id": "TEST-001",
+            "requirement_refs": ["RB-1"],
+            "focused_behavior": "Add a resource.",
+            "test_name": "test_add_resource_unique_and_duplicate",
+            "expected_result": "A duplicate id raises ValueError.",
+            "test_path": "tests/test_reservation_book.py",
+            "production_path": "reservation_book.py",
+            "red_objective": "Write a failing test.",
+            "green_objective": "Implement only enough production code.",
+            "reason_next_smallest": "This is the base capability.",
+            "exception_type": "ValueError",
+            "exception_message": "duplicate id",
+        },
+        "completed_requirement_refs": [],
+    }
+    repaired_step = {
+        "status": "propose",
+        "rationale": "Start with resource creation.",
+        "proposal": {
+            **invalid_step["proposal"],
+            "test_name": "tests/test_reservation_book.py::test_add_resource_unique_and_duplicate",
+        },
+        "completed_requirement_refs": [],
+    }
+    gateway = FakeReasoningGateway([f"```json\n{json.dumps(invalid_step)}\n```", repaired_step])
+
+    decision = await DynamicTddPlanner(gateway).decide_next_step(contract(), run_state())
+
+    assert decision.proposal is not None
+    assert decision.proposal.test_name == "tests/test_reservation_book.py::test_add_resource_unique_and_duplicate"
+    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
+    assert "step decision response was not valid JSON" in gateway.requests[1].prompt
+
+
+
+@pytest.mark.asyncio
+async def test_step_planner_repairs_requirement_ref_drift():
+    invalid_step = {
+        "status": "propose",
+        "rationale": "Start with resource creation.",
+        "proposal": {
+            "step_id": "TEST-002",
+            "requirement_refs": ["RB-999"],
+            "focused_behavior": "Add a resource.",
+            "test_name": "tests/test_reservation_book.py::test_add_resource_unique_and_duplicate",
+            "expected_result": "A duplicate id raises ValueError.",
+            "test_path": "tests/test_reservation_book.py",
+            "production_path": "reservation_book.py",
+            "red_objective": "Write a failing test.",
+            "green_objective": "Implement only enough production code.",
+            "reason_next_smallest": "This is the base capability.",
+            "exception_type": "ValueError",
+            "exception_message": "duplicate id",
+        },
+        "completed_requirement_refs": [],
+    }
+    repaired_step = {
+        "status": "propose",
+        "rationale": "Start with resource creation.",
+        "proposal": {
+            **invalid_step["proposal"],
+            "requirement_refs": ["RB-1"],
+        },
+        "completed_requirement_refs": [],
+    }
+    gateway = FakeReasoningGateway([invalid_step, repaired_step])
+
+    decision = await DynamicTddPlanner(gateway).decide_next_step(contract(), run_state())
+
+    assert decision.proposal is not None
+    assert decision.proposal.requirement_refs == ["RB-1"]
+    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
+    assert "step proposal referenced a requirement outside the contract" in gateway.requests[1].prompt
+
+
 
 
 @pytest.mark.asyncio
