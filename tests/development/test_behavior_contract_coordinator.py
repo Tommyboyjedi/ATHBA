@@ -678,6 +678,35 @@ def test_tester_work_unit_receives_external_repository_context_without_athba_ass
     assert "collection-safe" in work_unit.objective
 
 
+def test_repository_material_allows_the_first_test_file_to_be_absent(tmp_path: Path):
+    repo_root = tmp_path / "clean-target"
+    repo_root.mkdir()
+    (repo_root / "reservation_book.py").write_text("", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo_root, check=True)
+    subprocess.run(["git", "add", "reservation_book.py"], cwd=repo_root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "seed"],
+        cwd=repo_root,
+        check=True,
+    )
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root, check=True, text=True, capture_output=True
+    ).stdout.strip()
+
+    material = GitTesterRepositoryMaterialProvider(repo_root).render(
+        contract(), run_state(semantic_base_revision=revision, registered_root=repo_root)
+    )
+
+    assert material["test_files"] == [{
+        "path": "tests/test_reservation_book.py",
+        "module_name": "tests.test_reservation_book",
+        "content": "",
+        "truncated": False,
+        "pytest_nodes": [],
+    }]
+    assert material["all_contract_files_empty"] is True
+
+
 def test_empty_external_source_uses_collection_safe_module_access_in_red_objective():
     material = {
         "all_contract_files_empty": True,
@@ -1490,15 +1519,10 @@ def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     assert red.allowed_paths == ["tests/test_reservation_book.py"]
     assert green.allowed_paths == ["reservation_book.py"]
     assert repair.allowed_paths == ["reservation_book.py"]
-    assert red.acceptance.commands == [["python3", "scripts/assert_test_fails.py", step.test_name, "expected failure"]]
-    assert green.acceptance.commands == [
-        ["python3", "-m", "pytest", "-q", step.test_name],
-        ["python3", "-m", "pytest", "-q", step.test_path],
-    ]
-    assert repair.acceptance.commands == [
-        ["python3", "-m", "pytest", "-q", step.test_name],
-        ["python3", "-m", "pytest", "-q", step.test_path],
-    ]
+    assert red.acceptance.commands == [["python3", "-B", "scripts/assert_test_fails.py", step.test_name]]
+    expected_pytest = ["python3", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    assert green.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
+    assert repair.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
     assert "Act in ATHBA's Tester role during RED" in red.objective
     assert "Do not edit tests" in green.objective
     assert "Reviewer instructions" in repair.objective

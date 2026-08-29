@@ -36,6 +36,7 @@ from core.development.tdd_progression import (
     repair_work_unit_id,
 )
 from core.development.specification_gatekeeper import SpecificationGapTddAdapter, SpecificationGatekeeper
+from core.development.python_test_runtime import PythonPytestRuntime
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
@@ -169,7 +170,7 @@ class GitTesterRepositoryMaterialProvider:
 
     def _file_material(self, revision: str, path: str) -> dict[str, object]:
         normalized_path = _repository_relative_path(path, label="repository context path")
-        content = self._git("show", f"{revision}:{normalized_path}")
+        content = self._optional_git_show(revision, normalized_path)
         return {
             "path": normalized_path,
             "module_name": _python_module_name(normalized_path),
@@ -177,6 +178,21 @@ class GitTesterRepositoryMaterialProvider:
             "truncated": len(content) > self._MAX_FILE_CHARS,
             "pytest_nodes": _pytest_nodes(normalized_path, content),
         }
+
+    def _optional_git_show(self, revision: str, path: str) -> str:
+        result = subprocess.run(
+            ["git", "show", f"{revision}:{path}"],
+            cwd=self.repository_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout
+        if f"path '{path}' does not exist" in (result.stderr or result.stdout):
+            return ""
+        detail = (result.stderr or result.stdout).strip()
+        raise ValueError(f"git show {revision}:{path} failed: {detail}")
 
     def _verify_revision(self, revision: str) -> None:
         self._git("rev-parse", "--verify", f"{revision}^{{commit}}")
@@ -409,6 +425,9 @@ class SeniorReviewer:
 
 
 class ContractTesterWorkUnitFactory:
+    def __init__(self, runtime: PythonPytestRuntime | None = None):
+        self.runtime = runtime or PythonPytestRuntime()
+
     def build(
         self,
         contract: BehaviorContract,
@@ -422,7 +441,7 @@ class ContractTesterWorkUnitFactory:
             objective=_tester_objective(contract, step, repository_material),
             allowed_paths=[step.test_path],
             acceptance=AcceptanceContract(
-                commands=[["python3", "scripts/assert_test_fails.py", step.test_name, "expected failure"]],
+                commands=[self.runtime.red_command(step.test_name)],
                 required_artifacts=[step.test_path],
             ),
             status=WorkUnitStatus.READY,
@@ -430,6 +449,9 @@ class ContractTesterWorkUnitFactory:
 
 
 class ContractDeveloperWorkUnitFactory:
+    def __init__(self, runtime: PythonPytestRuntime | None = None):
+        self.runtime = runtime or PythonPytestRuntime()
+
     def build(
         self,
         contract: BehaviorContract,
@@ -443,7 +465,7 @@ class ContractDeveloperWorkUnitFactory:
             objective=_developer_objective(contract, step, repository_material),
             allowed_paths=[step.production_path],
             acceptance=AcceptanceContract(
-                commands=[["python3", "-m", "pytest", "-q", step.test_name], ["python3", "-m", "pytest", "-q", step.test_path]],
+                commands=[self.runtime.pytest_command(step.test_name), self.runtime.pytest_command(step.test_path)],
                 required_artifacts=[step.production_path],
             ),
             status=WorkUnitStatus.READY,
@@ -451,6 +473,9 @@ class ContractDeveloperWorkUnitFactory:
 
 
 class ContractRepairWorkUnitFactory:
+    def __init__(self, runtime: PythonPytestRuntime | None = None):
+        self.runtime = runtime or PythonPytestRuntime()
+
     def build(
         self,
         contract: BehaviorContract,
@@ -465,7 +490,7 @@ class ContractRepairWorkUnitFactory:
             objective=_repair_objective(contract, cycle.step, review),
             allowed_paths=[cycle.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[["python3", "-m", "pytest", "-q", cycle.step.test_name], ["python3", "-m", "pytest", "-q", cycle.step.test_path]],
+                commands=[self.runtime.pytest_command(cycle.step.test_name), self.runtime.pytest_command(cycle.step.test_path)],
                 required_artifacts=[cycle.step.production_path],
             ),
             status=WorkUnitStatus.READY,

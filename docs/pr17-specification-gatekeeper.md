@@ -307,3 +307,52 @@ Rack AI rejected the RED before accepting a revision:
 ATHBA persisted the rejected RED and did not start GREEN. This is a Rack AI
 path-policy/runtime concern. ATHBA did not modify Rack AI and the live proof is
 blocked until the Rack AI worker resolves that external execution defect.
+
+## Independent planning and test-only reconciliation checkpoint (2026-08-29)
+
+PR17 now keeps three concerns separate:
+
+```text
+Architectural requirement
+    ├── Gatekeeper atomizer -> independent factual checklist
+    └── Behavior Planner -> Tester -> Developer -> Senior Reviewer
+
+final accepted tests + independent checklist
+    -> test-evidence reconciliation -> YES / NO per checklist item
+```
+
+The atomizer emits only `ref`, `text`, and factual `kind`. It does not choose
+tests, reviews, mechanical checks, or any other proof method. The Behavior
+Planner receives the original requirement and bounded repository material, but
+not the Gatekeeper checklist.
+
+`TestEvidenceReconciler` is a separate post-run process. It accepts `YES` only
+when the selected pytest node exists in final source and is traceable to an
+accepted RED/GREEN cycle with a semantic revision. `NO` is valid, remains
+visible, and never triggers more TDD work. Invented test nodes fail closed to
+`NO`.
+
+ATHBA now supplies its Python/pytest runtime in work-unit acceptance commands.
+The default Python runtime disables bytecode and pytest cache creation so test
+execution remains compatible with the generic executor's path policy. Rack AI
+continues to receive only generic commands and paths; it is not taught Python,
+pytest, or ReservationBook semantics.
+
+### Clean-run evidence
+
+The first fresh target at
+`/srv/ATHBA/state/pr17-independent-runs/pr17-independent-20260829T181500Z/reservation-book`
+exposed and repaired an ATHBA defect: repository-material rendering rejected a
+missing initial test file instead of representing it as empty TDD material.
+
+Two subsequent fresh targets reached independent Gatekeeper atomization, then
+were blocked before TDD execution when the real local `local-primary` provider
+timed out while generating Behavior Planner source clauses:
+
+- `/srv/ATHBA/state/pr17-independent-runs/pr17-independent-20260829T182200Z/evidence.json`
+- `/srv/ATHBA/state/pr17-independent-runs/pr17-independent-20260829T182600Z/evidence.json`
+
+No Rack AI work unit was submitted in those retries, and no Rack AI files,
+configuration, or runtime images were modified. The end-to-end proof remains
+incomplete until the local reasoning service can return the Behavior Planner
+response reliably.
