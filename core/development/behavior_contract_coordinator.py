@@ -124,15 +124,33 @@ class BehaviorContractPlanner:
     def __init__(self, gateway: ReasoningGateway):
         self.gateway = gateway
 
-    async def create_contract(self, *, project_id: str, requirement_text: str) -> BehaviorContract:
+    async def create_contract(
+        self,
+        *,
+        project_id: str,
+        requirement_text: str,
+        production_paths: list[str] | None = None,
+        test_paths: list[str] | None = None,
+    ) -> BehaviorContract:
+        normalized_production_paths = _normalize_allowed_paths(production_paths, label="allowed production paths")
+        normalized_test_paths = _normalize_allowed_paths(test_paths, label="allowed test paths")
         request = ReasoningRequest(
             purpose="athba_behavior_contract",
-            prompt=_contract_prompt(project_id=project_id, requirement_text=requirement_text),
+            prompt=_contract_prompt(
+                project_id=project_id,
+                requirement_text=requirement_text,
+                production_paths=normalized_production_paths,
+                test_paths=normalized_test_paths,
+            ),
             project_id=project_id,
             requires_large_context=False,
         )
         result = await self.gateway.reason(request)
-        return BehaviorContract.from_dict(_json_object(result.text, label="behavior contract"))
+        return BehaviorContract.from_dict(
+            _json_object(result.text, label="behavior contract"),
+            allowed_production_paths=normalized_production_paths,
+            allowed_test_paths=normalized_test_paths,
+        )
 
 
 class DynamicTddPlanner:
@@ -593,22 +611,80 @@ def _json_object(text: str, *, label: str) -> dict[str, object]:
     return payload
 
 
-def _contract_prompt(*, project_id: str, requirement_text: str) -> str:
-    return f"""Produce one JSON object for ATHBA PR16.
-Return only JSON.
-Project id: {project_id}
-Requirement:
-{requirement_text}
-
-Create a bounded provider-neutral BehaviorContract with these fields:
-id, project_id, component_name, capability, requirement_source, observable_requirements,
-invariants, production_paths, test_paths, public_api, error_semantics, non_goals,
-completion_criteria, status.
-
-Each observable_requirements item must contain:
-ref, summary, observable_outcome, test_hint, error_expectation, preserves_state_on_failure.
-
-Do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection."""
+def _contract_prompt(
+    *,
+    project_id: str,
+    requirement_text: str,
+    production_paths: list[str],
+    test_paths: list[str],
+) -> str:
+    schema = {
+        "id": "string",
+        "project_id": "string",
+        "component_name": "string",
+        "capability": "string",
+        "requirement_source": "string",
+        "observable_requirements": [
+            {
+                "ref": "string",
+                "summary": "string",
+                "observable_outcome": "string",
+                "test_hint": "string",
+                "error_expectation": "string or null",
+                "preserves_state_on_failure": "boolean",
+            }
+        ],
+        "invariants": ["string"],
+        "production_paths": ["string"],
+        "test_paths": ["string"],
+        "public_api": ["string"],
+        "error_semantics": ["string"],
+        "non_goals": ["string"],
+        "completion_criteria": ["string"],
+        "status": "tdd_ready",
+    }
+    return json.dumps(
+        {
+            "instruction": "Produce one ATHBA PR16 BehaviorContract as raw JSON only.",
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+                "include every required field exactly once",
+                "do not add extra fields",
+            ],
+            "project_id": project_id,
+            "requirement_text": requirement_text,
+            "allowed_production_paths": production_paths,
+            "allowed_test_paths": test_paths,
+            "path_rules": [
+                "production_paths means repository-relative source file paths only",
+                "test_paths means repository-relative pytest file paths only",
+                "choose emitted production_paths only from allowed_production_paths",
+                "choose emitted test_paths only from allowed_test_paths",
+                "valid example production path: reservation_book.py",
+                "valid example test path: tests/test_reservation_book.py",
+                "do not emit conceptual names such as AddResource or CreateReservation in any path field",
+            ],
+            "required_json_schema": schema,
+            "requirement_atomicity_rules": [
+                "each observable_requirements entry must describe one independently verifiable behavior or invariant slice",
+                "one requirement ref must be completable by one focused semantic TDD slice",
+                "if two cases require distinct tests or distinct failure conditions, give them separate refs",
+                "do not bundle unrelated failure modes under one requirement ref",
+                "do not pre-author a future Tester step list",
+            ],
+            "domain_rules": [
+                "status must be exactly tdd_ready",
+                "public_api must be an array of strings",
+                "error_semantics must be an array of strings",
+                "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def _step_prompt(contract: BehaviorContract, run_state: BehaviorContractRunState) -> str:
@@ -724,6 +800,14 @@ def _repair_objective(contract: BehaviorContract, step: TddStepProposal, review:
         f"Reviewer instructions: {' | '.join(review.repair_instructions)}. "
         f"Component: {contract.component_name}."
     )
+
+
+def _normalize_allowed_paths(paths: list[str] | None, *, label: str) -> list[str]:
+    if paths is None:
+        return []
+    if not isinstance(paths, list):
+        raise ValueError(f"{label} must be a list")
+    return [_repository_relative_path(path, label=label) for path in paths]
 
 
 def _default_review_material_provider(repository_binding: RepositoryBinding) -> ReviewMaterialProvider | None:

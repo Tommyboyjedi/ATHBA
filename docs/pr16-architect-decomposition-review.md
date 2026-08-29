@@ -487,4 +487,109 @@ Report:
 
 `PR16_POOL_PROGRESSION = PASS|FAIL`
 
+## 2026-08-29 prompt hardening and live probe
+
+The first live local contract-generation attempt against:
+
+- model id `local-primary`
+- endpoint `http://127.0.0.1:8017/v1`
+- underlying model `cyankiwi/gemma-4-12B-it-AWQ-INT4`
+
+exposed seven concrete output-shape failures:
+
+1. JSON wrapped in Markdown fences.
+2. `production_paths` emitted conceptual names such as `AddResource`.
+3. `test_paths` emitted semantic labels rather than repository file paths.
+4. `public_api` emitted an object instead of `list[str]`.
+5. `error_semantics` emitted a string instead of `list[str]`.
+6. `status` emitted `READY` instead of lowercase `tdd_ready`.
+7. observable requirements bundled unrelated failure modes under one ref.
+
+The PR16 response path remains strict:
+
+- `_json_object()` still rejects fenced or prefixed prose responses.
+- `BehaviorContract.from_dict()` still rejects wrong field types and unsupported status values.
+- contract path validation now requires repository-relative file paths and can enforce caller-provided allowed path subsets.
+
+Prompt hardening added:
+
+- raw JSON only / no code fences / no commentary rules;
+- explicit allowed production and test path lists;
+- exact required JSON field shapes;
+- exact `status` value `tdd_ready`;
+- atomic observable-requirement rules;
+- explicit prohibition on worker/model/GPU/endpoint leakage.
+
+### Added regression coverage
+
+`tests/development/test_behavior_contract_coordinator.py` now proves:
+
+- fenced JSON fails closed;
+- prose before JSON fails closed;
+- `public_api` must be `list[str]`;
+- `error_semantics` must be `list[str]`;
+- `status` must remain `tdd_ready`;
+- absolute, conceptual, and parent-escaping paths are rejected;
+- returned contract paths must stay inside the allowed path set;
+- the planner prompt explicitly contains the raw-JSON, type, path, and atomicity constraints.
+
+Focused validation on `2026-08-29`:
+
+- `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q tests/development/test_behavior_contract_coordinator.py`
+  - result: `38 passed`
+
+Repository validation on `2026-08-29`:
+
+- `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q`
+  - result: `134 passed`
+- `./.venv/bin/python -m compileall athba core llm_service tests`
+  - result: pass
+
+### Five-shot local-primary probe
+
+Probe input:
+
+- requirement text: `Build a small in-memory ReservationBook for reservable resources.`
+- allowed production paths: `["reservation_book.py"]`
+- allowed test paths: `["tests/test_reservation_book.py"]`
+- ATHBA gateway path: `ProviderReasoningGateway(OpenAIProvider(...), model="local-primary")`
+- endpoint env: `OPENAI_API_BASE=http://127.0.0.1:8017/v1`
+- key env: `OPENAI_API_KEY=local-test-key`
+- no output repair, fence stripping, or type coercion
+
+Probe timing:
+
+- total wall time for 5 runs: `104.448s`
+- per-run latency: `20.900s`, `20.885s`, `20.887s`, `20.887s`, `20.887s`
+
+Observed outputs:
+
+1. raw JSON only: yes; structural validation: pass; atomicity: acceptable; leakage: none
+2. raw JSON only: yes; structural validation: pass; atomicity: acceptable; leakage: none
+3. raw JSON only: yes; structural validation: pass; atomicity: acceptable; leakage: none
+4. raw JSON only: yes; structural validation: pass; atomicity: acceptable; leakage: none
+5. raw JSON only: yes; structural validation: pass; atomicity: acceptable; leakage: none
+
+Stable post-hardening characteristics across all 5 runs:
+
+- `production_paths == ["reservation_book.py"]`
+- `test_paths == ["tests/test_reservation_book.py"]`
+- `public_api` emitted as a list
+- `error_semantics` emitted as a list
+- `status == "tdd_ready"`
+- no Markdown fences
+- no worker/model/GPU/endpoint leakage
+
+Current viability assessment:
+
+- The prompt/validation boundary is now internally coherent and repeatably enforces the PR16 structural contract.
+- The 5-shot local proof is green for shape/path/type/status constraints.
+- The probe did not complete within `90` seconds for all five runs combined, but each individual contract generation completed in about `21` seconds.
+- This is sufficient for PR16's local contract-generation baseline.
+- Semantic richness of the generated ReservationBook requirements can still improve later through better upstream requirement text and future reasoning-provider evolution, without weakening the strict PR16 parser.
+
+`PR16_LOCAL_CONTRACT_GENERATION = PASS`
+
+`PR16_READY_FOR_LIVE_TDD_RUN = YES`
+
 `PR16_END_TO_END_COMPONENT = PASS|FAIL`

@@ -271,10 +271,14 @@ async def test_valid_component_requirement_becomes_valid_behavior_contract():
     result = await planner.create_contract(
         project_id="reservation-book",
         requirement_text="Build a small in-memory ReservationBook for reservable resources.",
+        production_paths=["reservation_book.py"],
+        test_paths=["tests/test_reservation_book.py"],
     )
 
     assert result.component_name == "ReservationBook"
     assert result.requirement_refs() == ["RB-1", "RB-2"]
+    assert result.production_paths == ["reservation_book.py"]
+    assert result.test_paths == ["tests/test_reservation_book.py"]
     assert find_forbidden_resource_selection_keys(result.to_dict()) == []
 
 
@@ -287,10 +291,83 @@ async def test_malformed_contract_input_fails_closed():
         await planner.create_contract(project_id="reservation-book", requirement_text="broken")
 
 
+@pytest.mark.asyncio
+async def test_fenced_json_contract_output_fails_closed():
+    gateway = FakeReasoningGateway(["```json\n{}\n```"])
+    planner = BehaviorContractPlanner(gateway)
+
+    with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
+        await planner.create_contract(project_id="reservation-book", requirement_text="broken")
+
+
+@pytest.mark.asyncio
+async def test_prose_before_json_contract_output_fails_closed():
+    payload = json.dumps(contract_payload())
+    gateway = FakeReasoningGateway([f"Here is the JSON you asked for:\n{payload}"])
+    planner = BehaviorContractPlanner(gateway)
+
+    with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
+        await planner.create_contract(project_id="reservation-book", requirement_text="broken")
+
+
 def test_contract_requirement_refs_are_retained_through_round_trip():
-    restored = BehaviorContract.from_dict(contract().to_dict())
+    restored = BehaviorContract.from_dict(
+        contract().to_dict(),
+        allowed_production_paths=["reservation_book.py"],
+        allowed_test_paths=["tests/test_reservation_book.py"],
+    )
 
     assert restored.requirement_refs() == ["RB-1", "RB-2"]
+
+
+def test_contract_rejects_wrong_field_types_invalid_status_and_invalid_paths():
+    base = contract_payload()
+
+    wrong_public_api = dict(base)
+    wrong_public_api["public_api"] = {"add_resource": "callable"}
+    with pytest.raises(ValueError, match="public api must be a list"):
+        BehaviorContract.from_dict(wrong_public_api)
+
+    wrong_error_semantics = dict(base)
+    wrong_error_semantics["error_semantics"] = "raise ValueError"
+    with pytest.raises(ValueError, match="error semantics must be a list"):
+        BehaviorContract.from_dict(wrong_error_semantics)
+
+    invalid_status = dict(base)
+    invalid_status["status"] = "READY"
+    with pytest.raises(ValueError, match="unsupported contract status"):
+        BehaviorContract.from_dict(invalid_status)
+
+    absolute_path = dict(base)
+    absolute_path["production_paths"] = ["/srv/reservation_book.py"]
+    with pytest.raises(ValueError, match="repository-relative"):
+        BehaviorContract.from_dict(absolute_path)
+
+    conceptual_path = dict(base)
+    conceptual_path["production_paths"] = ["AddResource"]
+    with pytest.raises(ValueError, match="file paths"):
+        BehaviorContract.from_dict(conceptual_path)
+
+    parent_escape = dict(base)
+    parent_escape["test_paths"] = ["../tests/test_reservation_book.py"]
+    with pytest.raises(ValueError, match="repository-relative"):
+        BehaviorContract.from_dict(parent_escape)
+
+
+@pytest.mark.asyncio
+async def test_contract_output_paths_must_match_allowed_path_sets():
+    payload = contract_payload()
+    payload["production_paths"] = ["other.py"]
+    payload["test_paths"] = ["tests/other_test.py"]
+    planner = BehaviorContractPlanner(FakeReasoningGateway([payload]))
+
+    with pytest.raises(ValueError, match="allowed path set"):
+        await planner.create_contract(
+            project_id="reservation-book",
+            requirement_text="Build a small in-memory ReservationBook for reservable resources.",
+            production_paths=["reservation_book.py"],
+            test_paths=["tests/test_reservation_book.py"],
+        )
 
 
 def test_no_worker_model_or_gpu_fields_leak_into_contract_or_tdd_requests():
@@ -301,6 +378,34 @@ def test_no_worker_model_or_gpu_fields_leak_into_contract_or_tdd_requests():
     assert find_forbidden_resource_selection_keys(contract().to_dict()) == []
     assert find_forbidden_resource_selection_keys(red_request) == []
     assert find_forbidden_resource_selection_keys(green_request) == []
+
+
+@pytest.mark.asyncio
+async def test_contract_prompt_explicitly_constrains_raw_json_types_paths_and_atomicity():
+    gateway = FakeReasoningGateway([contract_payload()])
+    planner = BehaviorContractPlanner(gateway)
+
+    await planner.create_contract(
+        project_id="reservation-book",
+        requirement_text="Build a small in-memory ReservationBook for reservable resources.",
+        production_paths=["reservation_book.py"],
+        test_paths=["tests/test_reservation_book.py"],
+    )
+
+    prompt = gateway.requests[0].prompt
+    assert "return raw JSON only" in prompt
+    assert "do not use code fences" in prompt
+    assert "do not add commentary before or after the JSON" in prompt
+    assert "\"status\": \"tdd_ready\"" in prompt
+    assert "\"public_api\": [" in prompt
+    assert "\"error_semantics\": [" in prompt
+    assert "allowed_production_paths" in prompt
+    assert "reservation_book.py" in prompt
+    assert "allowed_test_paths" in prompt
+    assert "tests/test_reservation_book.py" in prompt
+    assert "one requirement ref must be completable by one focused semantic TDD slice" in prompt
+    assert "do not bundle unrelated failure modes under one requirement ref" in prompt
+    assert "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection" in prompt
 
 
 @pytest.mark.asyncio

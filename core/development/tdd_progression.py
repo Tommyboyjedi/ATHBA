@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import PurePosixPath
 from typing import Any
 
 from core.development.progression import ExecutionAttemptRecord
@@ -213,8 +214,8 @@ class BehaviorContract:
         if not self.observable_requirements:
             raise ValueError("observable requirements must not be empty")
         _validate_list_of_strings(self.invariants, "invariants")
-        _validate_list_of_strings(self.production_paths, "production paths")
-        _validate_list_of_strings(self.test_paths, "test paths")
+        _validate_repository_relative_paths(self.production_paths, "production paths")
+        _validate_repository_relative_paths(self.test_paths, "test paths")
         _validate_list_of_strings(self.public_api, "public api")
         _validate_list_of_strings(self.error_semantics, "error semantics")
         _validate_list_of_strings(self.non_goals, "non-goals")
@@ -248,11 +249,17 @@ class BehaviorContract:
         }
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "BehaviorContract":
+    def from_dict(
+        cls,
+        payload: dict[str, Any],
+        *,
+        allowed_production_paths: list[str] | None = None,
+        allowed_test_paths: list[str] | None = None,
+    ) -> "BehaviorContract":
         requirements = payload.get("observable_requirements")
         if not isinstance(requirements, list):
             raise ValueError("observable_requirements must be a list")
-        return cls(
+        contract = cls(
             id=str(payload["id"]),
             project_id=str(payload["project_id"]),
             component_name=str(payload["component_name"]),
@@ -268,6 +275,9 @@ class BehaviorContract:
             completion_criteria=_list_of_strings(payload.get("completion_criteria", []), "completion criteria"),
             status=str(payload.get("status", "tdd_ready")),
         )
+        _validate_allowed_path_subset(contract.production_paths, allowed_production_paths, "production paths")
+        _validate_allowed_path_subset(contract.test_paths, allowed_test_paths, "test paths")
+        return contract
 
 
 @dataclass(frozen=True)
@@ -640,6 +650,28 @@ def _list_of_strings(value: Any, label: str) -> list[str]:
     result = [str(item) for item in value]
     _validate_list_of_strings(result, label)
     return result
+
+
+def _validate_repository_relative_paths(values: list[str], label: str) -> None:
+    _validate_list_of_strings(values, label)
+    for value in values:
+        _validate_repository_relative_path(value, label)
+
+
+def _validate_allowed_path_subset(values: list[str], allowed: list[str] | None, label: str) -> None:
+    if allowed is None or not allowed:
+        return
+    disallowed = [value for value in values if value not in allowed]
+    if disallowed:
+        raise ValueError(f"{label} must be selected from the allowed path set")
+
+
+def _validate_repository_relative_path(value: str, label: str) -> None:
+    candidate = PurePosixPath(value.replace("\\", "/"))
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError(f"{label} must contain repository-relative paths")
+    if "/" not in candidate.as_posix() and "." not in candidate.name:
+        raise ValueError(f"{label} must contain repository-relative file paths")
 
 
 def _require_text(value: str, label: str) -> None:
