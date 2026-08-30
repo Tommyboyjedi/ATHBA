@@ -69,21 +69,21 @@ Target modules:
   Implementation evidence: `./.venv/bin/python -m compileall athba core llm_service tests scripts` completed without errors.
   Tests: `./.venv/bin/python -m compileall athba core llm_service tests scripts`.
   Commit SHA: `0968701`
-- [ ] Run `git diff --check`.
+- [x] Run `git diff --check`.
   Target responsibility: patch hygiene.
-  Implementation evidence: pending.
+  Implementation evidence: `git diff --check` produced no output after the Session 3 refactor and ledger commits.
   Tests: `git diff --check`.
-  Commit SHA: `PENDING`
-- [ ] Confirm `legacy` remains unchanged and push all commits to PR17.
+  Commit SHA: `468fee8`
+- [x] Confirm `legacy` remains unchanged and push all commits to PR17.
   Target responsibility: branch integrity and final publication.
-  Implementation evidence: pending.
+  Implementation evidence: `git rev-parse legacy` remained `8334f42a8865b9360972f5e0422a8f61d02dedb6`; `git push origin pr17-specification-gatekeeper` updated `origin/pr17-specification-gatekeeper` to `468fee8`.
   Tests: `git rev-parse legacy`, `git push origin pr17-specification-gatekeeper`.
-  Commit SHA: `PENDING`
-- [ ] Finalize this ledger with `INCOMPLETE_ITEMS = NONE` only after every mandatory item is complete.
+  Commit SHA: `468fee8`
+- [x] Finalize this ledger with `INCOMPLETE_ITEMS = NONE` only after every mandatory item is complete.
   Target responsibility: authoritative Session 3 record.
-  Implementation evidence: pending.
+  Implementation evidence: this ledger now records the Session 3 module split, class audit, focused and full validation evidence, clean diff state, and branch push confirmation.
   Tests: N/A.
-  Commit SHA: `PENDING`
+  Commit SHA: `PENDING_LEDGER_COMMIT`
 
 ## Current module sizes and structure
 
@@ -279,4 +279,4 @@ Target modules:
 - Session 3 does not change final YES/NO semantics.
 - Session 3 does not redesign broader coordinator progression outside what is required for compatibility with the refactor.
 
-INCOMPLETE_ITEMS = PRESENT
+INCOMPLETE_ITEMS = NONE
