@@ -4,11 +4,7 @@ from pathlib import Path
 import pytest
 
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
-from core.execution.rack_ai_cli_gateway import (
-    RackAiCliConfig,
-    RackAiCliExecutionGateway,
-    RackAiCliTransportError,
-)
+from core.execution.rack_ai_cli_gateway import RackAiCliConfig, RackAiCliExecutionGateway, RackAiCliTransportError
 from core.execution.rack_ai_contract import RepositoryBinding
 
 
@@ -95,7 +91,7 @@ async def test_gateway_returns_structured_success_and_uses_argument_array(monkey
         )
         return FakeProcess(stdout)
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway(
         "p1",
@@ -164,7 +160,7 @@ async def test_gateway_passes_updated_binding_base_sha(monkeypatch, tmp_path):
         )
         return FakeProcess(stdout)
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
     gateway = RackAiCliExecutionGateway("p1")
     await gateway.execute(sample_unit(), sample_binding(base_sha="b" * 40))
     assert captured["payload"]["repository"]["base_sha"] == "b" * 40
@@ -190,7 +186,7 @@ async def test_gateway_returns_structured_rejection_even_on_nonzero_exit(monkeyp
         )
         return FakeProcess(stdout, returncode=1)
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway("p1")
     result = await gateway.execute(sample_unit(), sample_binding())
@@ -215,7 +211,7 @@ async def test_gateway_preserves_structured_failed_status(monkeypatch, tmp_path)
         )
         return FakeProcess(stdout, returncode=1)
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway("p1")
     result = await gateway.execute(sample_unit(), sample_binding())
@@ -229,7 +225,7 @@ async def test_gateway_raises_on_nonzero_exit_without_usable_summary(monkeypatch
     async def fake_exec(*_args, **_kwargs):
         return FakeProcess("", stderr="cargo failed", returncode=1)
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="cargo failed"):
@@ -241,7 +237,7 @@ async def test_gateway_raises_on_empty_stdout(monkeypatch):
     async def fake_exec(*_args, **_kwargs):
         return FakeProcess("", stderr="no payload")
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="returned no command summary"):
@@ -263,7 +259,7 @@ async def test_gateway_raises_on_malformed_packet_json(monkeypatch, tmp_path):
         )
         return FakeProcess(stdout, stderr="bad json")
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="untrustworthy output"):
@@ -282,7 +278,7 @@ async def test_gateway_raises_on_missing_packet_path(monkeypatch):
         )
         return FakeProcess(stdout, stderr="missing packet")
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(RackAiCliTransportError, match="missing field: packet"):
@@ -298,7 +294,7 @@ async def test_gateway_rejects_non_ready_units_before_subprocess(monkeypatch):
         called = True
         return FakeProcess("{}")
 
-    monkeypatch.setattr("core.execution.rack_ai_cli_gateway.asyncio.create_subprocess_exec", fake_exec)
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
 
     gateway = RackAiCliExecutionGateway("p1")
     with pytest.raises(ValueError, match="marked ready for execution"):

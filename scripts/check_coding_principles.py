@@ -31,6 +31,15 @@ TARGETS = [
     Path("core/development/tdd_phase_execution.py"),
     Path("core/development/tdd_cycle_coordination.py"),
     Path("core/development/work_unit_coordination.py"),
+    Path("core/development/project_environment_state.py"),
+    Path("core/development/project_environment_store.py"),
+    Path("core/development/project_environment_git.py"),
+    Path("core/development/project_environment_lifecycle.py"),
+    Path("core/execution/rack_ai_request.py"),
+    Path("core/execution/rack_ai_result.py"),
+    Path("core/execution/rack_ai_cli_transport.py"),
+    Path("core/execution/rack_ai_cli_gateway.py"),
+    Path("core/execution/rack_ai_contract.py"),
 ]
 ALLOWED_BASES = {"Enum", "Protocol", "str"}
 
