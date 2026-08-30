@@ -1,3 +1,10 @@
+"""Legacy local resource-director compatibility loop.
+
+This module predates the ATHBA versus Rack AI execution boundary. It remains in
+source as quarantined compatibility code and is not part of the modern active
+ATHBA control plane.
+"""
+
 import asyncio
 import os
 import threading

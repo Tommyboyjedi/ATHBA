@@ -23,5 +23,6 @@ class ResumeProjectBehavior:
 
         return AgentMessage(
             sender=agent.name,
-            text="Project resumed. Agents may now continue their tasks."
+            text="Project resumed. Agents may now continue their tasks.",
+            session=agent.session,
         )

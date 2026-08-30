@@ -1,8 +1,8 @@
-"""
-Git service for repository operations.
+"""Legacy Git workflow service for the older Developer/Tester chat stack.
 
-This module provides Git operations for the ATHBA project, including
-repository initialization, branch management, and commit operations.
+This service operates on the quarantined `/tmp/athba_repos` compatibility lane.
+Modern PR17+ orchestration uses trusted project environments and Rack AI
+execution instead of this legacy Git control path.
 """
 
 from pathlib import Path

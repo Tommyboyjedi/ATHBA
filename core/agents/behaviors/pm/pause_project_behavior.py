@@ -23,5 +23,6 @@ class PauseProjectBehavior:
 
         return AgentMessage(
             sender=agent.name,
-            text="Project paused. All agents will suspend activity until resumed."
+            text="Project paused. All agents will suspend activity until resumed.",
+            session=agent.session,
         )

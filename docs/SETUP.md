@@ -1,5 +1,9 @@
 # ATHBA Setup Guide
 
+> Modern authority: ATHBA owns software-development semantics and trusted revision progression; Rack AI owns physical model, worker, GPU, and bounded execution control. Read `docs/ATHBA_RACK_AI_ARCHITECTURE.md` and `docs/pre_pr17_architecture_quarantine.md` before using this guide.
+
+> Legacy compatibility note: the local `llm_service`, `Resource Director`, and `/tmp/athba_repos` Developer/Tester workflow documented below describe the older chat stack and are not the modern PR17+ execution control plane.
+
 ## System Requirements
 
 ### Hardware

@@ -22,7 +22,8 @@ class RenameProjectBehavior:
         if not project_id or not new_name:
             return AgentMessage(
                 sender=agent.name,
-                text="I need both a project ID and a new name to rename a project."
+                text="I need both a project ID and a new name to rename a project.",
+                session=agent.session,
             )
 
         await agent.log(f"Renaming project {project_id} to '{new_name}'")
@@ -33,10 +34,12 @@ class RenameProjectBehavior:
         if updated_project:
             return AgentMessage(
                 sender=agent.name,
-                text=f"Project was successfully renamed to **{new_name}**."
+                text=f"Project was successfully renamed to **{new_name}**.",
+                session=agent.session,
             )
         else:
             return AgentMessage(
                 sender=agent.name,
-                text=f"Sorry, I couldn’t find a project with ID `{project_id}`."
+                text=f"Sorry, I couldn’t find a project with ID `{project_id}`.",
+                session=agent.session,
             )

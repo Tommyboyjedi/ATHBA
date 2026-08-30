@@ -2,6 +2,10 @@
 
 ## Overview
 
+> Modern authority: ATHBA owns software-development semantics and trusted revision progression; Rack AI owns physical model, worker, GPU, and bounded execution control. Read `docs/ATHBA_RACK_AI_ARCHITECTURE.md` and `docs/pre_pr17_architecture_quarantine.md` first.
+
+> Legacy compatibility note: the local `llm_service`, `Resource Director`, and `/tmp/athba_repos` Developer/Tester loop remain in the repository for the older chat stack, but they are not the modern PR17+ control plane.
+
 **ATHBA** is an AI-powered software development environment that simulates a complete agile team using multiple AI agents. The system orchestrates Project Manager, Architect, Developer, Tester, and Resource Director agents to collaboratively deliver software projects following TDD principles and GitOps workflows.
 
 **Key Features:**
@@ -60,6 +64,8 @@
    ```
 
 ### Running the Application
+
+The startup sequence below is for the older compatibility chat stack. Modern PR17+ development orchestration uses the Rack AI execution seam described in `docs/ATHBA_RACK_AI_ARCHITECTURE.md` and `docs/pre_pr17_architecture_quarantine.md`.
 
 **Start two services:**
 

@@ -1,8 +1,8 @@
-"""
-Test Execution Service.
+"""Legacy pytest execution service for the older Tester chat stack.
 
-This module provides test execution capabilities using pytest, allowing
-the Tester agent to run tests on ticket branches and capture results.
+This service executes tests inside the quarantined `/tmp/athba_repos`
+compatibility workflow. Modern PR17+ orchestration relies on trusted revision
+progression and Rack AI acceptance execution instead.
 """
 
 from pathlib import Path

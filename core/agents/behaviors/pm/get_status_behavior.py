@@ -25,4 +25,4 @@ class GetStatusBehavior:
             f"- Done tickets: {stats.get('done', 0)}"
         )
 
-        return AgentMessage(sender=agent.name, text=message)
+        return AgentMessage(sender=agent.name, text=message, session=agent.session)

@@ -3,6 +3,7 @@ from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.agents.spec_agent import SpecBuilderAgent
 
+
 class DelegateToSpecBuilderBehavior:
     intent = {
         "start_spec",
@@ -15,10 +16,13 @@ class DelegateToSpecBuilderBehavior:
     }
 
     async def run(self, execution: BehaviorExecution) -> list[ChatMessage]:
+        agent = execution.agent
+        content = execution.message
+        intent = execution.intent
+
         if intent.intent not in self.intent:
             return []
 
-        # Launch SpecBuilderAgent asynchronously
         asyncio.create_task(self._run_spec_builder(agent.session, content))
 
         return [

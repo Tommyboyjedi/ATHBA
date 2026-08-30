@@ -1,3 +1,10 @@
+"""Legacy local model registry for the older ATHBA chat stack.
+
+This registry configures the quarantined `llm_service` runtime. Modern ATHBA
+must not treat these physical model selections as authoritative execution
+policy.
+"""
+
 import os
 from pathlib import Path
 from typing import Dict
