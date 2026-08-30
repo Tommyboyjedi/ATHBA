@@ -80,6 +80,13 @@ class TesterRepositoryMaterialProvider(Protocol):
         ...
 
 
+class EnvironmentRecovery(Protocol):
+    """ATHBA-owned environment repair followed by a mandatory health proof."""
+
+    async def recover_and_verify(self, project_id: str) -> bool:
+        ...
+
+
 class GitReviewMaterialProvider:
     """Read-only Git-backed review evidence for semantic review."""
 
@@ -533,6 +540,7 @@ class BehaviorContractCoordinator:
         failure_policy: FailureProgressionPolicy | None = None,
         max_tester_repairs: int = 2,
         max_developer_repairs: int = 2,
+        environment_recovery: EnvironmentRecovery | None = None,
     ):
         self.execution_gateway = execution_gateway
         self.reasoning_gateway = reasoning_gateway
@@ -555,6 +563,7 @@ class BehaviorContractCoordinator:
         self.failure_policy = failure_policy or FailureProgressionPolicy()
         self.max_tester_repairs = max_tester_repairs
         self.max_developer_repairs = max_developer_repairs
+        self.environment_recovery = environment_recovery
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
         project_id = contract.project_id
@@ -692,7 +701,7 @@ class BehaviorContractCoordinator:
                             )
                             snapshot = self._save_run_state(snapshot, run_state)
                             continue
-                        run_state = self._route_failed_candidate(
+                        run_state = await self._route_failed_candidate(
                             run_state=run_state,
                             contract=contract,
                             cycle=cycle,
@@ -719,7 +728,7 @@ class BehaviorContractCoordinator:
                         base_binding=base_binding,
                     )
                     if not green_outcome.accepted:
-                        run_state = self._route_failed_candidate(
+                        run_state = await self._route_failed_candidate(
                             run_state=run_state,
                             contract=contract,
                             cycle=cycle,
@@ -912,7 +921,7 @@ class BehaviorContractCoordinator:
             blocked_reason=run_state.blocked_reason,
         )
 
-    def _route_failed_candidate(
+    async def _route_failed_candidate(
         self,
         *,
         run_state: BehaviorContractRunState,
@@ -925,6 +934,25 @@ class BehaviorContractCoordinator:
         """Persist one dominant policy decision before any retry or stop."""
         observation = self._failure_observation(phase, outcome)
         decision = self.failure_policy.decide([observation])
+        if decision.dominant is FailureClassification.ENVIRONMENT_FAILURE:
+            if self.environment_recovery is not None and self.failure_policy.retry_allowed(
+                run_state.failure_progress, "environment_recovery", budget=1
+            ) and await self.environment_recovery.recover_and_verify(contract.project_id):
+                progress = self.failure_policy.record(
+                    run_state.failure_progress,
+                    decision,
+                    route="environment_recovery",
+                    next_state=FailureRouteState.ACTIVE,
+                )
+                replacement = replace(cycle, pool="cycle_active", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state}))
+                return replace(
+                    run_state,
+                    current_pool="cycle_active",
+                    contract=replace(contract, status="cycle_active"),
+                    blocked_reason="environment recovered; rerunning from trusted revision",
+                    cycles=self._replace_current_cycle(run_state.cycles, replacement),
+                    failure_progress=progress,
+                )
         if decision.dominant in {
             FailureClassification.SYNTAX_OR_PARSE_FAILURE,
             FailureClassification.BUILD_OR_LINK_FAILURE,
