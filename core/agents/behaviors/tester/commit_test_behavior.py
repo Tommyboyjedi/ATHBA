@@ -7,7 +7,7 @@ This behavior commits generated test files to the Git branch.
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
-from datetime import datetime
+from datetime import UTC, datetime
 from core.dataclasses.history_entry import HistoryEntry
 
 
@@ -106,13 +106,13 @@ class CommitTestBehavior:
             
             # Add history entry
             ticket.history.append(HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 agent="Tester",
                 action="commit_test",
                 details=f"Committed {len(test_files)} test file(s) to branch {ticket.branch_name} (SHA: {commit_sha[:8]})"
             ))
             
-            ticket.updated_at = datetime.utcnow()
+            ticket.updated_at = datetime.now(UTC)
             await agent.ticket_repo.update(ticket)
             
             # Clear pending tests from session

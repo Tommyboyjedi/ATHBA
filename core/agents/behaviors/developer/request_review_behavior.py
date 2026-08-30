@@ -4,7 +4,7 @@ Request Review Behavior for Developer Agent.
 This behavior requests code review from the Tester agent.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
@@ -91,7 +91,7 @@ class RequestReviewBehavior:
             "column": "Review",
             "agents": [agent.name, "Tester"],  # Add Tester to agents list
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="review_requested",
                 actor=agent.name,
                 details=f"Code review requested from Tester agent"

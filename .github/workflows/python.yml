@@ -3,7 +3,7 @@ name: ATHBA Python gate
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [master, pr17-specification-gatekeeper]
 
 jobs:
   test:
@@ -11,16 +11,22 @@ jobs:
     env:
       CPU_ONLY: "true"
       DJANGO_SECRET_KEY: "ci-test-secret"
+      MONGO_USER: "ci"
+      MONGO_PASS: "ci"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
       - name: Install Poetry
-        run: pip install poetry
-      - name: Install dependencies
-        run: poetry install --no-interaction
+        run: pip install poetry==2.4.1
+      - name: Install dependencies from lockfile
+        run: poetry install --no-interaction --sync
+      - name: Coding principles gate
+        run: poetry run python scripts/check_coding_principles.py
+      - name: Static type gate
+        run: poetry run mypy
       - name: Compile Python
-        run: poetry run python -m compileall athba core llm_service tests
+        run: poetry run python -m compileall athba core llm_service tests scripts
       - name: Run tests
-        run: poetry run pytest
+        run: poetry run pytest -q

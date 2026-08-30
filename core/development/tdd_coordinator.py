@@ -5,6 +5,7 @@ from __future__ import annotations
 from core.development.tdd_cycle_coordination import (
     DeveloperWorkUnitFactory,
     TddCoordinator,
+    TddCoordinatorDependencies,
     TddCoordinationResult,
     TddStateRepository,
     TesterWorkUnitFactory,
@@ -54,6 +55,7 @@ __all__ = [
     "DeveloperWorkUnitFactory",
     "RED_ALREADY_SATISFIED_FRAGMENT",
     "TddCoordinator",
+    "TddCoordinatorDependencies",
     "TddCoordinationResult",
     "TddStateRepository",
     "TesterWorkUnitFactory",

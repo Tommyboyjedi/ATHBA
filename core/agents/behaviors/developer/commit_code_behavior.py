@@ -4,7 +4,7 @@ Commit Code Behavior for Developer Agent.
 This behavior commits generated code to the Git branch.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
@@ -120,7 +120,7 @@ class CommitCodeBehavior:
         updates = {
             "commits": commits,
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="code_committed",
                 actor=agent.name,
                 details=f"Committed code: {result['commit_sha'][:7]} - {commit_message}"

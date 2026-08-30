@@ -1,10 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Sequence
 
 from core.development.specification_atomization import ChecklistAtomizationRequest, SpecificationChecklistPlanner
-from core.development.specification_evidence import AcceptedTestEvidenceCollector, ApprovedReviewEvidenceCollector, ChecklistEvidenceContext, ChecklistEvidenceMapper, EvidenceMappingRequest, assessment_evidence_kind
-from core.development.tdd_progression import BehaviorContract, BehaviorContractRunState, ChecklistItemAssessment, GatekeeperAssessmentRecord, SpecificationGap, SpecificationGatekeeperRunState
+from core.development.specification_domain import ChecklistEvidence, SourceRequirementClause, SpecificationChecklistItem
+from core.development.specification_evidence import (
+    AcceptedTestEvidenceCollector,
+    ApprovedReviewEvidenceCollector,
+    ChecklistEvidenceContext,
+    ChecklistEvidenceMapper,
+    EvidenceMappingRequest,
+    assessment_evidence_kind,
+)
+from core.development.tdd_progression import (
+    BehaviorContract,
+    BehaviorContractRunState,
+    ChecklistItemAssessment,
+    GatekeeperAssessmentRecord,
+    SpecificationGap,
+    SpecificationGatekeeperRunState,
+)
 from core.development.tdd_progression_values import ChecklistAssessmentStatus, ChecklistEvidenceKind, GatekeeperAssessmentStatus
 from core.execution.reasoning_gateway import ReasoningGateway
 
@@ -24,7 +40,7 @@ class GatekeeperAssessmentRequest:
 
 @dataclass(frozen=True)
 class ChecklistAssessmentContext:
-    item: object
+    item: SpecificationChecklistItem | SourceRequirementClause
     contract: BehaviorContract
     run_state: BehaviorContractRunState
 
@@ -38,16 +54,17 @@ class ChecklistItemAssessor:
         self.mapper = ChecklistEvidenceMapper(gateway)
 
     async def assess(self, context: ChecklistAssessmentContext) -> ChecklistItemAssessment:
-        item_context = ChecklistEvidenceContext(context.item, context.contract, context.run_state)
-        evidence_kind = assessment_evidence_kind(context.item)
+        item = context.item
+        item_context = ChecklistEvidenceContext(item, context.contract, context.run_state)
+        evidence_kind = assessment_evidence_kind(item)
         if evidence_kind == ChecklistEvidenceKind.REVIEW.value:
-            return _review_assessment(context.item.ref, self.review_collector.collect(item_context))
+            return _review_assessment(item.ref, self.review_collector.collect(item_context))
         if evidence_kind == ChecklistEvidenceKind.MECHANICAL.value:
-            return _mechanical_assessment(context.item.ref)
+            return _mechanical_assessment(item.ref)
         candidates = self.test_collector.collect(item_context)
         if not candidates:
-            return _missing_test_assessment(context.item.ref)
-        return await self.mapper.map(EvidenceMappingRequest(context.contract.project_id, context.item, candidates))
+            return _missing_test_assessment(item.ref)
+        return await self.mapper.map(EvidenceMappingRequest(context.contract.project_id, item, candidates))
 
 
 class GatekeeperAssessmentRunner:
@@ -97,7 +114,7 @@ class SpecificationGatekeeper:
         return await self.runner.assess(request)
 
 
-def _gap_from_assessment(item: object, assessment: ChecklistItemAssessment) -> SpecificationGap:
+def _gap_from_assessment(item: SpecificationChecklistItem | SourceRequirementClause, assessment: ChecklistItemAssessment) -> SpecificationGap:
     return SpecificationGap(
         checklist_ref=item.ref,
         obligation_text=item.text,
@@ -108,13 +125,13 @@ def _gap_from_assessment(item: object, assessment: ChecklistItemAssessment) -> S
     )
 
 
-def _review_assessment(checklist_ref: str, evidence: list[object]) -> ChecklistItemAssessment:
+def _review_assessment(checklist_ref: str, evidence: Sequence[ChecklistEvidence]) -> ChecklistItemAssessment:
     if evidence:
         return ChecklistItemAssessment(
             checklist_ref=checklist_ref,
             status=ChecklistAssessmentStatus.PROVEN.value,
             rationale="Semantically approved review evidence exists for this quality obligation.",
-            evidence=evidence,
+            evidence=list(evidence),
         )
     return ChecklistItemAssessment(
         checklist_ref=checklist_ref,

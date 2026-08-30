@@ -4,7 +4,7 @@ Analyze Code Behavior for Tester Agent.
 This behavior allows the Tester agent to analyze code changes on a ticket's branch.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
@@ -59,13 +59,13 @@ Keep response concise and focused on testing needs."""
         ).get_response()
         ticket.history.append(
             HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 agent="Tester",
                 action="analyze_code",
                 details=f"Analyzed {len(files_changed)} file(s) on branch {ticket.branch_name}",
             )
         )
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = datetime.now(UTC)
         await agent.ticket_repo.update(ticket)
         response_msg = f"""🔍 **Code Analysis Complete**
 

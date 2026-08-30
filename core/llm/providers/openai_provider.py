@@ -2,19 +2,14 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict
+from typing import Any
 
 import httpx
-from jsonschema import ValidationError as JSONSchemaError, validate
+from jsonschema import ValidationError as JSONSchemaError, validate  # type: ignore[import-untyped]
 
 from core.config.openai import OpenAISettings
 from core.llm.contracts.exceptions import ValidationError
-from core.llm.contracts.provider import (
-    NormalizedResult,
-    ProviderRequest,
-    ProviderRetryPolicy,
-    build_provider_request,
-)
+from core.llm.contracts.provider import NormalizedResult, ProviderRequest, ProviderRetryPolicy
 
 DEFAULT_OPENAI_POLICY = ProviderRetryPolicy(timeout=30.0, max_retries=3, backoff_factor=2.0)
 
@@ -31,13 +26,12 @@ class OpenAIProvider:
         self.settings = OpenAISettings.from_env()
         self.policy = _policy_with_max_retries(policy, max_retries)
 
-    def invoke(self, request_or_prompt: ProviderRequest | str, **kwargs: Any) -> NormalizedResult:
-        request = build_provider_request(request_or_prompt, kwargs)
+    def invoke(self, request: ProviderRequest) -> NormalizedResult:
         url = f"{self.settings.api_base}/responses"
         headers = {"Authorization": f"Bearer {self.settings.api_key}"}
         if self.settings.org:
             headers["OpenAI-Organization"] = self.settings.org
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": request.model,
             "input": request.prompt,
             "temperature": request.temperature,

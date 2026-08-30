@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core.datastore.repos.mongo_requests import CodeFileSaveRequest
 from core.infra.mongo import get_mongo_db
@@ -40,6 +40,6 @@ class CodeRepo:
             )
         self.col.update_one(
             {"project_id": request.project_id, "filename": request.filename},
-            {"$set": {"code": request.code, "updated_at": datetime.utcnow()}},
+            {"$set": {"code": request.code, "updated_at": datetime.now(UTC)}},
             upsert=True,
         )

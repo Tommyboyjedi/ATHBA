@@ -7,7 +7,7 @@ This behavior approves code that passes all tests and moves ticket to Done.
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
-from datetime import datetime
+from datetime import UTC, datetime
 from core.dataclasses.history_entry import HistoryEntry
 
 
@@ -85,13 +85,13 @@ Please fix failing tests before approval."""
         
         # Add approval history entry
         ticket.history.append(HistoryEntry(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             agent="Tester",
             action="approve_code",
             details=f"Code approved! All {ticket.test_results.get('total', 0)} tests passing. Moved from {old_column} to Done."
         ))
         
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = datetime.now(UTC)
         
         # Reset failure counters on both Developer and Tester
         await agent.escalation_manager.record_success(ticket, "Developer")

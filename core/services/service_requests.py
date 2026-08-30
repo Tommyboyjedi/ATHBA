@@ -34,6 +34,7 @@ class FileContentRequest:
 
 @dataclass(frozen=True)
 class TestRunRequest:
+    __test__ = False
     project_id: str
     test_files: list[str] | None = None
     verbose: bool = True

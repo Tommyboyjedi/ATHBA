@@ -4,7 +4,7 @@ Claim Ticket Behavior for Developer Agent.
 This behavior allows the Developer agent to claim tickets from the Backlog.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
@@ -85,7 +85,7 @@ class ClaimTicketBehavior:
             "agents": [agent.name],
             "column": "To Do",
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="claimed",
                 actor=agent.name,
                 details=f"Ticket claimed by {agent.name}"

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from core.datastore.repos.mongo_requests import (
     AgentLogEntry,
@@ -13,7 +13,7 @@ class AgentLogRepo:
         self.col = get_mongo_db()["agent_logs"]
 
     async def insert(self, doc: dict) -> str:
-        doc["created_at"] = doc.get("created_at", datetime.utcnow())
+        doc["created_at"] = doc.get("created_at", datetime.now(UTC))
         result = await self.col.insert_one(doc)
         return str(result.inserted_id)
 
@@ -48,6 +48,6 @@ class AgentLogRepo:
                 "agent": entry.agent,
                 "action": entry.action,
                 "details": entry.details,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(UTC),
             }
         )

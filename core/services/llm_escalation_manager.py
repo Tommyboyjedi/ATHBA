@@ -7,7 +7,7 @@ Developer and Tester agents independently. Implements 3-failure escalation:
 - HEAVY -> MEGA (after 3 more failures)
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Tuple
 
 from core.dataclasses.history_entry import HistoryEntry
@@ -64,13 +64,13 @@ class LlmEscalationManager:
         )
         request.ticket.history.append(
             HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 agent=request.agent_type.value,
                 action="llm_escalation",
                 details=history_msg,
             )
         )
-        request.ticket.updated_at = datetime.utcnow()
+        request.ticket.updated_at = datetime.now(UTC)
         await self.ticket_repo.update(request.ticket)
         return request.ticket, new_tier
 
@@ -81,7 +81,7 @@ class LlmEscalationManager:
         if old_count > 0:
             ticket.history.append(
                 HistoryEntry(
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(UTC),
                     agent=normalized.value,
                     action="llm_escalation_reset",
                     details=(
@@ -90,7 +90,7 @@ class LlmEscalationManager:
                     ),
                 )
             )
-            ticket.updated_at = datetime.utcnow()
+            ticket.updated_at = datetime.now(UTC)
             await self.ticket_repo.update(ticket)
         return ticket
 

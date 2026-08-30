@@ -2,19 +2,14 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict
+from typing import Any
 
 import httpx
-from jsonschema import ValidationError as JSONSchemaError, validate
+from jsonschema import ValidationError as JSONSchemaError, validate  # type: ignore[import-untyped]
 
 from core.config.anthropic import AnthropicSettings
 from core.llm.contracts.exceptions import ValidationError
-from core.llm.contracts.provider import (
-    NormalizedResult,
-    ProviderRequest,
-    ProviderRetryPolicy,
-    build_provider_request,
-)
+from core.llm.contracts.provider import NormalizedResult, ProviderRequest, ProviderRetryPolicy
 
 DEFAULT_ANTHROPIC_POLICY = ProviderRetryPolicy(timeout=120.0, max_retries=3, backoff_factor=2.0)
 
@@ -24,8 +19,7 @@ class AnthropicProvider:
         self.settings = AnthropicSettings.from_env()
         self.policy = policy or DEFAULT_ANTHROPIC_POLICY
 
-    def invoke(self, request_or_prompt: ProviderRequest | str, **kwargs: Any) -> NormalizedResult:
-        request = build_provider_request(request_or_prompt, kwargs)
+    def invoke(self, request: ProviderRequest) -> NormalizedResult:
         model = request.model or self.settings.default_model
         url = f"{self.settings.api_base}/messages"
         headers = {
@@ -33,7 +27,7 @@ class AnthropicProvider:
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,

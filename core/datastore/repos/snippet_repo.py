@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from bson import ObjectId
 
@@ -15,7 +15,7 @@ class SnippetRepo:
         self.col = get_mongo_db()["snippets"]
 
     async def insert(self, doc: dict) -> str:
-        doc["created_at"] = doc.get("created_at", datetime.utcnow())
+        doc["created_at"] = doc.get("created_at", datetime.now(UTC))
         result = await self.col.insert_one(doc)
         return str(result.inserted_id)
 

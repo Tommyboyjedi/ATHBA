@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict
 
 from pymongo import DESCENDING
@@ -52,7 +52,7 @@ class SpecVersionRepo:
         return self._base_col
 
     async def insert(self, doc: dict) -> str:
-        doc["created_at"] = doc.get("created_at", datetime.utcnow())
+        doc["created_at"] = doc.get("created_at", datetime.now(UTC))
         result = await self._collection.insert_one(doc)
         return str(result.inserted_id)
 

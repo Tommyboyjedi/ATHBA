@@ -47,7 +47,7 @@ from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_contract import RepositoryBinding, find_forbidden_resource_selection_keys, to_rack_ai_request
 from core.execution.reasoning_gateway import ReasoningRequest, ReasoningResult
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
-from core.llm.contracts.provider import NormalizedResult, Provider
+from core.llm.contracts.provider import NormalizedResult, Provider, ProviderRequest
 
 
 class FakeReasoningGateway:
@@ -101,18 +101,18 @@ class StubProvider(Provider):
     def __init__(self):
         self.calls = []
 
-    def invoke(self, prompt: str, *, model: str, temperature: float = 0.0, max_tokens: int = 16, response_schema=None):
+    def invoke(self, request: ProviderRequest):
         self.calls.append({
-            "prompt": prompt,
-            "model": model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "response_schema": response_schema,
+            "prompt": request.prompt,
+            "model": request.model,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "response_schema": request.response_schema,
         })
         return NormalizedResult(
             text="{\"ok\": true}",
             usage={"input_tokens": 1, "output_tokens": 1},
-            raw={"provider": "stub", "model": model},
+            raw={"provider": "stub", "model": request.model},
         )
 
 

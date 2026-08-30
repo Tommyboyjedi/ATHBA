@@ -4,7 +4,7 @@ Create Branch Behavior for Developer Agent.
 This behavior creates a Git branch for a ticket.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
@@ -117,7 +117,7 @@ class CreateBranchBehavior:
             "branch_name": branch_name,
             "column": "In Progress",
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="branch_created",
                 actor=agent.name,
                 details=f"Created branch: {branch_name}"

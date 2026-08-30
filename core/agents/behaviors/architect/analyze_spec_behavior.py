@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import json
 from typing import Any, Dict, List
 
@@ -49,17 +49,17 @@ class AnalyzeSpecBehavior:
                 project_id=agent.session.project_id,
                 title=ticket_data.get("title", "Untitled Ticket"),
                 description=ticket_data.get("description", ""),
-                due=datetime.utcnow() + timedelta(days=ticket_data.get("estimated_days", 7)),
+                due=datetime.now(UTC) + timedelta(days=ticket_data.get("estimated_days", 7)),
                 eta=ticket_data.get("eta", "1 week"),
                 agents=[],
                 label=ticket_data.get("label", "Feature"),
                 severity=ticket_data.get("severity", "Medium"),
                 column="Backlog",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
                 history=[
                     HistoryEntry(
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(UTC),
                         event="created",
                         actor=agent.name,
                         details="Ticket generated from specification analysis",

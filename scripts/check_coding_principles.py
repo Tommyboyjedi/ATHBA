@@ -38,6 +38,10 @@ def input_count(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     count = len(node.args.posonlyargs) + len(node.args.args) + len(node.args.kwonlyargs)
     if node.args.args and node.args.args[0].arg in {"self", "cls"}:
         count -= 1
+    if node.args.vararg is not None:
+        count += 1
+    if node.args.kwarg is not None:
+        count += 1
     return count
 
 
@@ -74,7 +78,7 @@ def scan_class(path: Path, node: ast.ClassDef, failures: list[str]) -> None:
     lines = executable_line_count(node)
     if lines > LIMIT:
         failures.append(f"{path}:{node.name} has {lines} executable lines")
-    illegal_bases = []
+    illegal_bases: list[str] = []
     for base in node.bases:
         name = base_name(base)
         if name and name not in ALLOWED_BASES and name not in FRAMEWORK_BASES:
@@ -82,8 +86,10 @@ def scan_class(path: Path, node: ast.ClassDef, failures: list[str]) -> None:
     if illegal_bases:
         failures.append(f"{path}:{node.name} has forbidden bases {illegal_bases}")
     for method in node.body:
-        if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and input_count(method) > 2:
-            failures.append(f"{path}:{node.name}.{method.name} has {input_count(method)} inputs")
+        if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            count = input_count(method)
+            if count > 2:
+                failures.append(f"{path}:{node.name}.{method.name} has {count} inputs")
 
 
 def main() -> int:

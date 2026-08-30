@@ -98,38 +98,11 @@ class TddCoordinationContext:
 class TddCoordinator:
     """Run one predefined RED->GREEN cycle per behavior in order."""
 
-    def __init__(
-        self,
-        gateway: WorkUnitExecutionGateway,
-        repository_binding: RepositoryBinding,
-        *legacy: object,
-    ):
-        self.dependencies = _coordinator_dependencies(
-            gateway,
-            repository_binding,
-            legacy,
-        )
+    def __init__(self, dependencies: TddCoordinatorDependencies):
+        self.dependencies = dependencies
 
     async def run(self, behaviors: Iterable[TddBehavior]) -> TddCoordinationResult:
         return await _run_behaviors(self.dependencies, list(behaviors))
-
-
-def _coordinator_dependencies(
-    gateway: WorkUnitExecutionGateway,
-    repository_binding: RepositoryBinding,
-    legacy: tuple[object, ...],
-) -> TddCoordinatorDependencies:
-    if len(legacy) > 3:
-        raise TypeError(
-            "TddCoordinator accepts gateway, repository_binding, and up to three legacy collaborators"
-        )
-    return TddCoordinatorDependencies(
-        gateway=gateway,
-        repository_binding=repository_binding,
-        state_repo=legacy[0] if len(legacy) >= 1 else TddStateRepo(),
-        tester_factory=legacy[1] if len(legacy) >= 2 else TesterWorkUnitFactory(),
-        developer_factory=legacy[2] if len(legacy) >= 3 else DeveloperWorkUnitFactory(),
-    )
 
 
 async def _run_behaviors(

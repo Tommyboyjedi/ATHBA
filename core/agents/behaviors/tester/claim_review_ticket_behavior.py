@@ -4,7 +4,7 @@ Claim Review Ticket Behavior for Tester Agent.
 This behavior allows the Tester agent to claim tickets from the Review column.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
@@ -89,13 +89,13 @@ class ClaimReviewTicketBehavior:
         
         # Add history entry
         ticket.history.append(HistoryEntry(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             agent="Tester",
             action="claim_review",
             details=f"Tester claimed ticket for review from {ticket.column} column"
         ))
         
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = datetime.now(UTC)
         
         # Save ticket
         await agent.ticket_repo.update(ticket)

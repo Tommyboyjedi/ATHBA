@@ -7,7 +7,7 @@ This behavior rejects code that fails tests and returns ticket to Developer.
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
-from datetime import datetime
+from datetime import UTC, datetime
 from core.dataclasses.history_entry import HistoryEntry
 
 
@@ -84,13 +84,13 @@ class RejectCodeBehavior:
         
         # Add rejection history entry
         ticket.history.append(HistoryEntry(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             agent="Tester",
             action="reject_code",
             details=f"Code rejected: {reason}. Moved from {old_column} to In Progress for Developer fixes."
         ))
         
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = datetime.now(UTC)
         
         # Record failure for Developer (they couldn't pass the tests)
         ticket, new_tier = await agent.escalation_manager.record_failure(

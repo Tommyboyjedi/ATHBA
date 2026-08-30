@@ -9,7 +9,7 @@ import subprocess
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Protocol
+from typing import Protocol, cast
 
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.contract_run_store import ContractRunStore
@@ -248,7 +248,7 @@ class GitTesterRepositoryMaterialProvider:
             "files": files[:200],
             "production_files": production_files,
             "test_files": test_files,
-            "known_pytest_nodes": [node for material in test_files for node in material["pytest_nodes"]],
+            "known_pytest_nodes": [node for material in test_files for node in cast(list[str], material["pytest_nodes"])],
             "all_contract_files_empty": all(
                 not str(material["content"]).strip() for material in [*production_files, *test_files]
             ),
@@ -888,6 +888,7 @@ class ReadyPoolProgressor:
                 )
         decision = await self.dependencies.step_planner.decide_next_step(StepDecisionRequest(contract, run_state))
         if decision.status != "complete":
+            assert decision.proposal is not None
             cycle = ContractCycleRecord.from_step(decision.proposal, base_revision=run_state.semantic_base_revision)
             return RunAdvance(
                 replace(

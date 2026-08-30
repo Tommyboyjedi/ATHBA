@@ -1,6 +1,6 @@
 """Chat message dataclass for representing conversation messages."""
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import UTC, datetime
 import base64
 import json
 
@@ -23,7 +23,7 @@ class ChatMessage:
     """
     sender: str
     content: str
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     session_id: str = None
     project_id: str = None
     metadata: dict = field(default_factory=dict)
@@ -52,7 +52,7 @@ class ChatMessage:
         """
         try:
             dt = datetime.fromisoformat(self.timestamp.replace('Z', '+00:00'))
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             diff = now - dt
             
             if diff.total_seconds() < 60:

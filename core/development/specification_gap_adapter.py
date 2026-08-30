@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from core.development.tdd_progression import BehaviorContract, BehaviorContractRequirement, SpecificationChecklistItem, SpecificationGap
+from core.development.tdd_progression import BehaviorContract, BehaviorContractRequirement, SourceRequirementClause, SpecificationChecklistItem, SpecificationGap
 from core.development.tdd_progression_values import ChecklistItemKind
 
 
@@ -50,7 +50,7 @@ def matching_contract_source_refs_for_gap(contract: BehaviorContract, gap: Speci
 
 def matching_contract_source_refs_for_clause(
     contract: BehaviorContract,
-    item: SpecificationChecklistItem,
+    item: SpecificationChecklistItem | SourceRequirementClause,
 ) -> set[str]:
     direct_match = {clause.ref for clause in contract.source_clauses if clause.ref == item.ref}
     if direct_match:

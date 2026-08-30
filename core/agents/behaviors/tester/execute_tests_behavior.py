@@ -7,7 +7,7 @@ This behavior executes tests using pytest and captures results.
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
-from datetime import datetime
+from datetime import UTC, datetime
 from core.dataclasses.history_entry import HistoryEntry
 from core.services.service_requests import TestRunRequest
 
@@ -99,13 +99,13 @@ class ExecuteTestsBehavior:
         # Add history entry
         status_emoji = "✅" if results["status"] == "success" else "❌" if results["status"] == "failure" else "⚠️"
         ticket.history.append(HistoryEntry(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             agent="Tester",
             action="execute_tests",
             details=f"{status_emoji} Tests executed: {results['passed']}/{results['total']} passed ({results['pass_rate']*100:.1f}%)"
         ))
         
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = datetime.now(UTC)
         await agent.ticket_repo.update(ticket)
         
         # Format response based on results

@@ -19,6 +19,7 @@ TEST_TIMEOUT_SECONDS = 300
 
 
 class TestExecutionService:
+    __test__ = False
     def __init__(self, repos_base_path: str = "/tmp/athba_repos"):
         self.repos_base_path = Path(repos_base_path).resolve()
 

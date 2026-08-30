@@ -4,14 +4,14 @@ import json
 from dataclasses import dataclass
 
 from core.development.specification_gap_adapter import matching_contract_source_refs_for_clause
-from core.development.tdd_progression import BehaviorContract, BehaviorContractRunState, ChecklistEvidence, ChecklistItemAssessment, SpecificationChecklistItem
+from core.development.tdd_progression import BehaviorContract, BehaviorContractRunState, ChecklistEvidence, ChecklistItemAssessment, SourceRequirementClause, SpecificationChecklistItem
 from core.development.tdd_progression_values import ChecklistAssessmentStatus, ChecklistEvidenceKind, ChecklistItemKind
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 
 
 @dataclass(frozen=True)
 class ChecklistEvidenceContext:
-    item: SpecificationChecklistItem
+    item: SpecificationChecklistItem | SourceRequirementClause
     contract: BehaviorContract
     run_state: BehaviorContractRunState
 
@@ -19,7 +19,7 @@ class ChecklistEvidenceContext:
 @dataclass(frozen=True)
 class EvidenceMappingRequest:
     project_id: str
-    item: SpecificationChecklistItem
+    item: SpecificationChecklistItem | SourceRequirementClause
     candidates: list[ChecklistEvidence]
 
 
@@ -112,7 +112,7 @@ _ALLOWED_STATUSES = {
 }
 
 
-def assessment_evidence_kind(item: SpecificationChecklistItem) -> str:
+def assessment_evidence_kind(item: SpecificationChecklistItem | SourceRequirementClause) -> str:
     if item.kind == ChecklistItemKind.QUALITY.value:
         return ChecklistEvidenceKind.REVIEW.value
     if item.kind == ChecklistItemKind.CONSTRAINT.value:
@@ -163,7 +163,7 @@ def _resolved_assessment(
     )
 
 
-def _evidence_mapping_prompt(*, item: SpecificationChecklistItem, candidates: list[ChecklistEvidence]) -> str:
+def _evidence_mapping_prompt(*, item: SpecificationChecklistItem | SourceRequirementClause, candidates: list[ChecklistEvidence]) -> str:
     return json.dumps(
         {
             "instruction": "Act as ATHBA's Specification Gatekeeper evidence mapper. Return raw JSON only.",

@@ -4,7 +4,7 @@ Generate Code Behavior for Developer Agent.
 This behavior generates code to implement a ticket using the LLM.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
@@ -188,7 +188,7 @@ Generate the minimal implementation:"""
         # Update ticket history
         updates = {
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="code_generated",
                 actor=agent.name,
                 details=f"Generated code for {file_path}"
