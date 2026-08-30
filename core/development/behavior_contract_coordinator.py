@@ -13,6 +13,8 @@ from typing import Protocol
 
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.failure_progression import (
+    DependencyDecision,
+    DependencyDisposition,
     FailureClassification,
     FailureObservation,
     FailureProgressState,
@@ -407,6 +409,39 @@ class DynamicTddPlanner:
         return decision
 
 
+class DependencyPrerequisitePlanner:
+    """Small Behavior-Planner authority for mechanical dependency evidence."""
+
+    def __init__(self, gateway: ReasoningGateway):
+        self.gateway = gateway
+
+    async def decide(self, *, contract: BehaviorContract, step: TddStepProposal, evidence: FailureObservation, trusted_revision: str | None) -> DependencyDecision:
+        request = ReasoningRequest(
+            purpose="athba_dependency_prerequisite_decision",
+            project_id=contract.project_id,
+            requires_large_context=False,
+            prompt=json.dumps({
+                "instruction": "Choose exactly one bounded dependency decision as raw JSON. Do not prescribe a code fix or redesign.",
+                "blocked_requirement_ref": step.requirement_refs[0],
+                "planned_requirements": [item.to_dict() for item in contract.observable_requirements],
+                "trusted_revision": trusted_revision,
+                "mechanical_failure": evidence.to_dict(),
+                "schema": {"disposition": "already_planned|add_prerequisite|reject_dependency", "parent_requirement_ref": "string", "prerequisite_refs": ["string"], "rationale": "string"},
+            }, sort_keys=True),
+        )
+        result = await self.gateway.reason(request)
+        decision = DependencyDecision.from_dict(_json_object(result.text, label="dependency decision"))
+        if decision.parent_requirement_ref != step.requirement_refs[0]:
+            raise ValueError("dependency decision must retain the blocked requirement")
+        if decision.disposition is DependencyDisposition.ALREADY_PLANNED:
+            known = set(contract.requirement_refs())
+            if not set(decision.prerequisite_refs).issubset(known):
+                raise ValueError("existing planned dependency must reference contract requirements")
+        if decision.disposition is DependencyDisposition.ADD_PREREQUISITE and len(decision.prerequisite_refs) != 1:
+            raise ValueError("a justified prerequisite decision must add one smallest prerequisite")
+        return decision
+
+
 class SeniorReviewer:
     """Semantic gate that is separate from Rack AI mechanical acceptance."""
 
@@ -541,6 +576,7 @@ class BehaviorContractCoordinator:
         max_tester_repairs: int = 2,
         max_developer_repairs: int = 2,
         environment_recovery: EnvironmentRecovery | None = None,
+        dependency_planner: DependencyPrerequisitePlanner | None = None,
     ):
         self.execution_gateway = execution_gateway
         self.reasoning_gateway = reasoning_gateway
@@ -564,6 +600,7 @@ class BehaviorContractCoordinator:
         self.max_tester_repairs = max_tester_repairs
         self.max_developer_repairs = max_developer_repairs
         self.environment_recovery = environment_recovery
+        self.dependency_planner = dependency_planner or DependencyPrerequisitePlanner(reasoning_gateway)
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
         project_id = contract.project_id
@@ -958,22 +995,23 @@ class BehaviorContractCoordinator:
             FailureClassification.BUILD_OR_LINK_FAILURE,
             FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE,
         }:
-            requirement = next(item for item in contract.observable_requirements if item.ref == cycle.step.requirement_refs[0])
-            missing_prerequisites = [
-                ref for ref in requirement.depends_on if ref not in run_state.completed_requirement_refs
-            ]
-            if missing_prerequisites:
+            planner_decision = await self.dependency_planner.decide(
+                contract=contract, step=cycle.step, evidence=observation, trusted_revision=run_state.semantic_base_revision,
+            )
+            if planner_decision.disposition is not DependencyDisposition.REJECT_DEPENDENCY:
+                prerequisites = planner_decision.prerequisite_refs
                 progress = self.failure_policy.defer_for_prerequisites(
                     run_state.failure_progress,
                     decision,
-                    requirement_ref=requirement.ref,
-                    prerequisite_refs=missing_prerequisites,
+                    requirement_ref=planner_decision.parent_requirement_ref,
+                    prerequisite_refs=prerequisites,
                 )
+                progress = replace(progress, dependency_decisions=[*progress.dependency_decisions[:-1], planner_decision])
                 return replace(
                     run_state,
                     current_pool="tdd_ready",
                     contract=replace(contract, status="tdd_ready"),
-                    blocked_reason=f"{decision.dominant.value}: deferred until {', '.join(missing_prerequisites)} is approved",
+                    blocked_reason=f"{decision.dominant.value}: deferred until {', '.join(prerequisites)} is approved",
                     cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state}))),
                     failure_progress=progress,
                 )

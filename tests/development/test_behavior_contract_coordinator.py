@@ -653,7 +653,13 @@ async def test_tester_can_propose_one_next_focused_tdd_step_from_contract():
             "rationale": "RB-1 is the smallest useful missing behavior.",
             "proposal": step.to_dict(),
             "completed_requirement_refs": [],
-        }
+        },
+        {
+            "disposition": "reject_dependency",
+            "parent_requirement_ref": "RB-1",
+            "prerequisite_refs": [],
+            "rationale": "The requested resource behavior is independently testable.",
+        },
     ])
     planner = DynamicTddPlanner(gateway)
 
@@ -1783,7 +1789,13 @@ async def test_rejected_red_is_persisted_and_cannot_become_green_base():
             "rationale": "Start with RB-1.",
             "proposal": step.to_dict(),
             "completed_requirement_refs": [],
-        }
+        },
+        {
+            "disposition": "reject_dependency",
+            "parent_requirement_ref": "RB-1",
+            "prerequisite_refs": [],
+            "rationale": "No prerequisite is required for this focused behavior.",
+        },
     ])
     red_result = WorkUnitExecutionResult(
         work_unit_id=step.step_id + "--red",
@@ -1801,11 +1813,12 @@ async def test_rejected_red_is_persisted_and_cannot_become_green_base():
         reasoning_gateway=reasoner,
         repository_binding=binding(),
         state_repo=state_repo,
+        max_tester_repairs=0,
     ).run_contract(contract())
 
     saved_cycle = state_repo.snapshot.contract_runs[contract().id].cycles[0]
     assert result.current_pool == "replan_ready"
-    assert [call[0] for call in execution.calls] == [step.step_id + "--red"] * 3
+    assert [call[0] for call in execution.calls] == [step.step_id + "--red"]
     assert all("green" not in call[0] for call in execution.calls)
     assert saved_cycle.red_phase is not None
     assert saved_cycle.red_phase.status == "checks_failed"
