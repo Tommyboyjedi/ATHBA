@@ -105,7 +105,7 @@ def prepare_target(environment: ProjectEnvironmentService, project: DevelopmentP
     (target / "scripts").mkdir(exist_ok=True)
     (target / "reservation_book.py").write_text("\"\"\"ReservationBook implementation is introduced through TDD.\"\"\"\n", encoding="utf-8")
     (target / "scripts" / "assert_test_fails.py").write_text(
-        """import subprocess\nimport sys\n\ncommand = [sys.executable, '-B', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', sys.argv[1]]\nresult = subprocess.run(command)\nif result.returncode == 1:\n    raise SystemExit(0)\nraise SystemExit(result.returncode or 1)\n""",
+        """import subprocess\nimport sys\n\nprobe = subprocess.run([sys.executable, '-B', '-m', 'pytest', '--version'])\nif probe.returncode != 0:\n    raise SystemExit(probe.returncode or 2)\n\ncommand = [sys.executable, '-B', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', sys.argv[1]]\nresult = subprocess.run(command)\nif result.returncode == 1:\n    raise SystemExit(0)\nraise SystemExit(result.returncode or 1)\n""",
         encoding="utf-8",
     )
     run(["git", "add", "."], cwd=target)
