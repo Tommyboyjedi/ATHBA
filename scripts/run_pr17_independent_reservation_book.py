@@ -7,7 +7,7 @@ import asyncio
 import json
 import os
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,7 +25,7 @@ from core.development.specification_gatekeeper import SpecificationChecklistPlan
 from core.development.test_evidence_reconciliation import GitAcceptedTestCatalog, TestEvidenceReconciler
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
-from core.execution.rack_ai_contract import RepositoryBinding
+from core.execution.rack_ai_contract import RepositoryBinding, to_rack_ai_request
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 from core.llm.providers.openai_provider import OpenAIProvider
@@ -65,9 +65,19 @@ class PersistingExecutionGateway:
     environment: ProjectEnvironmentService
     project_id: str
     accepted_revisions: list[str] = field(default_factory=list)
+    rack_ai_events: list[dict[str, object]] = field(default_factory=list)
 
     async def execute(self, work_unit: object, repository_binding: RepositoryBinding) -> WorkUnitExecutionResult:
-        result = await self.delegate.execute(work_unit, repository_binding)
+        event: dict[str, object] = {
+            "request": to_rack_ai_request(self.delegate.workload_id, repository_binding, work_unit),
+        }
+        self.rack_ai_events.append(event)
+        try:
+            result = await self.delegate.execute(work_unit, repository_binding)
+        except Exception as error:
+            event["transport_error"] = {"type": type(error).__name__, "message": str(error)}
+            raise
+        event["result"] = asdict(result)
         if result.accepted:
             if result.accepted_revision is None:
                 raise RuntimeError("Rack AI accepted execution without a trusted revision")
@@ -120,6 +130,7 @@ async def main() -> None:
         ProviderReasoningGateway(OpenAIProvider(timeout=300, max_retries=1), model=model, max_tokens=4096)
     )
     project_id = args.run_id
+    rack_ai_events: list[dict[str, object]] = []
     evidence: dict[str, object] = {
         "run_id": args.run_id,
         "architectural_requirement": REQUIREMENT,
@@ -154,7 +165,7 @@ async def main() -> None:
         binding = project.binding()
         runtime = PythonPytestRuntime(project.runtime.environment_path)
         execution_gateway = PersistingExecutionGateway(
-            RackAiCliExecutionGateway(workload_id=args.run_id), environment, project.project_id
+            RackAiCliExecutionGateway(workload_id=args.run_id), environment, project.project_id, rack_ai_events=rack_ai_events
         )
         coordinator = BehaviorContractCoordinator(
             execution_gateway=execution_gateway,
@@ -198,6 +209,7 @@ async def main() -> None:
         evidence["failure"] = {"type": type(error).__name__, "message": str(error)}
     finally:
         evidence["reasoning_exchanges"] = gateway.exchanges
+        evidence["rack_ai_events"] = rack_ai_events
         output = run_root / "evidence.json"
         output.write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding="utf-8")
         print(f"EVIDENCE_FILE: {output.resolve()}")

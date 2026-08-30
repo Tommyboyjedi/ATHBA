@@ -403,3 +403,30 @@ Rack AI packet is
 
 This is a further Rack AI generic execution-policy handoff. ATHBA did not alter
 Rack AI, weaken allowed-path semantics, or fabricate an accepted revision.
+
+## Accepted-revision progression attempt (2026-08-30)
+
+Fresh run `pr17-e2e-20260830T001500Z` again created a disposable project through
+the PR19 lifecycle, with the ATHBA-owned `/srv/ATHBA/.venv` declared as a
+generic environment resource. It generated the Gatekeeper checklist and
+Behavior Contract independently from the same ReservationBook requirement.
+
+The first RED step, `tests/test_reservation_book.py::test_add_duplicate_resource_id`,
+was accepted by Rack AI at `6001a22d2056d7d44f1e11e4449c09010fbbb565`. ATHBA
+verified that commit in the project repository, persisted it as the trusted
+revision, and submitted GREEN from that exact revision. Rack AI then rejected
+the GREEN request before execution with `base sha does not match the registered
+repository baseline`.
+
+The returned RED commit is not the seed SHA and ATHBA did not reuse the seed.
+The blocker is Rack AI's generic accepted-revision/baseline progression: it
+does not yet accept the revision that it returned as accepted for the next
+bounded change in the same dynamic project. No GREEN candidate, Senior Review,
+or test-evidence reconciliation can be truthfully produced. ATHBA did not
+modify Rack AI, alter its path policy, or substitute a revision.
+
+The ATHBA-owned evidence is
+`state/pr17-independent-runs/pr17-e2e-20260830T001500Z/evidence.json`. The
+proof runner now also retains each serialized generic Rack AI request together
+with its returned result or transport error, because the CLI adapter's temporary
+request file is deliberately removed after execution.
