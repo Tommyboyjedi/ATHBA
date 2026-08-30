@@ -246,6 +246,7 @@ class TddCoordinator:
                 phase_state=phase_state,
                 accepted=False,
                 blocked_reason=_blocked_reason_for_result(phase, result),
+                execution_result=result,
             )
         if not result.accepted_revision:
             return _PhaseOutcome(
@@ -253,8 +254,9 @@ class TddCoordinator:
                 phase_state=phase_state,
                 accepted=False,
                 blocked_reason=f"accepted {phase.value} phase missing trusted accepted revision",
+                execution_result=result,
             )
-        return _PhaseOutcome(attempt=attempt, phase_state=phase_state, accepted=True)
+        return _PhaseOutcome(attempt=attempt, phase_state=phase_state, accepted=True, execution_result=result)
 
     def _block_and_save(
         self,
@@ -333,6 +335,7 @@ class _PhaseOutcome:
     phase_state: TddPhaseState
     accepted: bool
     blocked_reason: str | None = None
+    execution_result: WorkUnitExecutionResult | None = None
 
 
 def _phase_state_from_result(
