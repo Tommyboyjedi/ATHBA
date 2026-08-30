@@ -17,17 +17,16 @@ from core.development.failure_progression import (
     DependencyDecision,
     DependencyDisposition,
     FailureClassification,
+    FailureDecision,
     FailureObservation,
     FailureProgressState,
     FailureProgressionPolicy,
-    FailureRecordRequest,
-    FailureRouteState,
-    PacketKind,
-    PrerequisiteDeferralRequest,
-    RepairPacket,
+    ProgressionAction,
     RetryBudget,
     RetryRoute,
 )
+from core.development.failure_state import TERMINAL_CONTRACT_POOLS, active_failure_progress_state
+from core.development import failure_routing
 from core.development.tdd_cycle_coordination import TddStateRepository
 from core.development.tdd_phase_execution import (
     PhaseExecutionRequest,
@@ -646,12 +645,6 @@ class RunAdvance:
 
 
 @dataclass(frozen=True)
-class FailureObservationRequest:
-    phase: TddPhase
-    outcome: PhaseOutcome
-
-
-@dataclass(frozen=True)
 class FailureRoutingRequest:
     run_state: BehaviorContractRunState
     phase: TddPhase
@@ -666,6 +659,127 @@ class FailureRouterDependencies:
     dependency_planner: DependencyPrerequisitePlanner
     max_tester_repairs: int
     max_developer_repairs: int
+
+
+async def _candidate_failure_transition(
+    dependencies: FailureRouterDependencies,
+    request: FailureRoutingRequest,
+) -> failure_routing.FailureTransition:
+    cycle = request.run_state.current_cycle()
+    if cycle is None:
+        raise ValueError("failed candidate routing requires an active cycle")
+    observation = failure_routing.candidate_failure_observation(request.phase, request.outcome)
+    decision = dependencies.failure_policy.decide([observation])
+    if decision.action is ProgressionAction.BLOCK_EXECUTOR:
+        return failure_routing.transition_for_executor_block(decision, observation.message)
+    if decision.action is ProgressionAction.RECOVER_ENVIRONMENT:
+        recovered = await _environment_recovery_succeeded(dependencies, request.run_state, request.run_state.contract.project_id)
+        return failure_routing.transition_for_environment(decision, observation.message, recovered)
+    if decision.action is ProgressionAction.ASSESS_MECHANICAL_DEPENDENCY:
+        return await _mechanical_dependency_transition(dependencies, request, observation, decision, cycle)
+    if decision.action in {
+        ProgressionAction.REPAIR_CANDIDATE,
+        ProgressionAction.REPAIR_TESTER,
+        ProgressionAction.REPAIR_DEVELOPER,
+        ProgressionAction.REPAIR_REGRESSION,
+    }:
+        return _candidate_repair_transition(dependencies, request, observation, decision, cycle)
+    if decision.action is ProgressionAction.SPLIT_PACKET:
+        return failure_routing.transition_for_split_required(decision, observation.message)
+    if decision.action is ProgressionAction.REPLAN_DEPENDENCY:
+        return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: {observation.message}")
+    if decision.action is ProgressionAction.BLOCK_AMBIGUITY:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_AMBIGUITY, failure_routing.ContractPoolStatus.BLOCKED_AMBIGUITY, observation.message)
+    if decision.action is ProgressionAction.REPLAN_INTEGRATION:
+        return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: {observation.message}")
+    if decision.action is ProgressionAction.REPAIR_REVIEW:
+        return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: review repair is not an executable candidate route")
+    if decision.action is ProgressionAction.BLOCK_ARCHITECTURE:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_ARCHITECTURE, failure_routing.ContractPoolStatus.BLOCKED_ARCHITECTURE, observation.message)
+    if decision.action is ProgressionAction.ANALYZE_UNCLASSIFIED:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_UNCLASSIFIED, failure_routing.ContractPoolStatus.BLOCKED_UNCLASSIFIED, observation.message)
+    return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: accepted RED is represented by successful RED execution, not failure routing")
+
+
+def _candidate_repair_transition(
+    dependencies: FailureRouterDependencies,
+    request: FailureRoutingRequest,
+    observation: FailureObservation,
+    decision: FailureDecision,
+    cycle: ContractCycleRecord,
+) -> failure_routing.FailureTransition:
+    route = _retry_route_for_action(decision.action, request.phase)
+    budget = dependencies.max_tester_repairs if route is RetryRoute.TESTER_REPAIR else dependencies.max_developer_repairs
+    retry_allowed = dependencies.failure_policy.retry_allowed(
+        RetryBudget(state=request.run_state.failure_progress, route=route, budget=budget)
+    )
+    return failure_routing.transition_for_candidate_repair(
+        decision,
+        request.phase,
+        request.work_unit,
+        _trusted_revision_for_phase(request.run_state, cycle, request.phase),
+        observation,
+        retry_allowed,
+    )
+
+
+async def _mechanical_dependency_transition(
+    dependencies: FailureRouterDependencies,
+    request: FailureRoutingRequest,
+    observation: FailureObservation,
+    decision: FailureDecision,
+    cycle: ContractCycleRecord,
+) -> failure_routing.FailureTransition:
+    planner_decision = await dependencies.dependency_planner.decide(
+        DependencyDecisionRequest(request.run_state.contract, cycle.step, observation, request.run_state.semantic_base_revision)
+    )
+    if planner_decision.disposition is DependencyDisposition.REJECT_DEPENDENCY:
+        return _candidate_repair_transition(dependencies, request, observation, decision, cycle)
+    updated_contract = request.run_state.contract
+    if planner_decision.disposition is DependencyDisposition.ADD_PREREQUISITE:
+        updated_contract = _add_synthesized_prerequisite(request.run_state.contract, planner_decision, request.run_state)
+    blocker = f"{decision.dominant.value}: deferred until {', '.join(planner_decision.prerequisite_refs)} is approved"
+    return failure_routing.transition_for_dependency_deferral(decision, blocker, updated_contract, planner_decision)
+
+
+def _review_failure_transition(
+    dependencies: ReviewProgressionDependencies,
+    review: SemanticReviewResult,
+    cycle: ContractCycleRecord,
+) -> failure_routing.FailureTransition:
+    observation = failure_routing.review_failure_observation(review)
+    decision = dependencies.failure_policy.decide([observation])
+    if decision.action is ProgressionAction.REPAIR_REVIEW:
+        exhausted = cycle.repair_attempts >= dependencies.max_semantic_repairs
+        blocker = "semantic repair budget exhausted" if exhausted else review.rationale
+        return failure_routing.transition_for_review_repair(decision, exhausted, blocker)
+    if decision.action is ProgressionAction.REPLAN_INTEGRATION:
+        return failure_routing.transition_for_replan(decision, review.rationale)
+    if decision.action is ProgressionAction.BLOCK_ARCHITECTURE:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_ARCHITECTURE, failure_routing.ContractPoolStatus.BLOCKED_ARCHITECTURE, review.rationale)
+    if decision.action is ProgressionAction.BLOCK_AMBIGUITY:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_AMBIGUITY, failure_routing.ContractPoolStatus.BLOCKED_AMBIGUITY, review.rationale)
+    if decision.action is ProgressionAction.ANALYZE_UNCLASSIFIED:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_UNCLASSIFIED, failure_routing.ContractPoolStatus.BLOCKED_UNCLASSIFIED, review.rationale)
+    return failure_routing.transition_for_replan(decision, review.rationale)
+
+
+def _retry_route_for_action(action: ProgressionAction, phase: TddPhase) -> RetryRoute:
+    if action is ProgressionAction.REPAIR_TESTER:
+        return RetryRoute.TESTER_REPAIR
+    if action is ProgressionAction.REPAIR_DEVELOPER:
+        return RetryRoute.DEVELOPER_REPAIR
+    return RetryRoute.TESTER_REPAIR if phase is TddPhase.RED else RetryRoute.DEVELOPER_REPAIR
+
+
+def _trusted_revision_for_phase(
+    run_state: BehaviorContractRunState,
+    cycle: ContractCycleRecord,
+    phase: TddPhase,
+) -> str | None:
+    if phase is TddPhase.RED:
+        return run_state.semantic_base_revision
+    return cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision
 
 
 @dataclass(frozen=True)
@@ -691,6 +805,7 @@ class ReviewProgressionDependencies:
     review_material_provider: ReviewMaterialProvider | None
     gatekeeper: SpecificationGatekeeper | None
     max_semantic_repairs: int
+    failure_policy: FailureProgressionPolicy
 
 
 @dataclass(frozen=True)
@@ -699,152 +814,20 @@ class RepairProgressionDependencies:
     phase_executor: 'PhaseExecutor'
 
 
-class FailureObservationBuilder:
-    def build(self, request: FailureObservationRequest) -> FailureObservation:
-        result = request.outcome.execution_result
-        message = request.outcome.blocked_reason or request.outcome.phase_state.error or f"{request.phase.value} phase failed"
-        evidence_refs = [item for item in [request.outcome.phase_state.evidence_location] if item]
-        status = request.outcome.phase_state.status
-        text = " ".join(
-            item
-            for item in [message, request.outcome.phase_state.error, None if result is None else result.error, status]
-            if item
-        ).lower()
-        plausible: list[FailureClassification] = []
-        if status == "transport_error":
-            plausible.append(FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE)
-        if any(token in text for token in ("runtime executable", "pytest is unavailable", "environment", "dependency environment")):
-            plausible.append(FailureClassification.ENVIRONMENT_FAILURE)
-        if any(token in text for token in ("timeout", "out of memory", "no space left", "resource exhausted")):
-            plausible.append(FailureClassification.RESOURCE_LIMIT_FAILURE)
-        if any(token in text for token in ("syntaxerror", "parse error", "invalid syntax")):
-            plausible.append(FailureClassification.SYNTAX_OR_PARSE_FAILURE)
-        if any(token in text for token in ("build failed", "linker", "link failure", "packaging failed")):
-            plausible.append(FailureClassification.BUILD_OR_LINK_FAILURE)
-        if any(token in text for token in ("error collecting", "importerror", "modulenotfounderror", "bootstrap")):
-            plausible.append(FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE)
-        if any(token in text for token in ("path_policy", "policy", "unauthorized")):
-            plausible.append(FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION)
-        if any(token in text for token in ("changed_paths", "allowed_paths", "out-of-scope")):
-            plausible.append(FailureClassification.CHANGE_SCOPE_VIOLATION)
-        if not plausible:
-            fallback = FailureClassification.TESTER_CANDIDATE_DEFECT if request.phase is TddPhase.RED else FailureClassification.DEVELOPER_CANDIDATE_DEFECT
-            plausible.append(fallback)
-        return FailureObservation(
-            source=f"{request.phase.value}_execution",
-            message=message,
-            evidence_refs=evidence_refs,
-            plausible=plausible,
-            candidate_revision=None if result is None else result.accepted_revision,
-            status=status,
-        )
-
-
 @dataclass(frozen=True)
 class FailedCandidateRouter:
     dependencies: FailureRouterDependencies
-    observation_builder: FailureObservationBuilder = field(default_factory=FailureObservationBuilder)
 
     async def route(self, request: FailureRoutingRequest) -> BehaviorContractRunState:
-        contract = request.run_state.contract
-        cycle = request.run_state.current_cycle()
-        if cycle is None:
-            raise ValueError("failed candidate routing requires an active cycle")
-        observation = self.observation_builder.build(FailureObservationRequest(request.phase, request.outcome))
-        decision = self.dependencies.failure_policy.decide([observation])
-        if decision.dominant is FailureClassification.ENVIRONMENT_FAILURE and await _environment_recovery_succeeded(self.dependencies, request.run_state, contract.project_id):
-            progress = self.dependencies.failure_policy.record(
-                FailureRecordRequest(
-                    state=request.run_state.failure_progress,
-                    decision=decision,
-                    route=RetryRoute.ENVIRONMENT_RECOVERY,
-                    next_state=FailureRouteState.ACTIVE,
-                )
-            )
-            return replace(
-                request.run_state,
-                current_pool="cycle_active",
-                contract=replace(contract, status="cycle_active"),
-                blocked_reason="environment recovered; rerunning from trusted revision",
-                cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "cycle_active")),
-                failure_progress=progress,
-            )
-        if decision.dominant in {FailureClassification.SYNTAX_OR_PARSE_FAILURE, FailureClassification.BUILD_OR_LINK_FAILURE, FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE}:
-            planner_decision = await self.dependencies.dependency_planner.decide(DependencyDecisionRequest(contract, cycle.step, observation, request.run_state.semantic_base_revision))
-            if planner_decision.disposition is not DependencyDisposition.REJECT_DEPENDENCY:
-                updated_contract = contract
-                if planner_decision.disposition is DependencyDisposition.ADD_PREREQUISITE:
-                    updated_contract = _add_synthesized_prerequisite(contract, planner_decision, request.run_state)
-                progress = self.dependencies.failure_policy.defer_for_prerequisites(
-                    PrerequisiteDeferralRequest(
-                        state=request.run_state.failure_progress,
-                        decision=decision,
-                        requirement_ref=planner_decision.parent_requirement_ref,
-                        prerequisite_refs=planner_decision.prerequisite_refs,
-                    )
-                )
-                progress = replace(progress, dependency_decisions=[*progress.dependency_decisions[:-1], planner_decision])
-                return replace(
-                    request.run_state,
-                    current_pool="tdd_ready",
-                    contract=replace(updated_contract, status="tdd_ready"),
-                    blocked_reason=f"{decision.dominant.value}: deferred until {', '.join(planner_decision.prerequisite_refs)} is approved",
-                    cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "replan_ready")),
-                    failure_progress=progress,
-                )
-        role = "Tester" if request.phase is TddPhase.RED else "Developer"
-        route = RetryRoute.TESTER_REPAIR if request.phase is TddPhase.RED else RetryRoute.DEVELOPER_REPAIR
-        budget = self.dependencies.max_tester_repairs if request.phase is TddPhase.RED else self.dependencies.max_developer_repairs
-        trusted_revision = request.run_state.semantic_base_revision if request.phase is TddPhase.RED else (cycle.red_phase.accepted_revision if cycle.red_phase else request.run_state.semantic_base_revision)
-        packet = RepairPacket(
-            kind=PacketKind.REPAIR,
-            role=role,
-            work_unit_id=request.work_unit.id,
-            trusted_revision=trusted_revision,
-            original_objective=request.work_unit.objective,
-            allowed_paths=list(request.work_unit.allowed_paths),
-            classification=decision.dominant,
-            previous_candidate=observation.candidate_revision,
-            evidence=[observation.message, *observation.evidence_refs],
-        )
-        repairable = decision.action.value in {"repair_tester", "repair_developer", "repair_regression"} or decision.dominant in {FailureClassification.SYNTAX_OR_PARSE_FAILURE, FailureClassification.BUILD_OR_LINK_FAILURE, FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE}
-        if repairable and self.dependencies.failure_policy.retry_allowed(
-            RetryBudget(state=request.run_state.failure_progress, route=route, budget=budget)
-        ):
-            progress = self.dependencies.failure_policy.record(
-                FailureRecordRequest(
-                    state=request.run_state.failure_progress,
-                    decision=decision,
-                    route=route,
-                    packet=packet,
-                    next_state=FailureRouteState.AWAITING_REPAIR,
-                )
-            )
-            return replace(
-                request.run_state,
-                current_pool="cycle_active",
-                contract=replace(contract, status="cycle_active"),
-                blocked_reason=f"{decision.dominant.value}: retrying {role} from trusted revision",
-                cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "cycle_active")),
-                failure_progress=progress,
-            )
-        next_state = _route_state_for_failure(decision.dominant)
-        progress = self.dependencies.failure_policy.record(
-            FailureRecordRequest(
-                state=request.run_state.failure_progress,
-                decision=decision,
-                packet=packet,
-                next_state=next_state,
-                blocker=observation.message if next_state.name.startswith("BLOCKED") else None,
-            )
-        )
-        return replace(
-            request.run_state,
-            current_pool="replan_ready",
-            contract=replace(contract, status="replan_ready"),
-            blocked_reason=f"{decision.dominant.value}: {observation.message}",
-            cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "replan_ready")),
-            failure_progress=progress,
+        transition = await _candidate_failure_transition(self.dependencies, request)
+        return failure_routing.apply_candidate_failure_transition(
+            failure_routing.CandidateFailureTransitionRequest(
+                run_state=request.run_state,
+                phase=request.phase,
+                phase_state=request.outcome.phase_state,
+            ),
+            transition,
+            self.dependencies.failure_policy,
         )
 
 
@@ -933,51 +916,218 @@ class ReadyPoolProgressor:
         )
 
 
+async def _advance_cycle_active(
+    run_state: BehaviorContractRunState,
+    dependencies: CycleProgressionDependencies,
+) -> RunAdvance:
+    contract = run_state.contract
+    cycle = run_state.current_cycle()
+    if cycle is None:
+        raise ValueError("cycle_active run state requires an active cycle")
+    if cycle.red_phase is not None and cycle.red_phase.accepted_revision is None:
+        material = _repository_material(contract, run_state, dependencies.repository_material_provider)
+        work_unit = dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
+        outcome = await dependencies.phase_executor.execute(
+            PhaseExecutionRequest(TddPhase.RED, work_unit, run_state.repository_binding.with_base_sha(run_state.semantic_base_revision))
+        )
+        return await _advance_red_phase(run_state, cycle, contract, dependencies.failure_router, work_unit, outcome)
+    return await _advance_green_phase(run_state, cycle, contract, dependencies)
+
+
+async def _advance_red_phase(
+    run_state: BehaviorContractRunState,
+    cycle: ContractCycleRecord,
+    contract: BehaviorContract,
+    failure_router: FailedCandidateRouter,
+    work_unit: DevelopmentWorkUnit,
+    outcome: PhaseOutcome,
+) -> RunAdvance:
+    if not outcome.accepted:
+        if _is_red_already_satisfied_from_phase(outcome):
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="tdd_ready",
+                    contract=replace(contract, status="tdd_ready"),
+                    blocked_reason="step already satisfied before RED",
+                    cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state, pool="approved")),
+                )
+            )
+        routed = await failure_router.route(FailureRoutingRequest(run_state, TddPhase.RED, work_unit, outcome))
+        return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
+    return RunAdvance(
+        replace(
+            run_state,
+            cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state)),
+            failure_progress=active_failure_progress_state(run_state.failure_progress),
+            blocked_reason=None,
+        )
+    )
+
+
+async def _advance_green_phase(
+    run_state: BehaviorContractRunState,
+    cycle: ContractCycleRecord,
+    contract: BehaviorContract,
+    dependencies: CycleProgressionDependencies,
+) -> RunAdvance:
+    if cycle.green_phase is None or cycle.green_phase.accepted_revision is not None:
+        raise ValueError("cycle_active run state has no remaining executable phase")
+    base_revision = cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision
+    material = _repository_material(contract, run_state, dependencies.repository_material_provider, base_revision)
+    work_unit = dependencies.developer_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
+    outcome = await dependencies.phase_executor.execute(
+        PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(base_revision))
+    )
+    if not outcome.accepted:
+        routed = await dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.GREEN, work_unit, outcome))
+        return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
+    updated_cycle = replace(cycle, green_phase=outcome.phase_state, candidate_revision=outcome.phase_state.accepted_revision, pool="review_ready")
+    return RunAdvance(
+        replace(
+            run_state,
+            current_pool="review_ready",
+            contract=replace(contract, status="review_ready"),
+            cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
+            failure_progress=active_failure_progress_state(run_state.failure_progress),
+            blocked_reason=None,
+        )
+    )
+
+
+async def _advance_review_ready(
+    run_state: BehaviorContractRunState,
+    dependencies: ReviewProgressionDependencies,
+) -> RunAdvance:
+    contract = run_state.contract
+    cycle = run_state.current_cycle()
+    if cycle is None or cycle.candidate_revision is None:
+        raise ValueError("review_ready run state requires a candidate revision")
+    review_material = _review_material(contract, run_state, cycle, dependencies.review_material_provider)
+    review = await dependencies.reviewer.review(
+        SemanticReviewRequest(contract, run_state, cycle, cycle.candidate_revision, review_material)
+    )
+    cycle = replace(cycle, review_result=review, review_history=[*cycle.review_history, review])
+    if review.verdict != "approved":
+        transition = _review_failure_transition(dependencies, review, cycle)
+        routed = failure_routing.apply_review_failure_transition(
+            failure_routing.ReviewFailureTransitionRequest(run_state=run_state, cycle=cycle),
+            transition,
+            dependencies.failure_policy,
+        )
+        return RunAdvance(routed, return_now=transition.return_now)
+    return await _advance_approved_review(run_state, dependencies, contract, cycle)
+
+
+async def _advance_approved_review(
+    run_state: BehaviorContractRunState,
+    dependencies: ReviewProgressionDependencies,
+    contract: BehaviorContract,
+    cycle: ContractCycleRecord,
+) -> RunAdvance:
+    completed_refs = sorted(set(run_state.completed_requirement_refs).union(cycle.step.requirement_refs))
+    approved_run_state = replace(
+        run_state,
+        current_pool="approved",
+        contract=replace(contract, status="approved"),
+        semantic_base_revision=cycle.candidate_revision,
+        repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
+        completed_requirement_refs=completed_refs,
+        blocked_reason=None,
+        cycles=_replace_current_cycle(run_state.cycles, replace(cycle, semantic_revision=cycle.candidate_revision, pool="approved")),
+        failure_progress=active_failure_progress_state(run_state.failure_progress),
+    )
+    if approved_run_state.targeted_checklist_ref is None or dependencies.gatekeeper is None:
+        return RunAdvance(approved_run_state)
+    gatekeeper_state = await dependencies.gatekeeper.assess(
+        GatekeeperAssessmentRequest(
+            contract,
+            approved_run_state,
+            approved_run_state.gatekeeper_state
+            or await dependencies.gatekeeper.ensure_state(GatekeeperStateRequest(contract, None)),
+        )
+    )
+    return _targeted_checklist_completion(approved_run_state, contract, gatekeeper_state)
+
+
+def _targeted_checklist_completion(
+    approved_run_state: BehaviorContractRunState,
+    contract: BehaviorContract,
+    gatekeeper_state,
+) -> RunAdvance:
+    checklist_ref = approved_run_state.targeted_checklist_ref
+    if checklist_ref is None:
+        raise ValueError("targeted checklist completion requires a checklist ref")
+    target_assessment = _checklist_assessment(gatekeeper_state, checklist_ref)
+    target_proven = target_assessment is not None and target_assessment.status == "proven"
+    checklist_complete = gatekeeper_state.is_complete()
+    pool = "completed" if checklist_complete else ("approved" if target_proven else "replan_ready")
+    status = "completed" if checklist_complete else approved_run_state.contract.status
+    reason = None if checklist_complete else (
+        "additional specification checklist items remain unproven"
+        if target_proven
+        else "targeted specification gap remains unproven"
+    )
+    return RunAdvance(
+        replace(
+            approved_run_state,
+            current_pool=pool,
+            contract=replace(contract, status=status),
+            blocked_reason=reason,
+            gatekeeper_state=gatekeeper_state,
+        ),
+        return_now=True,
+    )
+
+
+async def _advance_repair_ready(
+    run_state: BehaviorContractRunState,
+    dependencies: RepairProgressionDependencies,
+) -> RunAdvance:
+    contract = run_state.contract
+    cycle = run_state.current_cycle()
+    if cycle is None or cycle.review_result is None or cycle.candidate_revision is None:
+        raise ValueError("repair_ready run state requires a review result and candidate revision")
+    work_unit = dependencies.repair_factory.build(RepairWorkUnitBuildRequest(contract, cycle, cycle.review_result))
+    outcome = await dependencies.phase_executor.execute(
+        PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(cycle.candidate_revision))
+    )
+    if not outcome.accepted:
+        return RunAdvance(
+            replace(
+                run_state,
+                current_pool="replan_ready",
+                contract=replace(contract, status="replan_ready"),
+                blocked_reason=outcome.blocked_reason,
+                cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready", green_phase=outcome.phase_state)),
+            ),
+            return_now=True,
+        )
+    updated_cycle = replace(
+        cycle,
+        repair_attempts=cycle.repair_attempts + 1,
+        green_phase=outcome.phase_state,
+        candidate_revision=outcome.phase_state.accepted_revision,
+        pool="review_ready",
+    )
+    return RunAdvance(
+        replace(
+            run_state,
+            current_pool="review_ready",
+            contract=replace(contract, status="review_ready"),
+            cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
+            failure_progress=active_failure_progress_state(run_state.failure_progress),
+            blocked_reason=None,
+        )
+    )
+
+
 @dataclass(frozen=True)
 class CycleActiveProgressor:
     dependencies: CycleProgressionDependencies
 
     async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
-        contract = run_state.contract
-        cycle = run_state.current_cycle()
-        if cycle is None:
-            raise ValueError("cycle_active run state requires an active cycle")
-        if cycle.red_phase is not None and cycle.red_phase.accepted_revision is None:
-            material = _repository_material(contract, run_state, self.dependencies.repository_material_provider)
-            work_unit = self.dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
-            outcome = await self.dependencies.phase_executor.execute(PhaseExecutionRequest(TddPhase.RED, work_unit, run_state.repository_binding.with_base_sha(run_state.semantic_base_revision)))
-            if not outcome.accepted:
-                if _is_red_already_satisfied_from_phase(outcome):
-                    return RunAdvance(
-                        replace(
-                            run_state,
-                            current_pool="tdd_ready",
-                            contract=replace(contract, status="tdd_ready"),
-                            blocked_reason="step already satisfied before RED",
-                            cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state, pool="approved")),
-                        )
-                    )
-                routed = await self.dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.RED, work_unit, outcome))
-                return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
-            return RunAdvance(replace(run_state, cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state))))
-        if cycle.green_phase is None or cycle.green_phase.accepted_revision is not None:
-            raise ValueError("cycle_active run state has no remaining executable phase")
-        base_revision = cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision
-        material = _repository_material(contract, run_state, self.dependencies.repository_material_provider, base_revision)
-        work_unit = self.dependencies.developer_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
-        outcome = await self.dependencies.phase_executor.execute(PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(base_revision)))
-        if not outcome.accepted:
-            routed = await self.dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.GREEN, work_unit, outcome))
-            return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
-        updated_cycle = replace(cycle, green_phase=outcome.phase_state, candidate_revision=outcome.phase_state.accepted_revision, pool="review_ready")
-        return RunAdvance(
-            replace(
-                run_state,
-                current_pool="review_ready",
-                contract=replace(contract, status="review_ready"),
-                cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
-            )
-        )
+        return await _advance_cycle_active(run_state, self.dependencies)
 
 
 @dataclass(frozen=True)
@@ -985,75 +1135,7 @@ class ReviewReadyProgressor:
     dependencies: ReviewProgressionDependencies
 
     async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
-        contract = run_state.contract
-        cycle = run_state.current_cycle()
-        if cycle is None or cycle.candidate_revision is None:
-            raise ValueError("review_ready run state requires a candidate revision")
-        review_material = _review_material(contract, run_state, cycle, self.dependencies.review_material_provider)
-        review = await self.dependencies.reviewer.review(
-            SemanticReviewRequest(contract, run_state, cycle, cycle.candidate_revision, review_material)
-        )
-        cycle = replace(cycle, review_result=review, review_history=[*cycle.review_history, review])
-        if review.verdict == "approved":
-            completed_refs = sorted(set(run_state.completed_requirement_refs).union(cycle.step.requirement_refs))
-            approved_run_state = replace(
-                run_state,
-                current_pool="approved",
-                contract=replace(contract, status="approved"),
-                semantic_base_revision=cycle.candidate_revision,
-                repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
-                completed_requirement_refs=completed_refs,
-                blocked_reason=None,
-                cycles=_replace_current_cycle(run_state.cycles, replace(cycle, semantic_revision=cycle.candidate_revision, pool="approved")),
-            )
-            if approved_run_state.targeted_checklist_ref is not None and self.dependencies.gatekeeper is not None:
-                gatekeeper_state = await self.dependencies.gatekeeper.assess(
-                    GatekeeperAssessmentRequest(
-                        contract,
-                        approved_run_state,
-                        approved_run_state.gatekeeper_state
-                        or await self.dependencies.gatekeeper.ensure_state(GatekeeperStateRequest(contract, None)),
-                    )
-                )
-                target_assessment = _checklist_assessment(gatekeeper_state, approved_run_state.targeted_checklist_ref)
-                target_proven = target_assessment is not None and target_assessment.status == "proven"
-                checklist_complete = gatekeeper_state.is_complete()
-                pool = "completed" if checklist_complete else ("approved" if target_proven else "replan_ready")
-                status = "completed" if checklist_complete else approved_run_state.contract.status
-                reason = None if checklist_complete else ("additional specification checklist items remain unproven" if target_proven else "targeted specification gap remains unproven")
-                return RunAdvance(replace(approved_run_state, current_pool=pool, contract=replace(contract, status=status), blocked_reason=reason, gatekeeper_state=gatekeeper_state), return_now=True)
-            return RunAdvance(approved_run_state)
-        if review.verdict == "repair_required":
-            if cycle.repair_attempts >= self.dependencies.max_semantic_repairs:
-                return RunAdvance(
-                    replace(
-                        run_state,
-                        current_pool="replan_ready",
-                        contract=replace(contract, status="replan_ready"),
-                        blocked_reason="semantic repair budget exhausted",
-                        cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready")),
-                    ),
-                    return_now=True,
-                )
-            return RunAdvance(
-                replace(
-                    run_state,
-                    current_pool="repair_ready",
-                    contract=replace(contract, status="repair_ready"),
-                    blocked_reason=None,
-                    cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="repair_ready")),
-                )
-            )
-        return RunAdvance(
-            replace(
-                run_state,
-                current_pool="replan_ready",
-                contract=replace(contract, status="replan_ready"),
-                blocked_reason=review.rationale,
-                cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready")),
-            ),
-            return_now=True,
-        )
+        return await _advance_review_ready(run_state, self.dependencies)
 
 
 @dataclass(frozen=True)
@@ -1061,40 +1143,7 @@ class RepairReadyProgressor:
     dependencies: RepairProgressionDependencies
 
     async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
-        contract = run_state.contract
-        cycle = run_state.current_cycle()
-        if cycle is None or cycle.review_result is None or cycle.candidate_revision is None:
-            raise ValueError("repair_ready run state requires a review result and candidate revision")
-        work_unit = self.dependencies.repair_factory.build(RepairWorkUnitBuildRequest(contract, cycle, cycle.review_result))
-        outcome = await self.dependencies.phase_executor.execute(
-            PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(cycle.candidate_revision))
-        )
-        if not outcome.accepted:
-            return RunAdvance(
-                replace(
-                    run_state,
-                    current_pool="replan_ready",
-                    contract=replace(contract, status="replan_ready"),
-                    blocked_reason=outcome.blocked_reason,
-                    cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready", green_phase=outcome.phase_state)),
-                ),
-                return_now=True,
-            )
-        updated_cycle = replace(
-            cycle,
-            repair_attempts=cycle.repair_attempts + 1,
-            green_phase=outcome.phase_state,
-            candidate_revision=outcome.phase_state.accepted_revision,
-            pool="review_ready",
-        )
-        return RunAdvance(
-            replace(
-                run_state,
-                current_pool="review_ready",
-                contract=replace(contract, status="review_ready"),
-                cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
-            )
-        )
+        return await _advance_repair_ready(run_state, self.dependencies)
 
 
 class BehaviorContractCoordinator:
@@ -1117,7 +1166,7 @@ class BehaviorContractCoordinator:
         failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, deps.max_tester_repairs, deps.max_developer_repairs))
         self.ready_progressor = ReadyPoolProgressor(ReadyPoolDependencies(step_planner, deps.gatekeeper, deps.gap_adapter, deps.repository_binding))
         self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router))
-        self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs))
+        self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs, failure_policy))
         self.repair_progressor = RepairReadyProgressor(RepairProgressionDependencies(repair_factory, phase_executor))
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
@@ -1128,7 +1177,7 @@ class BehaviorContractCoordinator:
             snapshot = self.run_store.save(snapshot, run_state)
         while True:
             contract = run_state.contract
-            if run_state.current_pool in {"completed", "replan_ready"}:
+            if run_state.current_pool in TERMINAL_CONTRACT_POOLS:
                 return _result_from_run_state(run_state)
             advance = await self._advance(run_state)
             run_state = advance.run_state
@@ -1455,7 +1504,7 @@ def _contract_repair_prompt(
                 "error_semantics": ["string"],
                 "non_goals": ["string"],
                 "completion_criteria": ["string"],
-                "status": "tdd_ready|cycle_active|review_ready|repair_ready|replan_ready|approved|completed",
+                "status": "tdd_ready|cycle_active|review_ready|repair_ready|replan_ready|approved|completed|blocked_executor|blocked_environment|blocked_architecture|blocked_ambiguity|blocked_unclassified|split_required",
             },
             "output_rules": [
                 "return raw JSON only",
@@ -1887,22 +1936,6 @@ def _add_synthesized_prerequisite(
     updated_parent = replace(parent, depends_on=[*parent.depends_on, prerequisite_ref])
     requirements = [updated_parent if item.ref == parent.ref else item for item in contract.observable_requirements]
     return replace(contract, observable_requirements=[*requirements, prerequisite])
-
-
-def _route_state_for_failure(classification: FailureClassification) -> FailureRouteState:
-    if classification is FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE:
-        return FailureRouteState.BLOCKED_EXECUTOR
-    if classification is FailureClassification.ENVIRONMENT_FAILURE:
-        return FailureRouteState.AWAITING_ENVIRONMENT_RECOVERY
-    if classification is FailureClassification.RESOURCE_LIMIT_FAILURE:
-        return FailureRouteState.AWAITING_SPLIT
-    if classification is FailureClassification.ARCHITECTURE_CONSTRAINT_VIOLATION:
-        return FailureRouteState.BLOCKED_ARCHITECTURE
-    if classification in {FailureClassification.CONTRACT_OR_REQUIREMENT_AMBIGUITY}:
-        return FailureRouteState.BLOCKED_AMBIGUITY
-    if classification is FailureClassification.UNCLASSIFIED_FAILURE:
-        return FailureRouteState.BLOCKED_UNCLASSIFIED
-    return FailureRouteState.ACTIVE
 
 
 def _utc_now() -> str:

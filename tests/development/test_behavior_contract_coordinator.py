@@ -26,9 +26,18 @@ from core.development.behavior_contract_coordinator import (
     _first_executable_gap,
 )
 from core.development.failure_progression import (
+    FAILURE_ACTIONS,
+    FAILURE_PRIORITY,
     DependencyDisposition,
     FailureClassification,
+    FailureDecision,
     FailureObservation,
+    FailureProgressState,
+    FailureRouteState,
+    PacketKind,
+    ProgressionAction,
+    RepairPacket,
+    RetryRoute,
 )
 from core.development.tdd_progression import (
     BehaviorContract,
@@ -72,7 +81,12 @@ class FakeExecutionGateway:
 
     async def execute(self, work_unit, repository_binding):
         self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective))
-        return self.results[work_unit.id]
+        result = self.results[work_unit.id]
+        if isinstance(result, list):
+            if not result:
+                raise AssertionError(f"no more results configured for {work_unit.id}")
+            return result.pop(0)
+        return result
 
 
 class MemoryStateRepo:
@@ -95,6 +109,16 @@ class StaticReviewMaterialProvider:
 
     def render(self, request):
         return self.text
+
+
+class FakeEnvironmentRecovery:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = []
+
+    async def recover_and_verify(self, project_id: str) -> bool:
+        self.calls.append(project_id)
+        return self.outcomes.pop(0)
 
 
 class StubProvider(Provider):
@@ -282,6 +306,8 @@ def run_state(
     semantic_base_revision="a" * 40,
     contract_state=None,
     registered_root=None,
+    failure_progress=None,
+    blocked_reason=None,
 ):
     active_contract = contract_state or contract()
     return BehaviorContractRunState(
@@ -291,6 +317,44 @@ def run_state(
         current_pool=current_pool,
         completed_requirement_refs=completed_requirement_refs or [],
         cycles=cycles or [],
+        failure_progress=failure_progress or FailureProgressState(),
+        blocked_reason=blocked_reason,
+    )
+
+
+def failure_decision(classification: FailureClassification, action: ProgressionAction | None = None) -> FailureDecision:
+    observation = FailureObservation(
+        source="pytest",
+        message=classification.value,
+        plausible=[classification],
+        evidence_refs=["packet.json"],
+    )
+    return FailureDecision(
+        observations=[observation],
+        plausible=[classification],
+        dominant=classification,
+        priority=FAILURE_PRIORITY[classification],
+        action=action or FAILURE_ACTIONS[classification],
+    )
+
+
+def repair_progress(classification: FailureClassification, route: RetryRoute, role: str) -> FailureProgressState:
+    return FailureProgressState(
+        state=FailureRouteState.AWAITING_REPAIR,
+        history=[failure_decision(classification)],
+        retry_counts={route.value: 1},
+        repair_packets=[
+            RepairPacket(
+                kind=PacketKind.REPAIR,
+                role=role,
+                work_unit_id="repair-packet",
+                trusted_revision="a" * 40,
+                original_objective="repair objective",
+                allowed_paths=["reservation_book.py" if role == "Developer" else "tests/test_reservation_book.py"],
+                classification=classification,
+                evidence=[classification.value],
+            )
+        ],
     )
 
 
@@ -1957,3 +2021,462 @@ def test_behavior_contract_run_state_round_trip_preserves_binding_resources():
     )
 
     assert restored.repository_binding.environment_resources == ["/srv/env/python-314", "/srv/env/pytest"]
+
+
+def review_approved(step_id: str, revision: str) -> dict[str, object]:
+    return {
+        "verdict": "approved",
+        "rationale": "Looks good.",
+        "findings": ["approved"],
+        "candidate_revision": revision,
+        "step_id": step_id,
+        "evidence_refs": ["review:approved"],
+        "repair_instructions": [],
+    }
+
+
+def review_repair(step_id: str, revision: str) -> dict[str, object]:
+    return {
+        "verdict": "repair_required",
+        "rationale": "Remove the noisy comment.",
+        "findings": ["comment is noisy"],
+        "candidate_revision": revision,
+        "step_id": step_id,
+        "evidence_refs": ["review:repair"],
+        "repair_instructions": ["Remove the noisy comment and keep behavior unchanged."],
+    }
+
+
+def review_replan(step_id: str, revision: str) -> dict[str, object]:
+    return {
+        "verdict": "replan_required",
+        "rationale": "The change does not integrate with the contract.",
+        "findings": ["integration mismatch"],
+        "candidate_revision": revision,
+        "step_id": step_id,
+        "evidence_refs": ["review:replan"],
+        "repair_instructions": [],
+    }
+
+
+def saved_runs(repo: MemoryStateRepo, contract_id: str) -> list[BehaviorContractRunState]:
+    return [snapshot.contract_runs[contract_id] for snapshot in repo.saved if contract_id in snapshot.contract_runs]
+
+
+@pytest.mark.asyncio
+async def test_red_security_violation_routes_to_tester_repair():
+    step = proposal()
+    repo = MemoryStateRepo()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({step.step_id + "--red": rejected(step.step_id + "--red", error="unauthorized path_policy violation")}),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
+    assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION
+    assert retry_snapshot.failure_progress.history[-1].action is ProgressionAction.REPAIR_CANDIDATE
+    assert retry_snapshot.failure_progress.repair_packets[-1].role == "Tester"
+    assert result.current_pool == "replan_ready"
+
+
+@pytest.mark.asyncio
+async def test_green_security_violation_routes_to_developer_repair():
+    step = proposal()
+    repo = MemoryStateRepo()
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": rejected(step.step_id + "--green", error="unauthorized path_policy violation"),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
+    assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION
+    assert retry_snapshot.failure_progress.history[-1].action is ProgressionAction.REPAIR_CANDIDATE
+    assert retry_snapshot.failure_progress.repair_packets[-1].role == "Developer"
+    assert result.current_pool == "replan_ready"
+    assert gateway.calls[1][1] == "b" * 40
+
+
+@pytest.mark.asyncio
+async def test_red_change_scope_violation_routes_to_tester_repair():
+    step = proposal()
+    repo = MemoryStateRepo()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({step.step_id + "--red": rejected(step.step_id + "--red", error="changed_paths out-of-scope edit")}),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
+    assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.CHANGE_SCOPE_VIOLATION
+    assert retry_snapshot.failure_progress.history[-1].action is ProgressionAction.REPAIR_CANDIDATE
+    assert retry_snapshot.failure_progress.repair_packets[-1].role == "Tester"
+    assert result.current_pool == "replan_ready"
+
+
+@pytest.mark.asyncio
+async def test_green_change_scope_violation_routes_to_developer_repair():
+    step = proposal()
+    repo = MemoryStateRepo()
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": rejected(step.step_id + "--green", error="changed_paths out-of-scope edit"),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
+    assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.CHANGE_SCOPE_VIOLATION
+    assert retry_snapshot.failure_progress.history[-1].action is ProgressionAction.REPAIR_CANDIDATE
+    assert retry_snapshot.failure_progress.repair_packets[-1].role == "Developer"
+    assert result.current_pool == "replan_ready"
+    assert gateway.calls[1][1] == "b" * 40
+
+
+@pytest.mark.asyncio
+async def test_environment_recovery_success_reruns_from_trusted_revision():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    repo = MemoryStateRepo()
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": [
+            rejected(step.step_id + "--red", error="pytest is unavailable in dependency environment"),
+            accepted(step.step_id + "--red", "b" * 40),
+        ],
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+    recovery = FakeEnvironmentRecovery([True])
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+            review_approved(step.step_id, "c" * 40),
+            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []},
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+        environment_recovery=recovery,
+    ).run_contract(contract_state)
+
+    assert recovery.calls == ["reservation-book"]
+    assert [call[0] for call in gateway.calls[:2]] == [step.step_id + "--red", step.step_id + "--red"]
+    assert [call[1] for call in gateway.calls[:2]] == ["a" * 40, "a" * 40]
+    assert any(item.failure_progress.retry_counts.get(RetryRoute.ENVIRONMENT_RECOVERY.value) == 1 for item in saved_runs(repo, contract_state.id))
+    assert result.current_pool == "completed"
+
+
+@pytest.mark.asyncio
+async def test_environment_recovery_exhaustion_blocks_environment_truthfully():
+    step = proposal()
+    repo = MemoryStateRepo()
+    recovery = FakeEnvironmentRecovery([False])
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({step.step_id + "--red": rejected(step.step_id + "--red", error="pytest is unavailable in dependency environment")}),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        environment_recovery=recovery,
+    ).run_contract(contract())
+
+    saved = repo.snapshot.contract_runs[contract().id]
+    assert result.current_pool == "blocked_environment"
+    assert saved.failure_progress.state is FailureRouteState.BLOCKED_ENVIRONMENT
+    assert saved.failure_progress.history[-1].dominant is FailureClassification.ENVIRONMENT_FAILURE
+    assert recovery.calls == ["reservation-book"]
+
+
+@pytest.mark.asyncio
+async def test_executor_failure_stops_safely_in_blocked_executor_pool():
+    step = proposal()
+    repo = MemoryStateRepo()
+    gateway = FakeExecutionGateway({step.step_id + "--red": rejected(step.step_id + "--red", error="worker offline", status="transport_error")})
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    saved = repo.snapshot.contract_runs[contract().id]
+    assert result.current_pool == "blocked_executor"
+    assert saved.failure_progress.state is FailureRouteState.BLOCKED_EXECUTOR
+    assert saved.failure_progress.history[-1].dominant is FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE
+    assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
+
+
+@pytest.mark.asyncio
+async def test_review_repair_records_failure_progression_and_preserves_runtime_flow():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    repo = MemoryStateRepo()
+    await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+            step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+            step.step_id + "--repair-1": accepted(step.step_id + "--repair-1", "d" * 40),
+        }),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+            review_repair(step.step_id, "c" * 40),
+            review_approved(step.step_id, "d" * 40),
+            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []},
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    repair_ready = next(item for item in saved_runs(repo, contract_state.id) if item.current_pool == "repair_ready")
+    assert repair_ready.failure_progress.history[-1].dominant is FailureClassification.REVIEW_QUALITY_FAILURE
+    assert repair_ready.failure_progress.history[-1].action is ProgressionAction.REPAIR_REVIEW
+    assert repair_ready.failure_progress.retry_counts[RetryRoute.REVIEW_REPAIR.value] == 1
+
+
+@pytest.mark.asyncio
+async def test_semantic_replan_records_failure_progression():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    repo = MemoryStateRepo()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+            step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+        }),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+            review_replan(step.step_id, "c" * 40),
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    saved = repo.snapshot.contract_runs[contract_state.id]
+    assert result.current_pool == "replan_ready"
+    assert saved.failure_progress.history[-1].dominant is FailureClassification.SEMANTIC_INTEGRATION_FAILURE
+    assert saved.failure_progress.history[-1].action is ProgressionAction.REPLAN_INTEGRATION
+
+
+@pytest.mark.asyncio
+async def test_expected_red_success_path_does_not_create_failure_progression_entry():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+            step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+        }),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+            review_approved(step.step_id, "c" * 40),
+            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []},
+        ]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "completed"
+    assert result.blocked_reason is None
+
+
+@pytest.mark.asyncio
+async def test_resume_tester_repair_retry_preserves_transition_and_trusted_base():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_failed"),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="cycle_active",
+                cycles=[cycle],
+                contract_state=contract_state,
+                failure_progress=repair_progress(FailureClassification.TESTER_CANDIDATE_DEFECT, RetryRoute.TESTER_REPAIR, "Tester"),
+                blocked_reason="tester_candidate_defect: retrying Tester from trusted revision",
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([review_approved(step.step_id, "c" * 40), {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []}]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
+    assert result.current_pool == "completed"
+
+
+@pytest.mark.asyncio
+async def test_resume_developer_repair_retry_preserves_transition_and_red_base():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_failed"),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="cycle_active",
+                cycles=[cycle],
+                contract_state=contract_state,
+                failure_progress=repair_progress(FailureClassification.DEVELOPER_CANDIDATE_DEFECT, RetryRoute.DEVELOPER_REPAIR, "Developer"),
+                blocked_reason="developer_candidate_defect: retrying Developer from trusted revision",
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40)})
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([review_approved(step.step_id, "c" * 40), {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []}]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert gateway.calls[0][:2] == (step.step_id + "--green", "b" * 40)
+    assert result.current_pool == "completed"
+
+
+@pytest.mark.asyncio
+async def test_resume_environment_recovery_success_reruns_without_resetting_count():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_failed", error="pytest is unavailable in dependency environment"),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="cycle_active",
+                cycles=[cycle],
+                contract_state=contract_state,
+                failure_progress=FailureProgressState(retry_counts={RetryRoute.ENVIRONMENT_RECOVERY.value: 1}),
+                blocked_reason="environment recovered; rerunning from trusted revision",
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([review_approved(step.step_id, "c" * 40), {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []}]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
+    assert result.current_pool == "completed"
+
+
+@pytest.mark.asyncio
+async def test_resume_blocked_environment_is_terminal_and_does_not_execute():
+    contract_state = single_requirement_contract()
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="blocked_environment",
+                contract_state=contract_state,
+                failure_progress=FailureProgressState(
+                    state=FailureRouteState.BLOCKED_ENVIRONMENT,
+                    history=[failure_decision(FailureClassification.ENVIRONMENT_FAILURE)],
+                    retry_counts={RetryRoute.ENVIRONMENT_RECOVERY.value: 1},
+                    blocker="environment_failure: pytest is unavailable",
+                ),
+                blocked_reason="environment_failure: pytest is unavailable",
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({})
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "blocked_environment"
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_resume_blocked_executor_is_terminal_and_does_not_execute():
+    contract_state = single_requirement_contract()
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="blocked_executor",
+                contract_state=contract_state,
+                failure_progress=FailureProgressState(
+                    state=FailureRouteState.BLOCKED_EXECUTOR,
+                    history=[failure_decision(FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE)],
+                    blocker="executor_infrastructure_failure: worker offline",
+                ),
+                blocked_reason="executor_infrastructure_failure: worker offline",
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({})
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "blocked_executor"
+    assert gateway.calls == []

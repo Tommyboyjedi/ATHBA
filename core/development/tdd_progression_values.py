@@ -17,6 +17,12 @@ class ContractPoolStatus(str, Enum):
     REPLAN_READY = "replan_ready"
     APPROVED = "approved"
     COMPLETED = "completed"
+    BLOCKED_EXECUTOR = "blocked_executor"
+    BLOCKED_ENVIRONMENT = "blocked_environment"
+    BLOCKED_ARCHITECTURE = "blocked_architecture"
+    BLOCKED_AMBIGUITY = "blocked_ambiguity"
+    BLOCKED_UNCLASSIFIED = "blocked_unclassified"
+    SPLIT_REQUIRED = "split_required"
 
 
 class ReviewVerdict(str, Enum):

@@ -127,3 +127,39 @@ As a result, most failure-route states are persisted as sideband evidence, while
 - This audit did not change runtime behavior.
 - No Rack AI source or configuration was modified.
 - The next corrective step should be a source-of-truth decision: either narrow the declared PR17 matrix to what is executable, or implement the missing producers and route consumers so the matrix is truthful.
+
+## Post-implementation re-audit (2026-08-31)
+
+Focused post-refactor execution:
+
+- `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true MONGO_USER=test MONGO_PASS=test ./.venv/bin/python -m pytest -q tests/development/test_failure_progression.py tests/development/test_behavior_contract_coordinator.py`
+- Result: `87 passed, 8054 warnings in 1.23s`
+
+### Affected row status changes
+
+| Classification | Before | After | Evidence |
+| --- | --- | --- | --- |
+| `executor_infrastructure_failure` | `B` | `A` | `block_executor` now produces `FailureTransition(... next_pool=blocked_executor ...)`, persists `FailureRouteState.BLOCKED_EXECUTOR`, and resumes as a terminal non-executing state. |
+| `environment_failure` | `B` | `A` | `recover_environment` now either reruns from trusted revision with preserved retry count or blocks truthfully in `blocked_environment`. |
+| `resource_limit_failure` | `B` | `B` | Still intentionally deferred, but now stops truthfully via `split_required` instead of pretending ordinary replan is the executable route. |
+| `security_or_execution_policy_violation` | `E` | `A` | Policy now uses `repair_candidate`; RED and GREEN ownership are proven by explicit phase-ownership tests and trusted-base resume tests. |
+| `change_scope_violation` | `E` | `A` | Same phase-sensitive candidate-owner correction as security violations. |
+| `tester_candidate_defect` | `A` | `A` | Existing bounded RED repair route preserved and now expressed through typed executable transitions. |
+| `developer_candidate_defect` | `B` | `A` | GREEN defect route now has direct focused tests plus typed transition/resume coverage. |
+| `expected_behavior_red` | `C` | `A` | Active taxonomy decision is now explicit: accepted RED is represented by successful RED execution, not by failure progression. Legacy compatibility vocabulary remains readable. |
+| `semantic_integration_failure` | `E` | `A` | Senior Review `replan_required` now records coherent failure evidence and action through review failure progression before landing in `replan_ready`. |
+| `review_quality_failure` | `E` | `A` | Senior Review `repair_required` now records coherent failure evidence and action while preserving semantic repair budgets and `repair_ready` runtime flow. |
+
+### Updated state-machine conclusions
+
+- `current_pool` remains the single authoritative dispatcher. `FailureRouteState` is durable explanatory state, not a second orchestration machine.
+- Candidate failures and review failures now pass through one typed executable bridge in `core/development/failure_routing.py`.
+- Truthful terminal pools now exist for executor blockage, environment blockage, ambiguity blockage, architecture blockage, unclassified blockage, and deferred split requirements.
+- Successful RED remains a normal TDD success path, not a failure-classification path.
+- Resume semantics are now aligned with persisted blocked pools: terminal blocked states do not continue execution, and retry routes preserve trusted base revisions and retry counts.
+
+### Dead or compatibility-only vocabulary after implementation
+
+- `awaiting_prerequisite` remains compatibility-only historical vocabulary.
+- `accepted_red` remains compatibility-only historical vocabulary.
+- `awaiting_environment_recovery` and `awaiting_split` remain loadable but are no longer the truthful active route for new runs in this phase.

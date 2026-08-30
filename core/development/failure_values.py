@@ -34,6 +34,7 @@ class ProgressionAction(str, Enum):
     RECOVER_ENVIRONMENT = "recover_environment"
     SPLIT_PACKET = "split_packet"
     ASSESS_MECHANICAL_DEPENDENCY = "assess_mechanical_dependency"
+    REPAIR_CANDIDATE = "repair_candidate"
     REPAIR_TESTER = "repair_tester"
     REPAIR_DEVELOPER = "repair_developer"
     REPLAN_DEPENDENCY = "replan_dependency"
@@ -53,8 +54,8 @@ FAILURE_ACTIONS = {
     FailureClassification.SYNTAX_OR_PARSE_FAILURE: ProgressionAction.ASSESS_MECHANICAL_DEPENDENCY,
     FailureClassification.BUILD_OR_LINK_FAILURE: ProgressionAction.ASSESS_MECHANICAL_DEPENDENCY,
     FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE: ProgressionAction.ASSESS_MECHANICAL_DEPENDENCY,
-    FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION: ProgressionAction.REPAIR_TESTER,
-    FailureClassification.CHANGE_SCOPE_VIOLATION: ProgressionAction.REPAIR_TESTER,
+    FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION: ProgressionAction.REPAIR_CANDIDATE,
+    FailureClassification.CHANGE_SCOPE_VIOLATION: ProgressionAction.REPAIR_CANDIDATE,
     FailureClassification.DEPENDENCY_OR_PREREQUISITE_FAILURE: ProgressionAction.REPLAN_DEPENDENCY,
     FailureClassification.CONTRACT_OR_REQUIREMENT_AMBIGUITY: ProgressionAction.BLOCK_AMBIGUITY,
     FailureClassification.TESTER_CANDIDATE_DEFECT: ProgressionAction.REPAIR_TESTER,
@@ -75,7 +76,9 @@ class FailureRouteState(str, Enum):
     AWAITING_PREREQUISITE = "awaiting_prerequisite"
     AWAITING_ENVIRONMENT_RECOVERY = "awaiting_environment_recovery"
     AWAITING_SPLIT = "awaiting_split"
+    SPLIT_REQUIRED = "split_required"
     BLOCKED_EXECUTOR = "blocked_executor"
+    BLOCKED_ENVIRONMENT = "blocked_environment"
     BLOCKED_ARCHITECTURE = "blocked_architecture"
     BLOCKED_AMBIGUITY = "blocked_ambiguity"
     BLOCKED_UNCLASSIFIED = "blocked_unclassified"
@@ -96,4 +99,5 @@ class DependencyDisposition(str, Enum):
 class RetryRoute(str, Enum):
     TESTER_REPAIR = "tester_repair"
     DEVELOPER_REPAIR = "developer_repair"
+    REVIEW_REPAIR = "review_repair"
     ENVIRONMENT_RECOVERY = "environment_recovery"

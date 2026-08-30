@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.development.behavior_contract_domain import BehaviorContract
-from core.development.failure_progression import FailureProgressState
+from core.development.failure_state import FailureProgressState, validate_failure_progress_state
 from core.development.progression import ExecutionAttemptRecord
 from core.development.specification_domain import SpecificationGatekeeperRunState
 from core.development.tdd_domain import TddPhaseState, green_work_unit_id, red_work_unit_id
@@ -259,6 +259,7 @@ class BehaviorContractRunState:
             require_text(self.blocked_reason, "blocked reason")
         if self.gatekeeper_state is not None and self.gatekeeper_state.checklist.project_id != self.contract.project_id:
             raise ValueError("gatekeeper checklist project id must match the contract project id")
+        validate_failure_progress_state(self.current_pool, self.failure_progress, self.blocked_reason)
 
     def active_requirement_refs(self) -> list[str]:
         if self.targeted_requirement_ref is not None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from core.development.failure_records import (
@@ -11,6 +11,34 @@ from core.development.failure_records import (
     WorkPacketSplit,
 )
 from core.development.failure_values import FailureRouteState
+from core.development.tdd_progression_values import ContractPoolStatus
+
+TERMINAL_CONTRACT_POOLS = {
+    ContractPoolStatus.REPLAN_READY.value,
+    ContractPoolStatus.COMPLETED.value,
+    ContractPoolStatus.BLOCKED_EXECUTOR.value,
+    ContractPoolStatus.BLOCKED_ENVIRONMENT.value,
+    ContractPoolStatus.BLOCKED_ARCHITECTURE.value,
+    ContractPoolStatus.BLOCKED_AMBIGUITY.value,
+    ContractPoolStatus.BLOCKED_UNCLASSIFIED.value,
+    ContractPoolStatus.SPLIT_REQUIRED.value,
+}
+BLOCKED_CONTRACT_POOLS = {
+    ContractPoolStatus.BLOCKED_EXECUTOR.value,
+    ContractPoolStatus.BLOCKED_ENVIRONMENT.value,
+    ContractPoolStatus.BLOCKED_ARCHITECTURE.value,
+    ContractPoolStatus.BLOCKED_AMBIGUITY.value,
+    ContractPoolStatus.BLOCKED_UNCLASSIFIED.value,
+    ContractPoolStatus.SPLIT_REQUIRED.value,
+}
+BLOCKED_ROUTE_STATES = {
+    FailureRouteState.BLOCKED_EXECUTOR.value,
+    FailureRouteState.BLOCKED_ENVIRONMENT.value,
+    FailureRouteState.BLOCKED_ARCHITECTURE.value,
+    FailureRouteState.BLOCKED_AMBIGUITY.value,
+    FailureRouteState.BLOCKED_UNCLASSIFIED.value,
+    FailureRouteState.SPLIT_REQUIRED.value,
+}
 
 
 @dataclass(frozen=True)
@@ -59,3 +87,26 @@ class FailureProgressState:
             unclassified_analysis=None if payload.get("unclassified_analysis") is None else UnclassifiedAnalysis.from_dict(dict(payload["unclassified_analysis"])),
             blocker=payload.get("blocker"),
         )
+
+
+
+
+def active_failure_progress_state(failure_progress: FailureProgressState) -> FailureProgressState:
+    return replace(failure_progress, state=FailureRouteState.ACTIVE, blocker=None)
+
+def validate_failure_progress_state(
+    current_pool: str,
+    failure_progress: FailureProgressState,
+    blocked_reason: str | None,
+) -> None:
+    route_state = failure_progress.state.value
+    if current_pool == ContractPoolStatus.COMPLETED.value and route_state == FailureRouteState.AWAITING_REPAIR.value:
+        raise ValueError("completed runs must not remain in awaiting_repair")
+    if current_pool in BLOCKED_CONTRACT_POOLS and not blocked_reason:
+        raise ValueError("blocked contract pools require a blocked reason")
+    if current_pool == ContractPoolStatus.BLOCKED_EXECUTOR.value and route_state != FailureRouteState.BLOCKED_EXECUTOR.value:
+        raise ValueError("blocked_executor pool requires blocked_executor failure state")
+    if current_pool == ContractPoolStatus.BLOCKED_ENVIRONMENT.value and route_state != FailureRouteState.BLOCKED_ENVIRONMENT.value:
+        raise ValueError("blocked_environment pool requires blocked_environment failure state")
+    if current_pool == ContractPoolStatus.SPLIT_REQUIRED.value and route_state != FailureRouteState.SPLIT_REQUIRED.value:
+        raise ValueError("split_required pool requires split_required failure state")
