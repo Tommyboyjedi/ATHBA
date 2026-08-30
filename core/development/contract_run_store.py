@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from core.development.tdd_coordinator import TddStateRepository
+from core.development.tdd_cycle_coordination import TddStateRepository
 from core.development.tdd_progression import BehaviorContractRunState, TddSnapshot
 from core.execution.rack_ai_contract import RepositoryBinding
 

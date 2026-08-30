@@ -28,6 +28,9 @@ TARGETS = [
     Path("core/development/specification_gatekeeper.py"),
     Path("core/development/specification_reconciliation.py"),
     Path("core/development/test_evidence_reconciliation.py"),
+    Path("core/development/tdd_phase_execution.py"),
+    Path("core/development/tdd_cycle_coordination.py"),
+    Path("core/development/work_unit_coordination.py"),
 ]
 ALLOWED_BASES = {"Enum", "Protocol", "str"}
 

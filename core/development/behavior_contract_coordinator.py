@@ -28,13 +28,13 @@ from core.development.failure_progression import (
     RetryBudget,
     RetryRoute,
 )
-from core.development.tdd_coordinator import (
+from core.development.tdd_cycle_coordination import TddStateRepository
+from core.development.tdd_phase_execution import (
+    PhaseExecutionRequest,
+    PhaseOutcome,
+    TddPhaseExecutor as PhaseExecutor,
     RED_ALREADY_SATISFIED_FRAGMENT,
-    TddStateRepository,
-    _PhaseOutcome,
-    _blocked_reason_for_result,
-    _is_red_already_satisfied,
-    _phase_state_from_result,
+    is_red_already_satisfied,
 )
 from core.development.tdd_progression import (
     BehaviorContract,
@@ -646,16 +646,9 @@ class RunAdvance:
 
 
 @dataclass(frozen=True)
-class PhaseExecutionRequest:
-    phase: TddPhase
-    work_unit: DevelopmentWorkUnit
-    base_binding: RepositoryBinding
-
-
-@dataclass(frozen=True)
 class FailureObservationRequest:
     phase: TddPhase
-    outcome: _PhaseOutcome
+    outcome: PhaseOutcome
 
 
 @dataclass(frozen=True)
@@ -663,7 +656,7 @@ class FailureRoutingRequest:
     run_state: BehaviorContractRunState
     phase: TddPhase
     work_unit: DevelopmentWorkUnit
-    outcome: _PhaseOutcome
+    outcome: PhaseOutcome
 
 
 @dataclass(frozen=True)
@@ -704,42 +697,6 @@ class ReviewProgressionDependencies:
 class RepairProgressionDependencies:
     repair_factory: ContractRepairWorkUnitFactory
     phase_executor: 'PhaseExecutor'
-
-
-class PhaseExecutor:
-    def __init__(self, execution_gateway: WorkUnitExecutionGateway):
-        self.execution_gateway = execution_gateway
-
-    async def execute(self, request: PhaseExecutionRequest) -> _PhaseOutcome:
-        recorded_at = _utc_now()
-        base_sha = request.base_binding.base_sha
-        try:
-            result = await self.execution_gateway.execute(request.work_unit, request.base_binding)
-        except Exception as error:
-            return _PhaseOutcome(
-                attempt=None,
-                phase_state=_transport_failure_state(request.phase, request.work_unit.id, base_sha, recorded_at, str(error)),
-                accepted=False,
-                blocked_reason=f"{request.phase.value} phase transport failure",
-            )
-        phase_state = _phase_state_from_result(request.phase, request.work_unit.id, base_sha, recorded_at, result)
-        if not result.accepted:
-            return _PhaseOutcome(
-                attempt=None,
-                phase_state=phase_state,
-                accepted=False,
-                blocked_reason=_blocked_reason_for_result(request.phase, result),
-                execution_result=result,
-            )
-        if not result.accepted_revision:
-            return _PhaseOutcome(
-                attempt=None,
-                phase_state=phase_state,
-                accepted=False,
-                blocked_reason=f"accepted {request.phase.value} phase missing trusted accepted revision",
-                execution_result=result,
-            )
-        return _PhaseOutcome(attempt=None, phase_state=phase_state, accepted=True, execution_result=result)
 
 
 class FailureObservationBuilder:
@@ -1891,23 +1848,11 @@ def _repository_relative_path(path: str, *, label: str) -> str:
     return candidate.as_posix()
 
 
-def _is_red_already_satisfied_from_phase(outcome: _PhaseOutcome) -> bool:
+def _is_red_already_satisfied_from_phase(outcome: PhaseOutcome) -> bool:
     if outcome.phase_state.status != "already_satisfied":
         return False
     return RED_ALREADY_SATISFIED_FRAGMENT in (outcome.phase_state.error or "")
 
-
-def _transport_failure_state(phase: TddPhase, work_unit_id: str, base_sha: str | None, recorded_at: str, error: str):
-    from core.development.tdd_progression import TddPhaseState
-
-    return TddPhaseState(
-        phase=phase.value,
-        work_unit_id=work_unit_id,
-        base_sha=base_sha,
-        status="transport_error",
-        error=error,
-        recorded_at=recorded_at,
-    )
 
 
 def _add_synthesized_prerequisite(
