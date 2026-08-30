@@ -53,7 +53,12 @@ from core.development.tdd_progression import (
     red_work_unit_id,
     repair_work_unit_id,
 )
-from core.development.specification_gatekeeper import SpecificationGapTddAdapter, SpecificationGatekeeper
+from core.development.specification_gatekeeper import (
+    GatekeeperAssessmentRequest,
+    GatekeeperStateRequest,
+    SpecificationGapTddAdapter,
+    SpecificationGatekeeper,
+)
 from core.development.python_test_runtime import PythonPytestRuntime
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -893,8 +898,12 @@ class ReadyPoolProgressor:
     async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
         contract = run_state.contract
         if run_state.current_pool == "tdd_ready" and run_state.targeted_requirement_ref is None and self.dependencies.gatekeeper is not None and self.dependencies.gap_adapter is not None:
-            gatekeeper_state = await self.dependencies.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
-            gatekeeper_state = await self.dependencies.gatekeeper.assess(contract, run_state, gatekeeper_state)
+            gatekeeper_state = await self.dependencies.gatekeeper.ensure_state(
+                GatekeeperStateRequest(contract, run_state.gatekeeper_state)
+            )
+            gatekeeper_state = await self.dependencies.gatekeeper.assess(
+                GatekeeperAssessmentRequest(contract, run_state, gatekeeper_state)
+            )
             gap = _first_executable_gap(contract, gatekeeper_state)
             if gap is not None:
                 updated_contract = self.dependencies.gap_adapter.extend_contract_for_gap(contract, gap)
@@ -933,8 +942,12 @@ class ReadyPoolProgressor:
             )
         if self.dependencies.gatekeeper is None:
             return RunAdvance(_completed_run_state(run_state), return_now=True)
-        gatekeeper_state = await self.dependencies.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
-        gatekeeper_state = await self.dependencies.gatekeeper.assess(contract, run_state, gatekeeper_state)
+        gatekeeper_state = await self.dependencies.gatekeeper.ensure_state(
+                GatekeeperStateRequest(contract, run_state.gatekeeper_state)
+            )
+        gatekeeper_state = await self.dependencies.gatekeeper.assess(
+                GatekeeperAssessmentRequest(contract, run_state, gatekeeper_state)
+            )
         if gatekeeper_state.is_complete():
             completed = _completed_run_state(run_state)
             return RunAdvance(replace(completed, gatekeeper_state=gatekeeper_state), return_now=True)
@@ -1037,9 +1050,12 @@ class ReviewReadyProgressor:
             )
             if approved_run_state.targeted_checklist_ref is not None and self.dependencies.gatekeeper is not None:
                 gatekeeper_state = await self.dependencies.gatekeeper.assess(
-                    contract,
-                    approved_run_state,
-                    approved_run_state.gatekeeper_state or await self.dependencies.gatekeeper.ensure_state(contract, None),
+                    GatekeeperAssessmentRequest(
+                        contract,
+                        approved_run_state,
+                        approved_run_state.gatekeeper_state
+                        or await self.dependencies.gatekeeper.ensure_state(GatekeeperStateRequest(contract, None)),
+                    )
                 )
                 target_assessment = _checklist_assessment(gatekeeper_state, approved_run_state.targeted_checklist_ref)
                 target_proven = target_assessment is not None and target_assessment.status == "proven"

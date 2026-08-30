@@ -5,6 +5,9 @@ import pytest
 
 from core.development.behavior_contract_coordinator import BehaviorContractCoordinator, SemanticReviewRequest, StepDecisionRequest
 from core.development.specification_gatekeeper import (
+    ChecklistAtomizationRequest,
+    GatekeeperAssessmentRequest,
+    GatekeeperStateRequest,
     SpecificationChecklistPlanner,
     SpecificationGapTddAdapter,
     SpecificationGatekeeper,
@@ -256,7 +259,9 @@ def run_state(current_pool="approved", completed_requirement_refs=None, cycles=N
 async def test_valid_component_requirement_can_produce_checklist():
     planner = SpecificationChecklistPlanner(FakeReasoningGateway([checklist_payload()]))
 
-    checklist = await planner.create_checklist(project_id="reservation-book", requirement_text=requirement_text())
+    checklist = await planner.create_checklist(
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    )
 
     assert checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
     assert checklist.items[0] == SpecificationChecklistItem(
@@ -267,14 +272,38 @@ async def test_valid_component_requirement_can_produce_checklist():
 
 
 @pytest.mark.asyncio
+async def test_gatekeeper_atomization_request_remains_independent_of_development_state():
+    gateway = FakeReasoningGateway([checklist_payload()])
+    gatekeeper = SpecificationGatekeeper(gateway)
+
+    state = await gatekeeper.ensure_state(GatekeeperStateRequest(contract(), None))
+
+    request = gateway.requests[0]
+    prompt = json.loads(request.prompt)
+    assert state.checklist.project_id == "reservation-book"
+    assert request.purpose == "athba_specification_checklist"
+    assert prompt["project_id"] == "reservation-book"
+    assert prompt["requirement_text"] == requirement_text()
+    assert "checklist_item" not in prompt
+    assert "accepted_test_candidates" not in prompt
+    assert "accepted_tdd_tests" not in prompt
+    assert "observable_requirements" not in prompt
+
+
+
+@pytest.mark.asyncio
 async def test_malformed_or_invalid_checklist_output_fails_closed():
     planner = SpecificationChecklistPlanner(FakeReasoningGateway(["not json"]))
     with pytest.raises(ValueError, match="specification checklist response was not valid JSON"):
-        await planner.create_checklist(project_id="reservation-book", requirement_text=requirement_text())
+        await planner.create_checklist(
+            ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+        )
 
     bad_kind = SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [{"ref": "SPEC-1", "text": "x", "kind": "string"}]}]))
     with pytest.raises(ValueError, match="unsupported checklist item kind"):
-        await bad_kind.create_checklist(project_id="reservation-book", requirement_text=requirement_text())
+        await bad_kind.create_checklist(
+            ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+        )
 
 
 def test_checklist_round_trip_defaults_and_duplicates_are_validated():
@@ -348,9 +377,11 @@ async def test_semantically_unapproved_green_cannot_close_checklist_item():
     gatekeeper = SpecificationGatekeeper(FakeReasoningGateway([]))
 
     state = await gatekeeper.assess(
-        active_contract,
-        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
-        SpecificationGatekeeperRunState(checklist=checklist),
+        GatekeeperAssessmentRequest(
+            active_contract,
+            run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
+            SpecificationGatekeeperRunState(checklist=checklist),
+        )
     )
 
     assert state.latest_assessment is not None
@@ -378,14 +409,18 @@ async def test_completed_checklist_item_does_not_reopen_without_changed_evidence
     )
     gatekeeper = SpecificationGatekeeper(gateway)
     initial = await gatekeeper.assess(
-        active_contract,
-        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
-        SpecificationGatekeeperRunState(checklist=checklist),
+        GatekeeperAssessmentRequest(
+            active_contract,
+            run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
+            SpecificationGatekeeperRunState(checklist=checklist),
+        )
     )
     repeated = await gatekeeper.assess(
-        active_contract,
-        run_state(cycles=[cycle], gatekeeper_state=initial, contract_state=active_contract),
-        initial,
+        GatekeeperAssessmentRequest(
+            active_contract,
+            run_state(cycles=[cycle], gatekeeper_state=initial, contract_state=active_contract),
+            initial,
+        )
     )
 
     assert initial.latest_assessment is not None
@@ -397,8 +432,7 @@ async def test_completed_checklist_item_does_not_reopen_without_changed_evidence
 @pytest.mark.asyncio
 async def test_gatekeeper_preserves_multiple_independent_obligation_classes():
     checklist = await SpecificationChecklistPlanner(FakeReasoningGateway([checklist_payload()])).create_checklist(
-        project_id="reservation-book",
-        requirement_text=requirement_text(),
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
     )
 
     assert {item.kind for item in checklist.items} == {"validation", "quality"}
@@ -429,9 +463,11 @@ async def test_accepted_tdd_and_review_evidence_can_prove_independent_items():
     )
 
     state = await gatekeeper.assess(
-        active_contract,
-        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
-        SpecificationGatekeeperRunState(checklist=checklist),
+        GatekeeperAssessmentRequest(
+            active_contract,
+            run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
+            SpecificationGatekeeperRunState(checklist=checklist),
+        )
     )
 
     assert state.latest_assessment is not None
@@ -461,9 +497,11 @@ async def test_invented_evidence_is_downgraded_and_state_round_trips():
     )
 
     assessed = await gatekeeper.assess(
-        active_contract,
-        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
-        SpecificationGatekeeperRunState(checklist=checklist),
+        GatekeeperAssessmentRequest(
+            active_contract,
+            run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
+            SpecificationGatekeeperRunState(checklist=checklist),
+        )
     )
 
     restored = BehaviorContractRunState.from_dict(
@@ -589,9 +627,11 @@ async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
     )
 
     state = await gatekeeper.assess(
-        active_contract,
-        run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract, completed_requirement_refs=["BC-10"]),
-        SpecificationGatekeeperRunState(checklist=checklist),
+        GatekeeperAssessmentRequest(
+            active_contract,
+            run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract, completed_requirement_refs=["BC-10"]),
+            SpecificationGatekeeperRunState(checklist=checklist),
+        )
     )
 
     assert state.latest_assessment is not None

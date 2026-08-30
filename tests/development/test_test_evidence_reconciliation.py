@@ -159,3 +159,29 @@ async def test_reconciliation_is_pure_and_covers_every_checklist_item_once(tmp_p
 
     assert [item.checklist_ref for item in results] == ["CHECK-1", "CHECK-2"]
     assert state.to_dict() == before
+
+
+@pytest.mark.asyncio
+async def test_reconciler_rejects_accepted_test_missing_from_final_trusted_revision(tmp_path):
+    initial_revision = _repository(tmp_path)
+    (tmp_path / "tests" / "test_reservation_book.py").write_text("def test_other_behavior():\n    assert True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "remove accepted test"],
+        cwd=tmp_path,
+        check=True,
+    )
+    final_revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout.strip()
+    gateway = FakeReasoningGateway([
+        {"answer": "YES", "selected_test_names": ["tests/test_reservation_book.py::test_add_resource"], "rationale": "older accepted test"},
+        {"answer": "NO", "selected_test_names": [], "rationale": "no unit test proves readability"},
+    ])
+
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, final_revision)).reconcile(
+        _checklist(),
+        _run_state(initial_revision),
+    )
+
+    assert results[0].answer == "NO"
+    assert results[0].accepted_test_names == []
+    assert "not present" in results[0].rationale

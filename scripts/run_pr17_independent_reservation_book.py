@@ -21,7 +21,11 @@ from core.development.behavior_contract_coordinator import (
 )
 from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
 from core.development.python_test_runtime import PythonPytestRuntime
-from core.development.specification_gatekeeper import SpecificationChecklistPlanner, _checklist_prompt
+from core.development.specification_gatekeeper import (
+    ChecklistAtomizationRequest,
+    SpecificationChecklistPlanner,
+    _checklist_prompt,
+)
 from core.development.test_evidence_reconciliation import GitAcceptedTestCatalog, TestEvidenceReconciler
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
@@ -148,7 +152,9 @@ async def main() -> None:
     }
     try:
         checklist_planner = SpecificationChecklistPlanner(gateway)
-        checklist = await checklist_planner.create_checklist(project_id=project_id, requirement_text=REQUIREMENT)
+        checklist = await checklist_planner.create_checklist(
+            ChecklistAtomizationRequest(project_id=project_id, requirement_text=REQUIREMENT)
+        )
         evidence["gatekeeper"] = {
             "prompt": _checklist_prompt(project_id=project_id, requirement_text=REQUIREMENT),
             "checklist": checklist.to_dict(),

@@ -21,6 +21,13 @@ TARGETS = [
     Path("core/development/failure_state.py"),
     Path("core/development/failure_transitions.py"),
     Path("core/development/failure_values.py"),
+    Path("core/development/specification_atomization.py"),
+    Path("core/development/specification_assessment.py"),
+    Path("core/development/specification_evidence.py"),
+    Path("core/development/specification_gap_adapter.py"),
+    Path("core/development/specification_gatekeeper.py"),
+    Path("core/development/specification_reconciliation.py"),
+    Path("core/development/test_evidence_reconciliation.py"),
 ]
 ALLOWED_BASES = {"Enum", "Protocol", "str"}
 

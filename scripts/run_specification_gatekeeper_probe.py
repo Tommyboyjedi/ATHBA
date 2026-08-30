@@ -10,7 +10,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from core.development.specification_gatekeeper import SpecificationChecklistPlanner, _checklist_prompt
+from core.development.specification_gatekeeper import (
+    ChecklistAtomizationRequest,
+    SpecificationChecklistPlanner,
+    _checklist_prompt,
+)
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
 from core.llm.providers.openai_provider import OpenAIProvider
@@ -105,8 +109,7 @@ async def run_probe() -> dict[str, object]:
         result_count = len(recording_gateway.results)
         try:
             checklist = await planner.create_checklist(
-                project_id=PROJECT_ID,
-                requirement_text=REQUIREMENT,
+                ChecklistAtomizationRequest(project_id=PROJECT_ID, requirement_text=REQUIREMENT)
             )
             raw_output = recording_gateway.results[result_count].text
             items = [item.to_dict() for item in checklist.items]
