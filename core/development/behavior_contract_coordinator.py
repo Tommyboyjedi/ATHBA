@@ -33,6 +33,7 @@ from core.development.tdd_coordinator import (
 )
 from core.development.tdd_progression import (
     BehaviorContract,
+    BehaviorContractRequirement,
     BehaviorContractRunState,
     CONTRACT_POOL_STATUSES,
     ContractCycleRecord,
@@ -426,7 +427,7 @@ class DependencyPrerequisitePlanner:
                 "planned_requirements": [item.to_dict() for item in contract.observable_requirements],
                 "trusted_revision": trusted_revision,
                 "mechanical_failure": evidence.to_dict(),
-                "schema": {"disposition": "already_planned|add_prerequisite|reject_dependency", "parent_requirement_ref": "string", "prerequisite_refs": ["string"], "rationale": "string"},
+                "schema": {"disposition": "already_planned|add_prerequisite|reject_dependency", "parent_requirement_ref": "string", "prerequisite_refs": ["string"], "prerequisite_observable": "string|null", "rationale": "string"},
             }, sort_keys=True),
         )
         result = await self.gateway.reason(request)
@@ -1000,6 +1001,8 @@ class BehaviorContractCoordinator:
             )
             if planner_decision.disposition is not DependencyDisposition.REJECT_DEPENDENCY:
                 prerequisites = planner_decision.prerequisite_refs
+                if planner_decision.disposition is DependencyDisposition.ADD_PREREQUISITE:
+                    contract = _add_synthesized_prerequisite(contract, planner_decision, run_state.completed_requirement_refs)
                 progress = self.failure_policy.defer_for_prerequisites(
                     run_state.failure_progress,
                     decision,
@@ -1792,6 +1795,33 @@ def _transport_failure_state(phase: TddPhase, work_unit_id: str, base_sha: str |
         error=error,
         recorded_at=recorded_at,
     )
+
+
+def _add_synthesized_prerequisite(
+    contract: BehaviorContract,
+    decision: DependencyDecision,
+    completed_refs: list[str],
+) -> BehaviorContract:
+    prerequisite_ref = decision.prerequisite_refs[0]
+    if prerequisite_ref == decision.parent_requirement_ref or prerequisite_ref in contract.requirement_refs() or prerequisite_ref in completed_refs:
+        raise ValueError("synthesized prerequisite ref must be new and distinct")
+    parent = next(item for item in contract.observable_requirements if item.ref == decision.parent_requirement_ref)
+    observable = decision.prerequisite_observable or ""
+    if len(observable.split()) < 3 or any(token in observable.lower() for token in ("pytest", "import ", "call ", "patch ")):
+        raise ValueError("synthesized prerequisite must be an observable behavior, not an implementation recipe")
+    prerequisite = BehaviorContractRequirement(
+        ref=prerequisite_ref,
+        source_refs=list(parent.source_refs),
+        summary=observable,
+        observable_outcome=observable,
+        test_hint=f"prove_{prerequisite_ref.lower().replace('-', '_')}",
+        error_expectation=None,
+        preserves_state_on_failure=True,
+        depends_on=list(parent.depends_on),
+    )
+    updated_parent = replace(parent, depends_on=[*parent.depends_on, prerequisite_ref])
+    requirements = [updated_parent if item.ref == parent.ref else item for item in contract.observable_requirements]
+    return replace(contract, observable_requirements=[*requirements, prerequisite])
 
 
 def _route_state_for_failure(classification: FailureClassification) -> FailureRouteState:

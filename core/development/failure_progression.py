@@ -87,19 +87,22 @@ class DependencyDecision:
     parent_requirement_ref: str
     prerequisite_refs: list[str]
     rationale: str
+    prerequisite_observable: str | None = None
 
     def __post_init__(self) -> None:
         if not self.parent_requirement_ref.strip() or not self.rationale.strip():
             raise ValueError("dependency decision parent requirement and rationale must be non-empty")
         if self.disposition is not DependencyDisposition.REJECT_DEPENDENCY and not self.prerequisite_refs:
             raise ValueError("accepted dependency decisions require prerequisites")
+        if self.disposition is DependencyDisposition.ADD_PREREQUISITE and (self.prerequisite_observable is None or not self.prerequisite_observable.strip()):
+            raise ValueError("a justified prerequisite requires an observable behavior")
 
     def to_dict(self) -> dict[str, Any]:
-        return {"disposition": self.disposition.value, "parent_requirement_ref": self.parent_requirement_ref, "prerequisite_refs": list(self.prerequisite_refs), "rationale": self.rationale}
+        return {"disposition": self.disposition.value, "parent_requirement_ref": self.parent_requirement_ref, "prerequisite_refs": list(self.prerequisite_refs), "rationale": self.rationale, "prerequisite_observable": self.prerequisite_observable}
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "DependencyDecision":
-        return cls(DependencyDisposition(str(payload["disposition"])), str(payload["parent_requirement_ref"]), [str(item) for item in payload.get("prerequisite_refs", [])], str(payload["rationale"]))
+        return cls(DependencyDisposition(str(payload["disposition"])), str(payload["parent_requirement_ref"]), [str(item) for item in payload.get("prerequisite_refs", [])], str(payload["rationale"]), payload.get("prerequisite_observable"))
 
 
 @dataclass(frozen=True)
