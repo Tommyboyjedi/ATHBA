@@ -83,7 +83,7 @@ Target modules:
   Target responsibility: authoritative Session 3 record.
   Implementation evidence: this ledger now records the Session 3 module split, class audit, focused and full validation evidence, clean diff state, and branch push confirmation.
   Tests: N/A.
-  Commit SHA: `PENDING_LEDGER_COMMIT`
+  Commit SHA: `c17e1c5`
 
 ## Current module sizes and structure
 
