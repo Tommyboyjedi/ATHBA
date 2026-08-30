@@ -34,6 +34,7 @@ from core.development.tdd_coordinator import (
 )
 from core.development.tdd_progression import (
     BehaviorContract,
+    BehaviorContractLoadOptions,
     BehaviorContractRequirement,
     BehaviorContractRunState,
     CONTRACT_POOL_STATUSES,
@@ -1399,8 +1400,10 @@ def _contract_from_response(
 ) -> BehaviorContract:
     return BehaviorContract.from_dict(
         _json_object(text, label=label),
-        allowed_production_paths=allowed_production_paths,
-        allowed_test_paths=allowed_test_paths,
+        BehaviorContractLoadOptions(
+            allowed_production_paths=allowed_production_paths,
+            allowed_test_paths=allowed_test_paths,
+        ),
     )
 
 

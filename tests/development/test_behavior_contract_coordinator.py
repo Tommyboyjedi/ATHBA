@@ -25,6 +25,7 @@ from core.development.behavior_contract_coordinator import (
 )
 from core.development.tdd_progression import (
     BehaviorContract,
+    BehaviorContractLoadOptions,
     BehaviorContractRequirement,
     BehaviorContractRunState,
     ContractCycleRecord,
@@ -448,8 +449,10 @@ async def test_prose_before_json_contract_output_fails_closed():
 def test_contract_requirement_refs_are_retained_through_round_trip():
     restored = BehaviorContract.from_dict(
         contract().to_dict(),
-        allowed_production_paths=["reservation_book.py"],
-        allowed_test_paths=["tests/test_reservation_book.py"],
+        BehaviorContractLoadOptions(
+            allowed_production_paths=["reservation_book.py"],
+            allowed_test_paths=["tests/test_reservation_book.py"],
+        ),
     )
 
     assert restored.requirement_refs() == ["RB-1", "RB-2"]
