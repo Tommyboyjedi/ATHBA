@@ -14,6 +14,25 @@ def service(tmp_path):
     return ProjectEnvironmentService(tmp_path / "projects", python_executable=sys.executable)
 
 
+def commit_file(root, path, content, message):
+    target = root / path
+    target.write_text(content, encoding="utf-8")
+    subprocess.run(["git", "add", path], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", message],
+        cwd=root,
+        check=True,
+    )
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+
+def commit_on_branch(root, branch, path, content, message):
+    subprocess.run(["git", "switch", "-c", branch], cwd=root, check=True)
+    revision = commit_file(root, path, content, message)
+    subprocess.run(["git", "switch", "main"], cwd=root, check=True)
+    return revision
+
+
 def test_project_persists_reloads_and_reuses_runtime(tmp_path):
     first = service(tmp_path).create_or_load_python_project("proof-one")
     second = service(tmp_path).create_or_load_python_project("proof-one")
@@ -31,20 +50,80 @@ def test_project_persists_reloads_and_reuses_runtime(tmp_path):
 def test_accepted_executor_revision_is_persisted(tmp_path):
     project = service(tmp_path).create_or_load_python_project("accepted-revision")
     root = Path(project.repository_root)
-    (root / "marker.txt").write_text("accepted\\n", encoding="utf-8")
-
-    subprocess.run(["git", "add", "marker.txt"], cwd=root, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "accepted revision"],
-        cwd=root,
-        check=True,
-    )
-    revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    revision = commit_on_branch(root, "rack-red", "marker.txt", "accepted\\n", "accepted revision")
 
     updated = service(tmp_path).record_trusted_revision(project.project_id, revision)
 
     assert updated.trusted_base_sha == revision
-    assert service(tmp_path).create_or_load_python_project(project.project_id).trusted_base_sha == revision
+    assert subprocess.run(["git", "rev-parse", "main"], cwd=root, check=True, capture_output=True, text=True).stdout.strip() == revision
+    reloaded = service(tmp_path).create_or_load_python_project(project.project_id)
+    assert reloaded.trusted_base_sha == revision
+    assert reloaded.binding().base_sha == revision
+
+
+def test_trusted_revision_rejects_non_descendant_commit(tmp_path):
+    environment = service(tmp_path)
+    project = environment.create_or_load_python_project("non-descendant")
+    root = Path(project.repository_root)
+    accepted = commit_on_branch(root, "rack-accepted", "accepted.txt", "accepted\\n", "accepted revision")
+    environment.record_trusted_revision(project.project_id, accepted)
+
+    subprocess.run(["git", "switch", "-c", "unrelated", project.trusted_base_sha], cwd=root, check=True)
+    unrelated = commit_file(root, "unrelated.txt", "unrelated\\n", "unrelated revision")
+    subprocess.run(["git", "switch", "main"], cwd=root, check=True)
+
+    with pytest.raises(ValueError, match="fast-forward"):
+        environment.record_trusted_revision(project.project_id, unrelated)
+    assert environment.repo.load(project.project_id).trusted_base_sha == accepted
+    assert subprocess.run(["git", "rev-parse", "main"], cwd=root, check=True, capture_output=True, text=True).stdout.strip() == accepted
+
+
+def test_trusted_revision_rejects_unknown_or_retired_project(tmp_path):
+    environment = service(tmp_path)
+    project = environment.create_or_load_python_project("promotion-state")
+
+    with pytest.raises(ValueError, match="unavailable"):
+        environment.record_trusted_revision(project.project_id, "a" * 40)
+
+    environment.retire(project.project_id)
+    with pytest.raises(ValueError, match="ready"):
+        environment.record_trusted_revision(project.project_id, project.trusted_base_sha)
+
+
+def test_metadata_is_unchanged_when_canonical_promotion_fails(tmp_path, monkeypatch):
+    environment = service(tmp_path)
+    project = environment.create_or_load_python_project("promotion-failure")
+    root = Path(project.repository_root)
+    candidate = commit_on_branch(root, "rack-candidate", "candidate.txt", "candidate\\n", "candidate revision")
+    original_git = environment._git
+
+    def fail_promotion(git_root, *args):
+        if args[0] == "update-ref" and args[1] == "refs/heads/main":
+            raise subprocess.CalledProcessError(1, ["git", *args])
+        return original_git(git_root, *args)
+
+    monkeypatch.setattr(environment, "_git", fail_promotion)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        environment.record_trusted_revision(project.project_id, candidate)
+    assert environment.repo.load(project.project_id).trusted_base_sha == project.trusted_base_sha
+    assert subprocess.run(["git", "rev-parse", "main"], cwd=root, check=True, capture_output=True, text=True).stdout.strip() == project.trusted_base_sha
+
+
+def test_metadata_persistence_failure_rolls_back_canonical_promotion(tmp_path, monkeypatch):
+    environment = service(tmp_path)
+    project = environment.create_or_load_python_project("metadata-failure")
+    root = Path(project.repository_root)
+    candidate = commit_on_branch(root, "rack-candidate", "candidate.txt", "candidate\\n", "candidate revision")
+
+    def fail_save(_project):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(environment.repo, "save", fail_save)
+
+    with pytest.raises(OSError, match="disk unavailable"):
+        environment.record_trusted_revision(project.project_id, candidate)
+    assert subprocess.run(["git", "rev-parse", "main"], cwd=root, check=True, capture_output=True, text=True).stdout.strip() == project.trusted_base_sha
 
 
 def test_invalid_or_missing_state_fails_closed(tmp_path):

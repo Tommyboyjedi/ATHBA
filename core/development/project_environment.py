@@ -130,16 +130,38 @@ class ProjectEnvironmentService:
         return project
 
     def record_trusted_revision(self, project_id: str, revision: str) -> DevelopmentProject:
-        """Persist an accepted executor revision before project retirement."""
+        """Promote an accepted executor revision into ATHBA project state."""
         if not isinstance(revision, str) or not revision.strip():
             raise ValueError("trusted revision must be non-empty")
         project = self._required(project_id)
         if project.status != "ready":
             raise ValueError("only ready projects can record a trusted revision")
         root = Path(project.repository_root)
-        self._git(root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+        canonical_ref = f"refs/heads/{project.default_ref}"
+        try:
+            self._git(root, "rev-parse", "--verify", f"{revision}^{{commit}}")
+            current_revision = self._git(root, "rev-parse", "--verify", f"{canonical_ref}^{{commit}}").strip()
+        except subprocess.CalledProcessError as error:
+            raise ValueError("project revision is unavailable") from error
+        if current_revision != project.trusted_base_sha:
+            raise ValueError("project canonical ref does not match trusted revision")
+        if not self._is_ancestor(root, current_revision, revision):
+            raise ValueError("trusted revision promotion must be fast-forward")
+
+        # Compare-and-swap ensures an unrelated ref change cannot be overwritten.
+        self._git(root, "update-ref", canonical_ref, revision, current_revision)
+        if self._git(root, "rev-parse", "--verify", canonical_ref).strip() != revision:
+            raise RuntimeError("project canonical ref promotion was not applied")
+
         updated = replace(project, trusted_base_sha=revision)
-        self.repo.save(updated)
+        try:
+            self.repo.save(updated)
+        except Exception:
+            try:
+                self._git(root, "update-ref", canonical_ref, current_revision, revision)
+            except subprocess.CalledProcessError as rollback_error:
+                raise RuntimeError("trusted revision metadata persistence failed after canonical promotion") from rollback_error
+            raise
         return updated
 
     def retire(self, project_id: str, *, remove_workspace: bool = False) -> DevelopmentProject:
@@ -181,3 +203,14 @@ class ProjectEnvironmentService:
     @staticmethod
     def _git(root: Path, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+    @staticmethod
+    def _is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+        result = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.returncode == 0

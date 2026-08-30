@@ -438,3 +438,19 @@ that commit, then submitted GREEN with `c2fb0cabc858f178c61ea3bec4a394365d84e458
 as the explicit base SHA. Rack AI returned the same baseline-mismatch error.
 The retained evidence is
 `state/pr17-independent-runs/pr17-e2e-20260830T002000Z/evidence.json`.
+
+## Canonical trusted-revision promotion proof (2026-08-30)
+
+ATHBA now promotes an accepted descendant revision to the generated project's
+canonical `main` ref using a compare-and-swap fast-forward update before
+persisting the matching trusted SHA. A fresh run,
+`pr17-e2e-20260830T011000Z`, accepted RED revision
+`fee14a4258d860f4f8c860568a6d943d729f877e`; ATHBA promoted both `main` and
+`project.json` to that exact SHA. Its GREEN request used that promoted SHA as
+its `base_sha`, and Rack AI proceeded to execute it rather than returning a
+baseline-mismatch rejection.
+
+That GREEN candidate failed its focused pytest acceptance and was not
+promoted. The TDD lane correctly remained at the accepted RED revision. The
+ATHBA-owned evidence is
+`state/pr17-independent-runs/pr17-e2e-20260830T011000Z/evidence.json`.

@@ -101,6 +101,7 @@ def run(command: list[str], *, cwd: Path) -> str:
 def prepare_target(environment: ProjectEnvironmentService, project: DevelopmentProject) -> tuple[DevelopmentProject, list[str]]:
     """Add only ATHBA-owned TDD seed material to a lifecycle-created repository."""
     target = Path(project.repository_root)
+    run(["git", "switch", "-c", "athba-tdd-seed"], cwd=target)
     (target / "scripts").mkdir(exist_ok=True)
     (target / "reservation_book.py").write_text("\"\"\"ReservationBook implementation is introduced through TDD.\"\"\"\n", encoding="utf-8")
     (target / "scripts" / "assert_test_fails.py").write_text(
@@ -110,6 +111,7 @@ def prepare_target(environment: ProjectEnvironmentService, project: DevelopmentP
     run(["git", "add", "."], cwd=target)
     run(["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "ATHBA ReservationBook TDD seed"], cwd=target)
     sha = run(["git", "rev-parse", "HEAD"], cwd=target).strip()
+    run(["git", "switch", "main"], cwd=target)
     return environment.record_trusted_revision(project.project_id, sha), ["reservation_book.py", "scripts/assert_test_fails.py"]
 
 
