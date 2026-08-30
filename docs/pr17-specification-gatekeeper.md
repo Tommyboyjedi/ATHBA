@@ -430,3 +430,11 @@ The ATHBA-owned evidence is
 proof runner now also retains each serialized generic Rack AI request together
 with its returned result or transport error, because the CLI adapter's temporary
 request file is deliberately removed after execution.
+
+The first evidence-recording retry, `pr17-e2e-20260830T002000Z`, captured the
+handoff directly. RED used seed `0bb3545bad0a9a937d2cd9ab4a88f5cba7ce83d4` and
+was accepted at `c2fb0cabc858f178c61ea3bec4a394365d84e458`. ATHBA persisted
+that commit, then submitted GREEN with `c2fb0cabc858f178c61ea3bec4a394365d84e458`
+as the explicit base SHA. Rack AI returned the same baseline-mismatch error.
+The retained evidence is
+`state/pr17-independent-runs/pr17-e2e-20260830T002000Z/evidence.json`.
