@@ -272,6 +272,26 @@ def test_state_persists_phase_and_revisions(tmp_path):
     assert loaded.behaviors["b1"].current_phase == TddPhase.COMPLETE.value
 
 
+def test_state_persists_repository_environment_resources(tmp_path):
+    repo = TddStateRepo(tmp_path)
+    snapshot = TddSnapshot(
+        project_id="task-queue",
+        repository_binding=RepositoryBinding(
+            repository_id="task-queue-fixture",
+            base_ref="main",
+            base_sha="c" * 40,
+            environment_resources=["/srv/env/python-314", "/srv/env/pytest"],
+        ),
+        current_trusted_revision="c" * 40,
+    )
+
+    repo.save(snapshot)
+    loaded = repo.load("task-queue")
+
+    assert loaded is not None
+    assert loaded.repository_binding.environment_resources == ["/srv/env/python-314", "/srv/env/pytest"]
+
+
 @pytest.mark.asyncio
 async def test_resume_does_not_rerun_completed_red(tmp_path):
     b1 = behavior("b1", "add task", "tests/test_task_queue.py::test_add_task")

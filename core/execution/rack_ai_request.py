@@ -26,6 +26,27 @@ class RepositoryBinding:
         for resource in self.environment_resources:
             _require_text(resource, "environment resource")
 
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "repository_id": self.repository_id,
+            "base_ref": self.base_ref,
+            "base_sha": self.base_sha,
+            "registered_root": self.registered_root,
+        }
+        if self.environment_resources:
+            payload["environment_resources"] = list(self.environment_resources)
+        return payload
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "RepositoryBinding":
+        return cls(
+            repository_id=str(payload["repository_id"]),
+            base_ref=str(payload["base_ref"]),
+            base_sha=_optional_text(payload.get("base_sha")),
+            registered_root=_optional_text(payload.get("registered_root")),
+            environment_resources=_resource_list(payload.get("environment_resources")),
+        )
+
     def with_base_sha(self, base_sha: str | None) -> "RepositoryBinding":
         if base_sha is None:
             return replace(self, base_sha=None)
@@ -136,6 +157,26 @@ class RackAiRequestFactory:
 
 def to_rack_ai_request(workload_id: str, binding: RepositoryBinding, unit: DevelopmentWorkUnit) -> dict[str, Any]:
     return RackAiRequestFactory().build(RackAiRequestBuildRequest(workload_id, binding, unit)).to_dict()
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if not text.strip():
+        raise ValueError("optional text values must be non-empty when present")
+    return text
+
+
+def _resource_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("environment resources must be a list when present")
+    resources = [str(item) for item in value]
+    for resource in resources:
+        _require_text(resource, "environment resource")
+    return resources
 
 
 def _require_text(value: str, label: str) -> None:

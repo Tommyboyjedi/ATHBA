@@ -17,12 +17,11 @@ class StartSpecBehavior:
     ]
 
     async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
-        if intent.intent not in self.intent:
+        llm_response = execution.intent
+        if llm_response.intent not in self.intent:
             return None
-
-        return [
-            ChatMessage(
-                sender=agent.name,
-                content="🧱 I've created the initial structure for the project specification. Please describe your first requirement.",
-            )
-        ]
+        content = llm_response.response or (
+            "🧱 I've created the initial structure for the project specification. "
+            "Please describe your first requirement."
+        )
+        return [ChatMessage(sender=execution.agent.name, content=content)]

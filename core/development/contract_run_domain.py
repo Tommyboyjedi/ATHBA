@@ -271,12 +271,7 @@ class BehaviorContractRunState:
     def to_dict(self) -> dict[str, Any]:
         return {
             "contract": self.contract.to_dict(),
-            "repository_binding": {
-                "repository_id": self.repository_binding.repository_id,
-                "base_ref": self.repository_binding.base_ref,
-                "base_sha": self.repository_binding.base_sha,
-                "registered_root": self.repository_binding.registered_root,
-            },
+            "repository_binding": self.repository_binding.to_dict(),
             "semantic_base_revision": self.semantic_base_revision,
             "current_pool": self.current_pool,
             "completed_requirement_refs": list(self.completed_requirement_refs),
@@ -290,15 +285,9 @@ class BehaviorContractRunState:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "BehaviorContractRunState":
-        binding = payload["repository_binding"]
         return cls(
             contract=BehaviorContract.from_dict(dict(payload["contract"])),
-            repository_binding=RepositoryBinding(
-                repository_id=str(binding["repository_id"]),
-                base_ref=str(binding["base_ref"]),
-                base_sha=binding.get("base_sha"),
-                registered_root=binding.get("registered_root"),
-            ),
+            repository_binding=RepositoryBinding.from_dict(dict(payload["repository_binding"])),
             semantic_base_revision=payload.get("semantic_base_revision"),
             current_pool=str(payload.get("current_pool", ContractPoolStatus.TDD_READY.value)),
             completed_requirement_refs=list_of_strings(payload.get("completed_requirement_refs", []), "completed requirement refs"),
@@ -337,12 +326,7 @@ class TddSnapshot:
     def to_dict(self) -> dict[str, Any]:
         return {
             "project_id": self.project_id,
-            "repository_binding": {
-                "repository_id": self.repository_binding.repository_id,
-                "base_ref": self.repository_binding.base_ref,
-                "base_sha": self.repository_binding.base_sha,
-                "registered_root": self.repository_binding.registered_root,
-            },
+            "repository_binding": self.repository_binding.to_dict(),
             "current_trusted_revision": self.current_trusted_revision,
             "completed_behavior_ids": list(self.completed_behavior_ids),
             "attempts": [attempt.to_dict() for attempt in self.attempts],
@@ -355,17 +339,11 @@ class TddSnapshot:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "TddSnapshot":
-        binding = payload["repository_binding"]
         from core.development.tdd_domain import TddBehaviorProgress
 
         return cls(
             project_id=str(payload["project_id"]),
-            repository_binding=RepositoryBinding(
-                repository_id=str(binding["repository_id"]),
-                base_ref=str(binding["base_ref"]),
-                base_sha=binding.get("base_sha"),
-                registered_root=binding.get("registered_root"),
-            ),
+            repository_binding=RepositoryBinding.from_dict(dict(payload["repository_binding"])),
             current_trusted_revision=payload.get("current_trusted_revision"),
             completed_behavior_ids=[str(item) for item in payload.get("completed_behavior_ids", [])],
             attempts=[ExecutionAttemptRecord.from_dict(item) for item in payload.get("attempts", [])],

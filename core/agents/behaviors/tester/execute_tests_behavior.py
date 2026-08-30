@@ -9,6 +9,7 @@ from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from datetime import datetime
 from core.dataclasses.history_entry import HistoryEntry
+from core.services.service_requests import TestRunRequest
 
 
 class ExecuteTestsBehavior:
@@ -84,9 +85,11 @@ class ExecuteTestsBehavior:
         
         # Execute tests
         results = await agent.test_service.run_tests(
-            agent.project.id,
-            test_files=test_files,
-            verbose=True
+            TestRunRequest(
+                project_id=agent.project.id,
+                test_files=test_files,
+                verbose=True,
+            )
         )
         
         # Update ticket with results

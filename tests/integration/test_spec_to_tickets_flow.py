@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from core.agents.architect_agent import ArchitectAgent
+from core.agents.interfaces import BehaviorExecution
 from core.agents.behaviors.spec.finalize_spec_behavior import FinalizeSpecBehavior
 from core.agents.spec_agent import SpecBuilderAgent
 from core.dataclasses.llm_intent import LlmIntent
@@ -36,7 +37,7 @@ async def test_spec_finalization_triggers_architect(sample_session, sample_spec_
             entities={},
         )
 
-        result = await finalize_behavior.run(spec_agent, "finalize the spec", intent)
+        result = await finalize_behavior.run(BehaviorExecution(agent=spec_agent, message="finalize the spec", intent=intent))
 
         assert result is not None
         assert len(result) > 0
@@ -69,7 +70,7 @@ async def test_full_workflow_spec_to_tickets(sample_session, sample_spec_documen
         mock_architect.run = AsyncMock(side_effect=mock_architect_run)
         MockArchitect.return_value = mock_architect
 
-        finalize_result = await finalize_behavior.run(spec_agent, "finalize spec", intent)
+        finalize_result = await finalize_behavior.run(BehaviorExecution(agent=spec_agent, message="finalize spec", intent=intent))
 
         assert finalize_result is not None
         assert "approved" in finalize_result[0].content
@@ -152,20 +153,20 @@ async def test_spec_approval_metadata_saved(sample_session, sample_spec_document
 
     update_calls = []
 
-    async def mock_update(filter_dict, update_dict, **kwargs):
-        update_calls.append((filter_dict, update_dict))
+    async def mock_update(request):
+        update_calls.append(request)
 
     spec_agent.spec_repo.update = mock_update
 
     with patch("core.agents.behaviors.spec.finalize_spec_behavior.ArchitectAgent"):
         intent = LlmIntent(response="", intent="finalize_spec", agents_routing=[], entities={})
-        await finalize_behavior.run(spec_agent, "finalize", intent)
+        await finalize_behavior.run(BehaviorExecution(agent=spec_agent, message="finalize", intent=intent))
 
         assert len(update_calls) == 1
-        filter_dict, update_dict = update_calls[0]
+        request = update_calls[0]
 
-        assert filter_dict["project_id"] == sample_session.project_id
-        assert filter_dict["version"] == 1
-        assert update_dict["approved"] is True
-        assert update_dict["approved_by"] == "human"
-        assert "approved_at" in update_dict
+        assert request.filter["project_id"] == sample_session.project_id
+        assert request.filter["version"] == 1
+        assert request.update["approved"] is True
+        assert request.update["approved_by"] == "human"
+        assert "approved_at" in request.update

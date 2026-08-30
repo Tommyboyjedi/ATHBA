@@ -239,3 +239,26 @@ def test_parse_rack_ai_result_prefers_explicit_accepted_revision_when_present():
         }
     )
     assert attempt.accepted_revision == "c" * 40
+
+
+def test_repository_binding_round_trip_preserves_optional_fields_and_resources():
+    restored = RepositoryBinding.from_dict(
+        {
+            "repository_id": "repo",
+            "base_ref": "main",
+            "base_sha": None,
+            "registered_root": None,
+            "environment_resources": ["/srv/environments/adaptos"],
+        }
+    )
+
+    assert restored.base_sha is None
+    assert restored.registered_root is None
+    assert restored.environment_resources == ["/srv/environments/adaptos"]
+    assert restored.to_dict() == {
+        "repository_id": "repo",
+        "base_ref": "main",
+        "base_sha": None,
+        "registered_root": None,
+        "environment_resources": ["/srv/environments/adaptos"],
+    }

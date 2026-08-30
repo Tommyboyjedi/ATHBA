@@ -177,12 +177,7 @@ class CoordinationSnapshot:
     def to_dict(self) -> dict[str, Any]:
         return {
             "project_id": self.project_id,
-            "repository_binding": {
-                "repository_id": self.repository_binding.repository_id,
-                "base_ref": self.repository_binding.base_ref,
-                "base_sha": self.repository_binding.base_sha,
-                "registered_root": self.repository_binding.registered_root,
-            },
+            "repository_binding": self.repository_binding.to_dict(),
             "current_trusted_revision": self.current_trusted_revision,
             "accepted_ids": sorted(self.accepted_ids),
             "attempts": [attempt.to_dict() for attempt in self.attempts],
@@ -193,15 +188,9 @@ class CoordinationSnapshot:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "CoordinationSnapshot":
-        binding_payload = dict(payload["repository_binding"])
         return cls(
             project_id=str(payload["project_id"]),
-            repository_binding=RepositoryBinding(
-                repository_id=str(binding_payload["repository_id"]),
-                base_ref=str(binding_payload["base_ref"]),
-                base_sha=str(binding_payload["base_sha"]),
-                registered_root=str(binding_payload["registered_root"]),
-            ),
+            repository_binding=RepositoryBinding.from_dict(dict(payload["repository_binding"])),
             current_trusted_revision=payload.get("current_trusted_revision"),
             accepted_ids={str(item) for item in payload.get("accepted_ids", [])},
             attempts=[ExecutionAttemptRecord.from_dict(item) for item in payload.get("attempts", [])],

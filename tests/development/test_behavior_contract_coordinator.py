@@ -12,6 +12,8 @@ from core.development.behavior_contract_coordinator import (
     ContractDeveloperWorkUnitFactory,
     ContractRepairWorkUnitFactory,
     ContractTesterWorkUnitFactory,
+    DependencyDecisionRequest,
+    DependencyPrerequisitePlanner,
     DynamicTddPlanner,
     GitReviewMaterialProvider,
     GitTesterRepositoryMaterialProvider,
@@ -22,6 +24,11 @@ from core.development.behavior_contract_coordinator import (
     SeniorReviewer,
     WorkUnitBuildRequest,
     _first_executable_gap,
+)
+from core.development.failure_progression import (
+    DependencyDisposition,
+    FailureClassification,
+    FailureObservation,
 )
 from core.development.tdd_progression import (
     BehaviorContract,
@@ -1887,3 +1894,66 @@ def test_targeted_gap_selection_skips_untraceable_checklist_item():
     )
 
     assert _first_executable_gap(contract(), gatekeeper_state) is traceable
+
+
+@pytest.mark.asyncio
+async def test_dependency_prerequisite_planner_sends_reasoning_request_boundary():
+    payload = contract_payload()
+    payload["observable_requirements"][1]["depends_on"] = ["RB-1"]
+    gateway = FakeReasoningGateway([
+        {
+            "disposition": "already_planned",
+            "parent_requirement_ref": "RB-2",
+            "prerequisite_refs": ["RB-1"],
+            "rationale": "The blocked behavior depends on the already planned setup requirement.",
+            "prerequisite_observable": None,
+        }
+    ])
+    evidence = FailureObservation(
+        source="pytest",
+        message="ImportError while collecting the blocked reservation test.",
+        evidence_refs=["tests/test_reservation_book.py::test_reserve_reduces_capacity"],
+        plausible=[FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE],
+        stderr="ImportError: missing reservation dependency",
+        status="checks_failed",
+    )
+
+    decision = await DependencyPrerequisitePlanner(gateway).decide(
+        DependencyDecisionRequest(
+            contract=BehaviorContract.from_dict(payload),
+            step=proposal("RB-2"),
+            evidence=evidence,
+            trusted_revision="f" * 40,
+        )
+    )
+
+    sent = gateway.requests[0]
+    prompt = json.loads(sent.prompt)
+    assert isinstance(sent, ReasoningRequest)
+    assert sent.purpose == "athba_dependency_prerequisite_decision"
+    assert sent.project_id == "reservation-book"
+    assert prompt["blocked_requirement_ref"] == "RB-2"
+    assert "ImportError while collecting the blocked reservation test." in sent.prompt
+    assert "test_reserve_reduces_capacity" in sent.prompt
+    assert decision.disposition is DependencyDisposition.ALREADY_PLANNED
+    assert decision.prerequisite_refs == ["RB-1"]
+
+
+def test_behavior_contract_run_state_round_trip_preserves_binding_resources():
+    restored = BehaviorContractRunState.from_dict(
+        BehaviorContractRunState(
+            contract=contract(),
+            repository_binding=RepositoryBinding(
+                repository_id="reservation-book-fixture",
+                base_ref="main",
+                base_sha="a" * 40,
+                environment_resources=["/srv/env/python-314", "/srv/env/pytest"],
+            ),
+            semantic_base_revision="a" * 40,
+            current_pool="tdd_ready",
+            completed_requirement_refs=[],
+            cycles=[],
+        ).to_dict()
+    )
+
+    assert restored.repository_binding.environment_resources == ["/srv/env/python-314", "/srv/env/pytest"]

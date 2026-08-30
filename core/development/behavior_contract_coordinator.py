@@ -509,7 +509,7 @@ class DependencyPrerequisitePlanner:
                 "schema": {"disposition": "already_planned|add_prerequisite|reject_dependency", "parent_requirement_ref": "string", "prerequisite_refs": ["string"], "prerequisite_observable": "string|null", "rationale": "string"},
             }, sort_keys=True),
         )
-        result = await self.gateway.reason(request)
+        result = await self.gateway.reason(reasoning_request)
         decision = DependencyDecision.from_dict(_json_object(result.text, label="dependency decision"))
         if decision.parent_requirement_ref != request.step.requirement_refs[0]:
             raise ValueError("dependency decision must retain the blocked requirement")

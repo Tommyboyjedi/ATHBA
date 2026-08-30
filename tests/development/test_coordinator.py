@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from core.development.progression import CoordinationSnapshot
 from core.datastore.repos.work_unit_state_repo import WorkUnitStateRepo
 from core.development.coordinator import DevelopmentCoordinator
 from core.development.work_unit_coordination import DevelopmentCoordinatorDependencies
@@ -197,3 +198,27 @@ def test_state_repo_round_trips_snapshot(tmp_path):
     assert loaded.attempts[0].change_id == "change-a"
     assert loaded.attempts[0].placement == {"worker_ids": ["worker-a"]}
     assert result.work_units["a"].status == WorkUnitStatus.ACCEPTED.value
+
+
+def test_coordination_snapshot_preserves_none_binding_fields_and_resources():
+    restored = CoordinationSnapshot.from_dict(
+        {
+            "project_id": "tiny-ticket",
+            "repository_binding": {
+                "repository_id": "tiny-ticket-fixture",
+                "base_ref": "main",
+                "base_sha": None,
+                "registered_root": None,
+                "environment_resources": ["/srv/env/python-314", "/srv/env/pytest"],
+            },
+            "current_trusted_revision": None,
+            "accepted_ids": [],
+            "attempts": [],
+            "work_units": {},
+        }
+    )
+
+    assert restored.repository_binding.base_sha is None
+    assert restored.repository_binding.registered_root is None
+    assert restored.repository_binding.environment_resources == ["/srv/env/python-314", "/srv/env/pytest"]
+    assert restored.to_dict()["repository_binding"]["environment_resources"] == ["/srv/env/python-314", "/srv/env/pytest"]

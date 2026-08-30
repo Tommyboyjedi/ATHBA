@@ -6,6 +6,7 @@ from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.history_entry import HistoryEntry
 from core.dataclasses.ticket_model import TicketModel
+from core.datastore.repos.mongo_requests import MongoFindRequest
 
 
 class AnalyzeSpecBehavior:
@@ -20,9 +21,11 @@ class AnalyzeSpecBehavior:
         if llm_response.intent not in self.intent:
             return None
         spec_versions = await agent.spec_repo.find(
-            {"project_id": agent.session.project_id},
-            [("version", -1)],
-            1,
+            MongoFindRequest(
+                filter={"project_id": agent.session.project_id},
+                sort=[("version", -1)],
+                limit=1,
+            )
         )
         if not spec_versions:
             return [
