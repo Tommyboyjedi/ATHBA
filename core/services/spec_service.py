@@ -1,5 +1,7 @@
-from core.datastore.repos.spec_version_repo import SpecVersionRepo
 from uuid import UUID
+
+from core.datastore.repos.mongo_requests import SpecVersionCreateRequest
+from core.datastore.repos.spec_version_repo import SpecVersionRepo
 
 
 class SpecService:
@@ -12,4 +14,6 @@ class SpecService:
 
     async def initialize_spec(self, project_id: str, author: str = "Spec"):
         content = "<h1>Specification</h1><p>Let's define what this system should do...</p>"
-        return await self.repo.add_version(project_id, content, author)
+        return await self.repo.add_version(
+            SpecVersionCreateRequest(project_id=project_id, content=content, author=author)
+        )

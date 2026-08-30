@@ -4,14 +4,14 @@ Execute Tests Behavior for Tester Agent.
 This behavior executes tests using pytest and captures results.
 """
 
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from datetime import datetime
 from core.dataclasses.history_entry import HistoryEntry
 
 
-class ExecuteTestsBehavior(AgentBehavior):
+class ExecuteTestsBehavior:
     """
     Behavior for executing tests with pytest.
     
@@ -24,7 +24,7 @@ class ExecuteTestsBehavior(AgentBehavior):
     
     intent = ["execute_tests", "run_tests", "test", "pytest"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the execute tests behavior.
         
@@ -36,6 +36,10 @@ class ExecuteTestsBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         

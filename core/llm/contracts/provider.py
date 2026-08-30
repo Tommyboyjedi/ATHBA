@@ -1,31 +1,44 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol
 
 
 @dataclass
 class NormalizedResult:
-    """Standardized response from an LLM provider."""
-
     text: str
     usage: Dict[str, int]
     raw: Dict[str, Any]
 
 
-class Provider(ABC):
-    """Abstract base class for LLM providers."""
+@dataclass(frozen=True)
+class ProviderRequest:
+    prompt: str
+    model: str | None
+    temperature: float = 0.0
+    max_tokens: int = 16
+    response_schema: Optional[Dict[str, Any]] = None
 
-    @abstractmethod
-    def invoke(
-        self,
-        prompt: str,
-        *,
-        model: str,
-        temperature: float = 0.0,
-        max_tokens: int = 16,
-        response_schema: Optional[Dict[str, Any]] = None,
-    ) -> NormalizedResult:
-        """Invoke the provider with a prompt and generation options."""
-        raise NotImplementedError
+
+@dataclass(frozen=True)
+class ProviderRetryPolicy:
+    timeout: float
+    max_retries: int
+    backoff_factor: float
+
+
+def build_provider_request(request_or_prompt: ProviderRequest | str, options: Dict[str, Any]) -> ProviderRequest:
+    if isinstance(request_or_prompt, ProviderRequest):
+        return request_or_prompt
+    return ProviderRequest(
+        prompt=request_or_prompt,
+        model=options.get("model"),
+        temperature=float(options.get("temperature", 0.0)),
+        max_tokens=int(options.get("max_tokens", 16)),
+        response_schema=options.get("response_schema"),
+    )
+
+
+class Provider(Protocol):
+    def invoke(self, request_or_prompt: ProviderRequest | str, **kwargs: Any) -> NormalizedResult:
+        ...

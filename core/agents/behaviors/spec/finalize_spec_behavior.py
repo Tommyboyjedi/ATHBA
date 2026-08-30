@@ -1,15 +1,22 @@
 import asyncio
 
 from core.agents.architect_agent import ArchitectAgent
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 
 
-class FinalizeSpecBehavior(AgentBehavior):
+class FinalizeSpecBehavior:
     intent = ["finalize_spec"]
 
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution_or_agent, *args) -> list[ChatMessage] | None:
+        execution = execution_or_agent
+        if not isinstance(execution, BehaviorExecution):
+            execution = BehaviorExecution(agent=execution_or_agent, message=args[0], intent=args[1])
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
 

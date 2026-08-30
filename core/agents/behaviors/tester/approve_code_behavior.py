@@ -4,14 +4,14 @@ Approve Code Behavior for Tester Agent.
 This behavior approves code that passes all tests and moves ticket to Done.
 """
 
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from datetime import datetime
 from core.dataclasses.history_entry import HistoryEntry
 
 
-class ApproveCodeBehavior(AgentBehavior):
+class ApproveCodeBehavior:
     """
     Behavior for approving code after tests pass.
     
@@ -24,7 +24,7 @@ class ApproveCodeBehavior(AgentBehavior):
     
     intent = ["approve_code", "approve", "accept_code", "lgtm"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the approve code behavior.
         
@@ -36,6 +36,10 @@ class ApproveCodeBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         

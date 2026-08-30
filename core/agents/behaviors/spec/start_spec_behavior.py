@@ -1,8 +1,8 @@
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 
 
-class StartSpecBehavior(AgentBehavior):
+class StartSpecBehavior:
     intent = [
         "start_spec",
         "begin_spec",
@@ -16,7 +16,7 @@ class StartSpecBehavior(AgentBehavior):
         "launch",
     ]
 
-    async def run(self, agent, content: str, intent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         if intent.intent not in self.intent:
             return None
 

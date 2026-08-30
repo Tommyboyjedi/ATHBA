@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from core.datastore.repos.mongo_requests import CodeFileSaveRequest
 from core.infra.mongo import get_mongo_db
 
 
@@ -28,9 +29,17 @@ class CodeRepo:
         doc = self.col.find_one({"project_id": project_id, "filename": filename})
         return doc["code"] if doc else ""
 
-    def save_file(self, project_id: str, filename: str, code: str):
+    def save_file(self, request_or_project_id, *args):
+        if isinstance(request_or_project_id, CodeFileSaveRequest):
+            request = request_or_project_id
+        else:
+            request = CodeFileSaveRequest(
+                project_id=request_or_project_id,
+                filename=args[0],
+                code=args[1],
+            )
         self.col.update_one(
-            {"project_id": project_id, "filename": filename},
-            {"$set": {"code": code, "updated_at": datetime.utcnow()}},
+            {"project_id": request.project_id, "filename": request.filename},
+            {"$set": {"code": request.code, "updated_at": datetime.utcnow()}},
             upsert=True,
         )

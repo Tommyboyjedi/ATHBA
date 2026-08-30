@@ -1,13 +1,17 @@
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.agents.spec_agent import SpecBuilderAgent
 from core.dataclasses.agent_message import AgentMessage
 from core.dataclasses.llm_intent import LlmIntent
 
 
-class ChangeSpecBehavior(AgentBehavior):
+class ChangeSpecBehavior:
     intent = ["change_spec"]
 
-    async def run(self, agent: SpecBuilderAgent, user_input: str, llm_response: LlmIntent) -> AgentMessage | None:
+    async def run(self, execution: BehaviorExecution) -> AgentMessage | None:
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
 

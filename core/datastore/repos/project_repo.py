@@ -38,6 +38,10 @@ class ProjectRepo:
         cursor = self.collection.find({})
         return [Project(**doc) async for doc in cursor]
 
+    async def list_active(self) -> list[Project]:
+        cursor = self.collection.find({"active": True})
+        return [Project(**doc) async for doc in cursor]
+
     async def create(self, name: str) -> Project:
         now = datetime.utcnow()
         new_doc = {

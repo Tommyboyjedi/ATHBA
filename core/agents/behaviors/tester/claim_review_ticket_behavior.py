@@ -5,13 +5,13 @@ This behavior allows the Tester agent to claim tickets from the Review column.
 """
 
 from datetime import datetime
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from core.dataclasses.history_entry import HistoryEntry
 
 
-class ClaimReviewTicketBehavior(AgentBehavior):
+class ClaimReviewTicketBehavior:
     """
     Behavior for claiming a ticket from the Review column.
     
@@ -25,7 +25,7 @@ class ClaimReviewTicketBehavior(AgentBehavior):
     
     intent = ["claim_review", "claim_ticket", "review_ticket"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the claim review ticket behavior.
         
@@ -37,6 +37,10 @@ class ClaimReviewTicketBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         

@@ -1,8 +1,8 @@
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 
-class AddToSpecBehavior(AgentBehavior):
-    async def run(self, agent, content: str, intent) -> list[ChatMessage]:
+class AddToSpecBehavior:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage]:
         if intent.intent != "add_to_spec":
             return []
 

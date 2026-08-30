@@ -1,15 +1,19 @@
 import uuid
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.agents.pm_agent import PmAgent
 from core.dataclasses.agent_message import AgentMessage
 from core.dataclasses.llm_intent import LlmIntent
 from core.services.project_service import ProjectsService
 
 
-class RenameProjectBehavior(AgentBehavior):
+class RenameProjectBehavior:
     intent = ["rename_project", "change_project_name", "update_project_name"]
 
-    async def run(self, agent: PmAgent, user_input: str, llm_response: LlmIntent) -> AgentMessage | None:
+    async def run(self, execution: BehaviorExecution) -> AgentMessage | None:
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         project_id = str(agent.session.project_id)

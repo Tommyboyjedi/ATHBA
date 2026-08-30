@@ -5,13 +5,13 @@ This behavior generates code to implement a ticket using the LLM.
 """
 
 from datetime import datetime
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from core.dataclasses.history_entry import HistoryEntry
 
 
-class GenerateCodeBehavior(AgentBehavior):
+class GenerateCodeBehavior:
     """
     Behavior for generating code to implement a ticket following Uncle Bob's Law #3.
     
@@ -27,7 +27,7 @@ class GenerateCodeBehavior(AgentBehavior):
     
     intent = ["generate_code"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the generate code behavior.
         
@@ -39,6 +39,10 @@ class GenerateCodeBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
@@ -140,13 +144,8 @@ EXPLANATION: <brief explanation>
 Generate the minimal implementation:"""
         
         try:
-            from core.agents.helpers.llm_exchange import LlmExchange
-            llm_exchange = LlmExchange(
-                agent=agent,
-                session=agent.session,
-                content=code_prompt,
-                use_cloud=False  # Use local LLM for code generation
-            )
+            from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
+            llm_exchange = LlmExchange(LlmExchangeRequest(agent=agent, session=agent.session, content=code_prompt, use_cloud=False))
             
             generated_code = await llm_exchange.get_response()
         except Exception as e:

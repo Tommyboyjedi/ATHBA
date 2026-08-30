@@ -1,9 +1,14 @@
 import json
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from pymongo import DESCENDING
 
+from core.datastore.repos.mongo_requests import (
+    MongoFindRequest,
+    MongoUpdateRequest,
+    SpecVersionCreateRequest,
+)
 from core.infra.mongo import get_mongo_db
 
 
@@ -51,16 +56,30 @@ class SpecVersionRepo:
         result = await self._collection.insert_one(doc)
         return str(result.inserted_id)
 
-    async def update(self, filter: dict, update: dict, upsert: bool = False):
-        return await self._collection.update_one(filter, {"$set": update}, upsert=upsert)
+    async def update(self, request_or_filter, *args):
+        request = request_or_filter
+        if not isinstance(request, MongoUpdateRequest):
+            update = args[0]
+            upsert = args[1] if len(args) > 1 else False
+            request = MongoUpdateRequest(filter=request_or_filter, update=update, upsert=upsert)
+        return await self._collection.update_one(
+            request.filter,
+            {"$set": request.update},
+            upsert=request.upsert,
+        )
 
-    async def find(self, filter: dict, sort=None, limit=0):
-        cursor = self._collection.find(filter)
-        if sort:
-            cursor = cursor.sort(sort)
-        if limit:
-            cursor = cursor.limit(limit)
-        return await cursor.to_list(length=limit or 100)
+    async def find(self, request_or_filter, *args):
+        request = request_or_filter
+        if not isinstance(request, MongoFindRequest):
+            sort = args[0] if len(args) > 0 else []
+            limit = args[1] if len(args) > 1 else 0
+            request = MongoFindRequest(filter=request_or_filter, sort=sort or [], limit=limit)
+        cursor = self._collection.find(request.filter)
+        if request.sort:
+            cursor = cursor.sort(request.sort)
+        if request.limit:
+            cursor = cursor.limit(request.limit)
+        return await cursor.to_list(length=request.limit or 100)
 
     def _normalize_content(self, content: Any) -> Dict[str, Any]:
         if isinstance(content, dict):
@@ -85,15 +104,18 @@ class SpecVersionRepo:
             "meta": {"migratedFrom": "unknown"},
         }
 
-    async def add_version(self, project_id: str, content: Any, author: str, diff: Optional[str] = None):
-        latest = await self._collection.find_one({"project_id": project_id}, sort=[("version", DESCENDING)])
+    async def add_version(self, request: SpecVersionCreateRequest):
+        latest = await self._collection.find_one(
+            {"project_id": request.project_id},
+            sort=[("version", DESCENDING)],
+        )
         next_version = (latest["version"] + 1) if latest else 1
         return await self.insert(
             {
-                "project_id": project_id,
+                "project_id": request.project_id,
                 "version": next_version,
-                "content": self._normalize_content(content),
-                "author": author,
-                "diff": diff,
+                "content": self._normalize_content(request.content),
+                "author": request.author,
+                "diff": request.diff,
             }
         )
