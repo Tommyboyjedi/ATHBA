@@ -81,6 +81,6 @@ Scope: application-owned Python under `athba/`, `core/`, and `llm_service/`
   - Target responsibility: durable execution evidence for Session 6.
   - Implementation evidence: this ledger captures the audit, validation results, and milestone SHAs.
   - Tests: N/A
-  - Commit SHA: `PENDING_DOC_COMMIT`
+  - Commit SHA: `0e00663`
 
 INCOMPLETE_ITEMS = NONE
