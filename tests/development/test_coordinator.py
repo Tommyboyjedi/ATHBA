@@ -4,6 +4,7 @@ import pytest
 
 from core.datastore.repos.work_unit_state_repo import WorkUnitStateRepo
 from core.development.coordinator import DevelopmentCoordinator
+from core.development.work_unit_coordination import DevelopmentCoordinatorDependencies
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
@@ -66,7 +67,7 @@ async def test_coordinator_executes_dependency_chain_with_accepted_revision_prog
         }
     )
     repo = WorkUnitStateRepo(tmp_path)
-    result = await DevelopmentCoordinator(gateway, binding(), repo).run([unit("a"), unit("b", ["a"])])
+    result = await DevelopmentCoordinator(DevelopmentCoordinatorDependencies(gateway=gateway, repository_binding=binding(), state_repo=repo)).run([unit("a"), unit("b", ["a"])])
 
     assert gateway.calls == [("a", "a" * 40), ("b", "b" * 40)]
     assert result.accepted_ids == {"a", "b"}
@@ -89,7 +90,7 @@ async def test_rejected_unit_blocks_progress_without_advancing_base(tmp_path):
         }
     )
     repo = WorkUnitStateRepo(tmp_path)
-    result = await DevelopmentCoordinator(gateway, binding(), repo).run([unit("a"), unit("b", ["a"])])
+    result = await DevelopmentCoordinator(DevelopmentCoordinatorDependencies(gateway=gateway, repository_binding=binding(), state_repo=repo)).run([unit("a"), unit("b", ["a"])])
 
     assert gateway.calls == [("a", "a" * 40)]
     assert result.accepted_ids == set()
@@ -111,7 +112,7 @@ async def test_accepted_result_without_revision_fails_closed_for_progression(tmp
         }
     )
     repo = WorkUnitStateRepo(tmp_path)
-    result = await DevelopmentCoordinator(gateway, binding(), repo).run([unit("a"), unit("b", ["a"])])
+    result = await DevelopmentCoordinator(DevelopmentCoordinatorDependencies(gateway=gateway, repository_binding=binding(), state_repo=repo)).run([unit("a"), unit("b", ["a"])])
 
     assert gateway.calls == [("a", "a" * 40)]
     assert result.accepted_ids == {"a"}
@@ -124,7 +125,7 @@ async def test_accepted_result_without_revision_fails_closed_for_progression(tmp
 async def test_transport_failure_blocks_without_advancing_base(tmp_path):
     gateway = FakeGateway(transport_error_for="a")
     repo = WorkUnitStateRepo(tmp_path)
-    result = await DevelopmentCoordinator(gateway, binding(), repo).run([unit("a"), unit("b", ["a"])])
+    result = await DevelopmentCoordinator(DevelopmentCoordinatorDependencies(gateway=gateway, repository_binding=binding(), state_repo=repo)).run([unit("a"), unit("b", ["a"])])
 
     assert gateway.calls == [("a", "a" * 40)]
     assert result.blocked_unit_id == "a"
@@ -151,12 +152,12 @@ async def test_resume_skips_already_accepted_units_and_uses_persisted_revision(t
             ),
         }
     )
-    first = await DevelopmentCoordinator(first_gateway, binding(), repo).run([unit("a"), unit("b", ["a"])])
+    first = await DevelopmentCoordinator(DevelopmentCoordinatorDependencies(gateway=first_gateway, repository_binding=binding(), state_repo=repo)).run([unit("a"), unit("b", ["a"])])
     assert first_gateway.calls == [("a", "a" * 40), ("b", "b" * 40)]
     assert first.blocked_unit_id == "b"
 
     second_gateway = FakeGateway()
-    resumed = await DevelopmentCoordinator(second_gateway, binding(), repo).run([unit("a"), unit("b", ["a"])])
+    resumed = await DevelopmentCoordinator(DevelopmentCoordinatorDependencies(gateway=second_gateway, repository_binding=binding(), state_repo=repo)).run([unit("a"), unit("b", ["a"])])
     assert second_gateway.calls == []
     assert resumed.blocked_unit_id == "b"
     assert resumed.accepted_ids == {"a"}
@@ -184,7 +185,7 @@ def test_state_repo_round_trips_snapshot(tmp_path):
     )
 
     async def _run():
-        return await DevelopmentCoordinator(fake_gateway, binding(), snapshot_repo).run([unit("a")])
+        return await DevelopmentCoordinator(DevelopmentCoordinatorDependencies(gateway=fake_gateway, repository_binding=binding(), state_repo=snapshot_repo)).run([unit("a")])
 
     import asyncio
 

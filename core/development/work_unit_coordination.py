@@ -7,7 +7,14 @@ from datetime import UTC, datetime
 from typing import Iterable, Protocol
 
 from core.datastore.repos.work_unit_state_repo import WorkUnitStateRepo
-from core.development.progression import CoordinationSnapshot, ExecutionAttemptRecord, WorkUnitProgress
+from core.development.progression import (
+    CoordinationSnapshot,
+    ExecutionAttemptRecord,
+    ExecutionAttemptRequest,
+    TransportFailureRequest,
+    WorkUnitProgress,
+    WorkUnitProgressRequest,
+)
 from core.development.work_unit import DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway
@@ -51,36 +58,11 @@ class CoordinationContext:
 class DevelopmentCoordinator:
     """Advance dependency-aware work one accepted unit at a time."""
 
-    def __init__(
-        self,
-        gateway: WorkUnitExecutionGateway,
-        repository_binding: RepositoryBinding,
-        *legacy: object,
-    ):
-        self.dependencies = _coordinator_dependencies(
-            gateway,
-            repository_binding,
-            legacy,
-        )
+    def __init__(self, dependencies: DevelopmentCoordinatorDependencies):
+        self.dependencies = dependencies
 
     async def run(self, units: Iterable[DevelopmentWorkUnit]) -> CoordinationResult:
         return await _run_units(self.dependencies, list(units))
-
-
-def _coordinator_dependencies(
-    gateway: WorkUnitExecutionGateway,
-    repository_binding: RepositoryBinding,
-    legacy: tuple[object, ...],
-) -> DevelopmentCoordinatorDependencies:
-    if len(legacy) > 1:
-        raise TypeError(
-            "DevelopmentCoordinator accepts gateway, repository_binding, and at most one legacy state repository"
-        )
-    return DevelopmentCoordinatorDependencies(
-        gateway=gateway,
-        repository_binding=repository_binding,
-        state_repo=legacy[0] if legacy else WorkUnitStateRepo(),
-    )
 
 
 async def _run_units(
@@ -128,9 +110,7 @@ async def _run_ready_unit(
 ) -> tuple[CoordinationContext, CoordinationResult | None]:
     base_sha = context.current_binding.base_sha
     running = WorkUnitProgress.from_unit(
-        ready,
-        status=WorkUnitStatus.RUNNING,
-        last_base_sha=base_sha,
+        WorkUnitProgressRequest(unit=ready, status=WorkUnitStatus.RUNNING, last_base_sha=base_sha)
     )
     context = replace(context, work_units={**context.work_units, ready.id: running})
     recorded_at = _utc_now()
@@ -138,15 +118,15 @@ async def _run_ready_unit(
         result = await deps.gateway.execute(ready, context.current_binding)
     except Exception as error:
         attempt = ExecutionAttemptRecord.transport_failure(
-            ready.id,
-            base_sha=base_sha,
-            recorded_at=recorded_at,
-            error=str(error),
+            TransportFailureRequest(
+                work_unit_id=ready.id,
+                base_sha=base_sha,
+                recorded_at=recorded_at,
+                error=str(error),
+            )
         )
         failed = WorkUnitProgress.from_unit(
-            ready,
-            status=WorkUnitStatus.FAILED,
-            last_base_sha=base_sha,
+            WorkUnitProgressRequest(unit=ready, status=WorkUnitStatus.FAILED, last_base_sha=base_sha)
         )
         context = replace(
             context,
@@ -155,24 +135,22 @@ async def _run_ready_unit(
         )
         return context, _blocked_result(context, ready.id, "work-unit transport failure")
     attempt = ExecutionAttemptRecord.from_result(
-        result,
-        base_sha=base_sha,
-        recorded_at=recorded_at,
+        ExecutionAttemptRequest(result=result, base_sha=base_sha, recorded_at=recorded_at)
     )
     context = replace(context, attempts=[*context.attempts, attempt])
     if not result.accepted:
         rejected = WorkUnitProgress.from_unit(
-            ready,
-            status=_terminal_status_for_result(result.status),
-            last_base_sha=base_sha,
+            WorkUnitProgressRequest(
+                unit=ready,
+                status=_terminal_status_for_result(result.status),
+                last_base_sha=base_sha,
+            )
         )
         context = replace(context, work_units={**context.work_units, ready.id: rejected})
         reason = f"work unit returned structured non-accepted result: {result.status}"
         return context, _blocked_result(context, ready.id, reason)
     accepted = WorkUnitProgress.from_unit(
-        ready,
-        status=WorkUnitStatus.ACCEPTED,
-        last_base_sha=base_sha,
+        WorkUnitProgressRequest(unit=ready, status=WorkUnitStatus.ACCEPTED, last_base_sha=base_sha)
     )
     context = replace(
         context,
@@ -196,7 +174,10 @@ def _coordination_context(
 ) -> CoordinationContext:
     work_units = dict(snapshot.work_units) if snapshot else {}
     for unit in units:
-        work_units.setdefault(unit.id, WorkUnitProgress.from_unit(unit, status=unit.status))
+        work_units.setdefault(
+            unit.id,
+            WorkUnitProgress.from_unit(WorkUnitProgressRequest(unit=unit, status=unit.status)),
+        )
     return CoordinationContext(
         project_id=units[0].project_id,
         accepted_ids=set(snapshot.accepted_ids) if snapshot else set(),

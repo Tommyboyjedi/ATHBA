@@ -11,6 +11,28 @@ from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
 
 @dataclass(frozen=True)
+class WorkUnitProgressRequest:
+    unit: DevelopmentWorkUnit
+    status: str | WorkUnitStatus
+    last_base_sha: str | None = None
+
+
+@dataclass(frozen=True)
+class ExecutionAttemptRequest:
+    result: WorkUnitExecutionResult
+    base_sha: str | None
+    recorded_at: str
+
+
+@dataclass(frozen=True)
+class TransportFailureRequest:
+    work_unit_id: str
+    base_sha: str | None
+    recorded_at: str
+    error: str
+
+
+@dataclass(frozen=True)
 class WorkUnitProgress:
     work_unit_id: str
     project_id: str
@@ -21,21 +43,16 @@ class WorkUnitProgress:
     last_base_sha: str | None = None
 
     @classmethod
-    def from_unit(
-        cls,
-        unit: DevelopmentWorkUnit,
-        *,
-        status: str | WorkUnitStatus,
-        last_base_sha: str | None = None,
-    ) -> "WorkUnitProgress":
+    def from_unit(cls, request: WorkUnitProgressRequest) -> "WorkUnitProgress":
+        status = request.status.value if isinstance(request.status, WorkUnitStatus) else request.status
         return cls(
-            work_unit_id=unit.id,
-            project_id=unit.project_id,
-            parent_ticket_id=unit.parent_ticket_id,
-            objective=unit.objective,
-            depends_on=list(unit.depends_on),
-            status=str(status.value if isinstance(status, WorkUnitStatus) else status),
-            last_base_sha=last_base_sha,
+            work_unit_id=request.unit.id,
+            project_id=request.unit.project_id,
+            parent_ticket_id=request.unit.parent_ticket_id,
+            objective=request.unit.objective,
+            depends_on=list(request.unit.depends_on),
+            status=str(status),
+            last_base_sha=request.last_base_sha,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -79,45 +96,32 @@ class ExecutionAttemptRecord:
     error: str | None = None
 
     @classmethod
-    def from_result(
-        cls,
-        result: WorkUnitExecutionResult,
-        *,
-        base_sha: str | None,
-        recorded_at: str,
-    ) -> "ExecutionAttemptRecord":
+    def from_result(cls, request: ExecutionAttemptRequest) -> "ExecutionAttemptRecord":
         return cls(
-            work_unit_id=result.work_unit_id,
-            base_sha=base_sha,
-            accepted=result.accepted,
-            status=result.status,
-            recorded_at=recorded_at,
-            change_id=result.change_id,
-            accepted_revision=result.accepted_revision,
-            evidence_location=result.evidence_location,
-            branch=result.branch,
-            worktree_path=result.worktree_path,
-            selected_worker_id=result.selected_worker_id,
-            placement=dict(result.placement) if result.placement is not None else None,
-            error=result.error,
+            work_unit_id=request.result.work_unit_id,
+            base_sha=request.base_sha,
+            accepted=request.result.accepted,
+            status=request.result.status,
+            recorded_at=request.recorded_at,
+            change_id=request.result.change_id,
+            accepted_revision=request.result.accepted_revision,
+            evidence_location=request.result.evidence_location,
+            branch=request.result.branch,
+            worktree_path=request.result.worktree_path,
+            selected_worker_id=request.result.selected_worker_id,
+            placement=dict(request.result.placement) if request.result.placement is not None else None,
+            error=request.result.error,
         )
 
     @classmethod
-    def transport_failure(
-        cls,
-        work_unit_id: str,
-        *,
-        base_sha: str | None,
-        recorded_at: str,
-        error: str,
-    ) -> "ExecutionAttemptRecord":
+    def transport_failure(cls, request: TransportFailureRequest) -> "ExecutionAttemptRecord":
         return cls(
-            work_unit_id=work_unit_id,
-            base_sha=base_sha,
+            work_unit_id=request.work_unit_id,
+            base_sha=request.base_sha,
             accepted=False,
             status="transport_error",
-            recorded_at=recorded_at,
-            error=error,
+            recorded_at=request.recorded_at,
+            error=request.error,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -189,25 +193,19 @@ class CoordinationSnapshot:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "CoordinationSnapshot":
-        binding = payload["repository_binding"]
+        binding_payload = dict(payload["repository_binding"])
         return cls(
             project_id=str(payload["project_id"]),
             repository_binding=RepositoryBinding(
-                repository_id=str(binding["repository_id"]),
-                base_ref=str(binding["base_ref"]),
-                base_sha=binding.get("base_sha"),
-                registered_root=binding.get("registered_root"),
+                repository_id=str(binding_payload["repository_id"]),
+                base_ref=str(binding_payload["base_ref"]),
+                base_sha=str(binding_payload["base_sha"]),
+                registered_root=str(binding_payload["registered_root"]),
             ),
             current_trusted_revision=payload.get("current_trusted_revision"),
             accepted_ids={str(item) for item in payload.get("accepted_ids", [])},
-            attempts=[
-                ExecutionAttemptRecord.from_dict(item)
-                for item in payload.get("attempts", [])
-            ],
-            work_units={
-                str(key): WorkUnitProgress.from_dict(value)
-                for key, value in payload.get("work_units", {}).items()
-            },
+            attempts=[ExecutionAttemptRecord.from_dict(item) for item in payload.get("attempts", [])],
+            work_units={str(key): WorkUnitProgress.from_dict(value) for key, value in payload.get("work_units", {}).items()},
             blocked_unit_id=payload.get("blocked_unit_id"),
             blocked_reason=payload.get("blocked_reason"),
         )

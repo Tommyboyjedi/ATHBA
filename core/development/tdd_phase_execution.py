@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from core.development.progression import ExecutionAttemptRecord
+from core.development.progression import ExecutionAttemptRecord, ExecutionAttemptRequest, TransportFailureRequest
 from core.development.tdd_progression import TddPhase, TddPhaseState
 from core.development.work_unit import DevelopmentWorkUnit
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -41,10 +41,12 @@ class TddPhaseExecutor:
             result = await self.gateway.execute(request.work_unit, request.base_binding)
         except Exception as error:
             attempt = ExecutionAttemptRecord.transport_failure(
-                request.work_unit.id,
-                base_sha=base_sha,
-                recorded_at=recorded_at,
-                error=str(error),
+                TransportFailureRequest(
+                    work_unit_id=request.work_unit.id,
+                    base_sha=base_sha,
+                    recorded_at=recorded_at,
+                    error=str(error),
+                )
             )
             return PhaseOutcome(
                 attempt=attempt,
@@ -53,9 +55,7 @@ class TddPhaseExecutor:
                 blocked_reason=f"{request.phase.value} phase transport failure",
             )
         attempt = ExecutionAttemptRecord.from_result(
-            result,
-            base_sha=base_sha,
-            recorded_at=recorded_at,
+            ExecutionAttemptRequest(result=result, base_sha=base_sha, recorded_at=recorded_at)
         )
         phase_state = phase_state_from_result(request, recorded_at, result)
         if not result.accepted:
