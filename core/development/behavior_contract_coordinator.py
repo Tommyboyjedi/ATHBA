@@ -12,6 +12,15 @@ from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from core.datastore.repos.tdd_state_repo import TddStateRepo
+from core.development.failure_progression import (
+    FailureClassification,
+    FailureObservation,
+    FailureProgressState,
+    FailureProgressionPolicy,
+    FailureRouteState,
+    PacketKind,
+    RepairPacket,
+)
 from core.development.tdd_coordinator import (
     RED_ALREADY_SATISFIED_FRAGMENT,
     TddStateRepository,
@@ -377,6 +386,9 @@ class DynamicTddPlanner:
             raise ValueError("step proposal referenced a requirement outside the contract")
         if proposal_ref in approved_ref_set:
             raise ValueError("step proposal repeated a requirement that is already semantically covered")
+        ready_refs = set(contract.ready_requirement_refs(run_state.completed_requirement_refs))
+        if proposal_ref not in ready_refs:
+            raise ValueError("step proposal selected a requirement whose prerequisites are not semantically approved")
         if proposal.test_path not in contract.test_paths:
             raise ValueError("step proposal test path is outside the contract")
         if proposal.production_path not in contract.production_paths:
@@ -518,6 +530,9 @@ class BehaviorContractCoordinator:
         max_semantic_repairs: int = 2,
         gatekeeper: SpecificationGatekeeper | None = None,
         gap_adapter: SpecificationGapTddAdapter | None = None,
+        failure_policy: FailureProgressionPolicy | None = None,
+        max_tester_repairs: int = 2,
+        max_developer_repairs: int = 2,
     ):
         self.execution_gateway = execution_gateway
         self.reasoning_gateway = reasoning_gateway
@@ -537,6 +552,9 @@ class BehaviorContractCoordinator:
         self.max_semantic_repairs = max_semantic_repairs
         self.gatekeeper = gatekeeper
         self.gap_adapter = gap_adapter
+        self.failure_policy = failure_policy or FailureProgressionPolicy()
+        self.max_tester_repairs = max_tester_repairs
+        self.max_developer_repairs = max_developer_repairs
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
         project_id = contract.project_id
@@ -674,14 +692,17 @@ class BehaviorContractCoordinator:
                             )
                             snapshot = self._save_run_state(snapshot, run_state)
                             continue
-                        run_state = replace(
-                            run_state,
-                            current_pool="replan_ready",
-                            contract=replace(contract, status="replan_ready"),
-                            blocked_reason=red_outcome.blocked_reason,
-                            cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, red_phase=red_outcome.phase_state, pool="replan_ready")),
+                        run_state = self._route_failed_candidate(
+                            run_state=run_state,
+                            contract=contract,
+                            cycle=cycle,
+                            phase=TddPhase.RED,
+                            work_unit=self.tester_factory.build(contract, cycle.step, self._repository_material(contract, run_state)),
+                            outcome=red_outcome,
                         )
                         snapshot = self._save_run_state(snapshot, run_state)
+                        if run_state.current_pool == "cycle_active":
+                            continue
                         return self._result_from_run_state(run_state)
                     cycle = replace(cycle, red_phase=red_outcome.phase_state)
                     run_state = replace(run_state, cycles=self._replace_current_cycle(run_state.cycles, cycle))
@@ -698,14 +719,21 @@ class BehaviorContractCoordinator:
                         base_binding=base_binding,
                     )
                     if not green_outcome.accepted:
-                        run_state = replace(
-                            run_state,
-                            current_pool="replan_ready",
-                            contract=replace(contract, status="replan_ready"),
-                            blocked_reason=green_outcome.blocked_reason,
-                            cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, green_phase=green_outcome.phase_state, pool="replan_ready")),
+                        run_state = self._route_failed_candidate(
+                            run_state=run_state,
+                            contract=contract,
+                            cycle=cycle,
+                            phase=TddPhase.GREEN,
+                            work_unit=self.developer_factory.build(
+                                contract,
+                                cycle.step,
+                                self._repository_material(contract, run_state, cycle.red_phase.accepted_revision if cycle.red_phase else None),
+                            ),
+                            outcome=green_outcome,
                         )
                         snapshot = self._save_run_state(snapshot, run_state)
+                        if run_state.current_pool == "cycle_active":
+                            continue
                         return self._result_from_run_state(run_state)
                     cycle = replace(
                         cycle,
@@ -884,6 +912,106 @@ class BehaviorContractCoordinator:
             blocked_reason=run_state.blocked_reason,
         )
 
+    def _route_failed_candidate(
+        self,
+        *,
+        run_state: BehaviorContractRunState,
+        contract: BehaviorContract,
+        cycle: ContractCycleRecord,
+        phase: TddPhase,
+        work_unit: DevelopmentWorkUnit,
+        outcome: _PhaseOutcome,
+    ) -> BehaviorContractRunState:
+        """Persist one dominant policy decision before any retry or stop."""
+        observation = self._failure_observation(phase, outcome)
+        decision = self.failure_policy.decide([observation])
+        role = "Tester" if phase is TddPhase.RED else "Developer"
+        route = "tester_repair" if role == "Tester" else "developer_repair"
+        budget = self.max_tester_repairs if role == "Tester" else self.max_developer_repairs
+        packet = RepairPacket(
+            kind=PacketKind.REPAIR,
+            role=role,
+            work_unit_id=work_unit.id,
+            trusted_revision=run_state.semantic_base_revision if phase is TddPhase.RED else (cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision),
+            original_objective=work_unit.objective,
+            allowed_paths=list(work_unit.allowed_paths),
+            classification=decision.dominant,
+            previous_candidate=observation.candidate_revision,
+            evidence=[observation.message, *observation.evidence_refs],
+        )
+
+        if decision.action.value in {"repair_tester", "repair_developer", "repair_regression"} and self.failure_policy.retry_allowed(run_state.failure_progress, route, budget=budget):
+            progress = self.failure_policy.record(
+                run_state.failure_progress,
+                decision,
+                route=route,
+                packet=packet,
+                next_state=FailureRouteState.AWAITING_REPAIR,
+            )
+            replacement = replace(cycle, pool="cycle_active", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state}))
+            return replace(
+                run_state,
+                current_pool="cycle_active",
+                contract=replace(contract, status="cycle_active"),
+                blocked_reason=f"{decision.dominant.value}: retrying {role} from trusted revision",
+                cycles=self._replace_current_cycle(run_state.cycles, replacement),
+                failure_progress=progress,
+            )
+
+        next_state = _route_state_for_failure(decision.dominant)
+        progress = self.failure_policy.record(
+            run_state.failure_progress,
+            decision,
+            packet=packet,
+            next_state=next_state,
+            blocker=observation.message if next_state.name.startswith("BLOCKED") else None,
+        )
+        return replace(
+            run_state,
+            current_pool="replan_ready",
+            contract=replace(contract, status="replan_ready"),
+            blocked_reason=f"{decision.dominant.value}: {observation.message}",
+            cycles=self._replace_current_cycle(
+                run_state.cycles,
+                replace(cycle, pool="replan_ready", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state})),
+            ),
+            failure_progress=progress,
+        )
+
+    def _failure_observation(self, phase: TddPhase, outcome: _PhaseOutcome) -> FailureObservation:
+        result = outcome.execution_result
+        message = outcome.blocked_reason or outcome.phase_state.error or f"{phase.value} phase failed"
+        evidence_refs = [item for item in [outcome.phase_state.evidence_location] if item]
+        status = outcome.phase_state.status
+        text = " ".join(item for item in [message, outcome.phase_state.error, None if result is None else result.error, status] if item).lower()
+        plausible: list[FailureClassification] = []
+        if status == "transport_error":
+            plausible.append(FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE)
+        if any(token in text for token in ("runtime executable", "pytest is unavailable", "environment", "dependency environment")):
+            plausible.append(FailureClassification.ENVIRONMENT_FAILURE)
+        if any(token in text for token in ("timeout", "out of memory", "no space left", "resource exhausted")):
+            plausible.append(FailureClassification.RESOURCE_LIMIT_FAILURE)
+        if any(token in text for token in ("syntaxerror", "parse error", "invalid syntax")):
+            plausible.append(FailureClassification.SYNTAX_OR_PARSE_FAILURE)
+        if any(token in text for token in ("build failed", "linker", "link failure", "packaging failed")):
+            plausible.append(FailureClassification.BUILD_OR_LINK_FAILURE)
+        if any(token in text for token in ("error collecting", "importerror", "modulenotfounderror", "bootstrap")):
+            plausible.append(FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE)
+        if any(token in text for token in ("path_policy", "policy", "unauthorized")):
+            plausible.append(FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION)
+        if any(token in text for token in ("changed_paths", "allowed_paths", "out-of-scope")):
+            plausible.append(FailureClassification.CHANGE_SCOPE_VIOLATION)
+        if not plausible:
+            plausible.append(FailureClassification.TESTER_CANDIDATE_DEFECT if phase is TddPhase.RED else FailureClassification.DEVELOPER_CANDIDATE_DEFECT)
+        return FailureObservation(
+            source=f"{phase.value}_execution",
+            message=message,
+            evidence_refs=evidence_refs,
+            plausible=plausible,
+            candidate_revision=None if result is None else result.accepted_revision,
+            status=status,
+        )
+
     async def _execute_phase(
         self,
         *,
@@ -909,6 +1037,7 @@ class BehaviorContractCoordinator:
                 phase_state=phase_state,
                 accepted=False,
                 blocked_reason=_blocked_reason_for_result(phase, result),
+                execution_result=result,
             )
         if not result.accepted_revision:
             return _PhaseOutcome(
@@ -916,8 +1045,9 @@ class BehaviorContractCoordinator:
                 phase_state=phase_state,
                 accepted=False,
                 blocked_reason=f"accepted {phase.value} phase missing trusted accepted revision",
+                execution_result=result,
             )
-        return _PhaseOutcome(attempt=None, phase_state=phase_state, accepted=True)
+        return _PhaseOutcome(attempt=None, phase_state=phase_state, accepted=True, execution_result=result)
 
     def _review_material(
         self,
@@ -1017,6 +1147,7 @@ def _contract_prompt(
                 "test_hint": "string",
                 "error_expectation": "string or null",
                 "preserves_state_on_failure": "boolean",
+                "depends_on": ["requirement ref"],
             }
         ],
         "invariants": ["string"],
@@ -1061,6 +1192,7 @@ def _contract_prompt(
                 "do not bundle unrelated failure modes under one requirement ref",
                 "multiple observable requirements may reference the same source clause when that improves TDD granularity",
                 "do not pre-author a future Tester step list",
+                "declare depends_on only for a real prerequisite requirement in this contract; use an empty array when independently executable",
             ],
             "traceability_rules": [
                 "every supplied source clause must be covered by at least one observable requirement source_refs entry",
@@ -1144,6 +1276,7 @@ def _contract_repair_prompt(
                         "test_hint": "string",
                         "error_expectation": "string|null",
                         "preserves_state_on_failure": "boolean",
+                        "depends_on": ["requirement ref"],
                     }
                 ],
                 "invariants": ["string"],
@@ -1184,7 +1317,11 @@ def _step_prompt(
         {
             "instruction": "Act as ATHBA's Tester planner. Return one JSON object only.",
             "contract": contract.to_dict(),
-            "allowed_requirement_refs": run_state.active_requirement_refs(),
+            "allowed_requirement_refs": [
+                ref
+                for ref in run_state.active_requirement_refs()
+                if ref in contract.ready_requirement_refs(run_state.completed_requirement_refs)
+            ],
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
             "prior_steps": prior_steps,
@@ -1560,6 +1697,22 @@ def _transport_failure_state(phase: TddPhase, work_unit_id: str, base_sha: str |
         error=error,
         recorded_at=recorded_at,
     )
+
+
+def _route_state_for_failure(classification: FailureClassification) -> FailureRouteState:
+    if classification is FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE:
+        return FailureRouteState.BLOCKED_EXECUTOR
+    if classification is FailureClassification.ENVIRONMENT_FAILURE:
+        return FailureRouteState.AWAITING_ENVIRONMENT_RECOVERY
+    if classification is FailureClassification.RESOURCE_LIMIT_FAILURE:
+        return FailureRouteState.AWAITING_SPLIT
+    if classification is FailureClassification.ARCHITECTURE_CONSTRAINT_VIOLATION:
+        return FailureRouteState.BLOCKED_ARCHITECTURE
+    if classification in {FailureClassification.CONTRACT_OR_REQUIREMENT_AMBIGUITY}:
+        return FailureRouteState.BLOCKED_AMBIGUITY
+    if classification is FailureClassification.UNCLASSIFIED_FAILURE:
+        return FailureRouteState.BLOCKED_UNCLASSIFIED
+    return FailureRouteState.ACTIVE
 
 
 def _utc_now() -> str:

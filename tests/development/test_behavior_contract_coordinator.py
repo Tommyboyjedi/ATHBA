@@ -190,6 +190,36 @@ def contract() -> BehaviorContract:
     return BehaviorContract.from_dict(contract_payload())
 
 
+def test_contract_rejects_unknown_or_cyclic_requirement_dependencies():
+    payload = contract_payload()
+    payload["observable_requirements"][0]["depends_on"] = ["RB-404"]
+    with pytest.raises(ValueError, match="must reference"):
+        BehaviorContract.from_dict(payload)
+
+    payload = contract_payload()
+    payload["observable_requirements"][0]["depends_on"] = ["RB-2"]
+    payload["observable_requirements"][1]["depends_on"] = ["RB-1"]
+    with pytest.raises(ValueError, match="acyclic"):
+        BehaviorContract.from_dict(payload)
+
+
+@pytest.mark.asyncio
+async def test_tdd_planner_rejects_a_requirement_before_its_prerequisite_is_approved():
+    payload = contract_payload()
+    payload["observable_requirements"][1]["depends_on"] = ["RB-1"]
+    dependency_contract = BehaviorContract.from_dict(payload)
+    step = proposal("RB-2")
+    gateway = FakeReasoningGateway([{
+        "status": "propose",
+        "rationale": "Try the reservation behavior.",
+        "proposal": step.to_dict(),
+        "completed_requirement_refs": [],
+    }])
+
+    with pytest.raises(ValueError, match="prerequisites"):
+        await DynamicTddPlanner(gateway).decide_next_step(dependency_contract, run_state())
+
+
 def single_requirement_contract() -> BehaviorContract:
     payload = contract_payload()
     payload["source_clauses"] = payload["source_clauses"][:2]
@@ -944,7 +974,7 @@ async def test_completion_rejects_unknown_requirement_refs_in_model_claim():
 
 
 @pytest.mark.asyncio
-async def test_green_cannot_begin_before_accepted_red():
+async def test_green_cannot_begin_before_accepted_red_and_tester_failures_use_bounded_retries():
     step = proposal()
     reasoner = FakeReasoningGateway([
         {
@@ -964,8 +994,10 @@ async def test_green_cannot_begin_before_accepted_red():
         state_repo=repo,
     ).run_contract(contract())
 
-    assert [call[0] for call in gateway.calls] == [step.step_id + "--red"]
+    assert [call[0] for call in gateway.calls] == [step.step_id + "--red"] * 3
     assert result.current_pool == "replan_ready"
+    assert result.blocked_reason is not None
+    assert "tester_candidate_defect" in result.blocked_reason
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any
 
+from core.development.failure_progression import FailureProgressState
 from core.development.progression import ExecutionAttemptRecord
 from core.execution.rack_ai_contract import RepositoryBinding
 
@@ -483,6 +484,7 @@ class BehaviorContractRequirement:
     test_hint: str
     error_expectation: str | None = None
     preserves_state_on_failure: bool = True
+    depends_on: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         _require_text(self.ref, "requirement ref")
@@ -494,6 +496,9 @@ class BehaviorContractRequirement:
         _require_text(self.test_hint, "requirement test hint")
         if self.error_expectation is not None:
             _require_text(self.error_expectation, "requirement error expectation")
+        _validate_list_of_strings(self.depends_on, "requirement dependencies")
+        if self.ref in self.depends_on:
+            raise ValueError("requirement cannot depend on itself")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -504,6 +509,7 @@ class BehaviorContractRequirement:
             "test_hint": self.test_hint,
             "error_expectation": self.error_expectation,
             "preserves_state_on_failure": self.preserves_state_on_failure,
+            "depends_on": list(self.depends_on),
         }
 
     @classmethod
@@ -516,6 +522,7 @@ class BehaviorContractRequirement:
             test_hint=str(payload["test_hint"]),
             error_expectation=payload.get("error_expectation"),
             preserves_state_on_failure=bool(payload.get("preserves_state_on_failure", True)),
+            depends_on=_list_of_strings(payload.get("depends_on", []), "requirement dependencies"),
         )
 
 
@@ -550,6 +557,7 @@ class BehaviorContract:
         _validate_unique_refs(self.source_clause_refs(), "source clause refs")
         _validate_unique_refs(self.requirement_refs(), "requirement refs")
         _validate_contract_source_coverage(self)
+        _validate_requirement_dependencies(self.observable_requirements)
         _validate_list_of_strings(self.invariants, "invariants")
         _validate_repository_relative_paths(self.production_paths, "production paths")
         _validate_repository_relative_paths(self.test_paths, "test paths")
@@ -569,6 +577,14 @@ class BehaviorContract:
     def uncovered_requirement_refs(self, completed_refs: list[str]) -> list[str]:
         completed = set(completed_refs)
         return [ref for ref in self.requirement_refs() if ref not in completed]
+
+    def ready_requirement_refs(self, completed_refs: list[str]) -> list[str]:
+        completed = set(completed_refs)
+        return [
+            requirement.ref
+            for requirement in self.observable_requirements
+            if requirement.ref not in completed and set(requirement.depends_on).issubset(completed)
+        ]
 
     def uncovered_source_clause_refs(self) -> list[str]:
         covered = {ref for requirement in self.observable_requirements for ref in requirement.source_refs}
@@ -855,6 +871,7 @@ class BehaviorContractRunState:
     gatekeeper_state: SpecificationGatekeeperRunState | None = None
     targeted_requirement_ref: str | None = None
     targeted_checklist_ref: str | None = None
+    failure_progress: FailureProgressState = field(default_factory=FailureProgressState)
 
     def __post_init__(self) -> None:
         if self.current_pool not in CONTRACT_POOL_STATUSES:
@@ -899,6 +916,7 @@ class BehaviorContractRunState:
             "gatekeeper_state": None if self.gatekeeper_state is None else self.gatekeeper_state.to_dict(),
             "targeted_requirement_ref": self.targeted_requirement_ref,
             "targeted_checklist_ref": self.targeted_checklist_ref,
+            "failure_progress": self.failure_progress.to_dict(),
         }
 
     @classmethod
@@ -920,6 +938,7 @@ class BehaviorContractRunState:
             gatekeeper_state=None if payload.get("gatekeeper_state") is None else SpecificationGatekeeperRunState.from_dict(dict(payload["gatekeeper_state"])),
             targeted_requirement_ref=payload.get("targeted_requirement_ref"),
             targeted_checklist_ref=payload.get("targeted_checklist_ref"),
+            failure_progress=FailureProgressState.from_dict(dict(payload.get("failure_progress", {}))),
         )
 
 
@@ -1055,6 +1074,30 @@ def _validate_contract_source_coverage(contract: BehaviorContract) -> None:
     uncovered = [ref for ref in clause_refs if ref not in seen_source_refs]
     if uncovered:
         raise ValueError(f"source clauses must be covered by observable requirements: {uncovered}")
+
+
+def _validate_requirement_dependencies(requirements: list[BehaviorContractRequirement]) -> None:
+    refs = {requirement.ref for requirement in requirements}
+    dependencies = {requirement.ref: set(requirement.depends_on) for requirement in requirements}
+    unknown = {dependency for values in dependencies.values() for dependency in values} - refs
+    if unknown:
+        raise ValueError(f"requirement dependencies must reference the contract: {sorted(unknown)}")
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(ref: str) -> None:
+        if ref in visiting:
+            raise ValueError("requirement dependencies must be acyclic")
+        if ref in visited:
+            return
+        visiting.add(ref)
+        for dependency in dependencies[ref]:
+            visit(dependency)
+        visiting.remove(ref)
+        visited.add(ref)
+
+    for ref in dependencies:
+        visit(ref)
 
 
 def _default_evidence_kind(kind: str) -> str:
