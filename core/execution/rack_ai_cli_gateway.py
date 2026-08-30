@@ -5,7 +5,7 @@ from __future__ import annotations
 from core.development.work_unit import DevelopmentWorkUnit
 from core.execution.rack_ai_cli_transport import RackAiCliConfig, RackAiCliTransport, RackAiCliTransportError
 from core.execution.rack_ai_request import RackAiRequestBuildRequest, RackAiRequestFactory, RepositoryBinding
-from core.execution.rack_ai_result import RackAiExecutionResultMapper, RackAiGatewayResult
+from core.execution.rack_ai_result import RackAiExecutionResultMapper, RackAiExpectedIdentity, RackAiGatewayResult
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
 
@@ -22,7 +22,21 @@ class RackAiCliExecutionGateway:
     async def execute(self, work_unit: DevelopmentWorkUnit, repository_binding: RepositoryBinding) -> WorkUnitExecutionResult:
         request = self.request_factory.build(RackAiRequestBuildRequest(self.workload_id, repository_binding, work_unit))
         response = await self.transport.execute(request)
-        return self.result_mapper.map(RackAiGatewayResult(work_unit.id, response.summary, response.packet_payload))
+        try:
+            return self.result_mapper.map(
+                RackAiGatewayResult(
+                    expected=RackAiExpectedIdentity(
+                        work_unit_id=work_unit.id,
+                        change_id=request.change_id,
+                        repository_id=request.repository.repository_id,
+                        base_sha=request.repository.base_sha,
+                    ),
+                    summary=response.summary,
+                    packet_payload=response.packet_payload,
+                )
+            )
+        except ValueError as error:
+            raise RackAiCliTransportError(f"Rack AI returned untrustworthy output: {error}") from error
 
 
 __all__ = [

@@ -5,12 +5,13 @@ This module provides Git operations for the ATHBA project, including
 repository initialization, branch management, and commit operations.
 """
 
-import os
-import shutil
+from pathlib import Path
 from typing import Dict, List, Optional
+import shutil
 
 from git import GitCommandError, Repo
 
+from core.filesystem_policy import resolve_identifier_path, resolve_relative_path
 from core.services.service_requests import (
     BranchCreateRequest,
     CommitFilesRequest,
@@ -20,34 +21,35 @@ from core.services.service_requests import (
 
 class GitService:
     def __init__(self, repos_base_path: str = "/tmp/athba_repos"):
-        self.repos_base_path = repos_base_path
-        os.makedirs(self.repos_base_path, exist_ok=True)
+        self.repos_base_path = Path(repos_base_path).resolve()
+        self.repos_base_path.mkdir(parents=True, exist_ok=True)
 
-    def _get_repo_path(self, project_id: str) -> str:
-        return os.path.join(self.repos_base_path, project_id)
+    def _get_repo_path(self, project_id: str) -> Path:
+        return resolve_identifier_path(self.repos_base_path, project_id, "project id")
 
-    def _require_repo_path(self, project_id: str) -> str:
+    def _require_repo_path(self, project_id: str) -> Path:
         repo_path = self._get_repo_path(project_id)
-        if not os.path.exists(repo_path):
+        if not repo_path.exists():
             raise ValueError(f"Repository for project {project_id} does not exist")
         return repo_path
 
     async def initialize_repo(self, project_id: str, project_name: str) -> Dict[str, str]:
         repo_path = self._get_repo_path(project_id)
-        if os.path.exists(repo_path):
+        if repo_path.exists():
             shutil.rmtree(repo_path)
-        os.makedirs(repo_path, exist_ok=True)
+        repo_path.mkdir(parents=True, exist_ok=True)
         repo = Repo.init(repo_path)
-        readme_path = os.path.join(repo_path, "README.md")
-        with open(readme_path, "w") as handle:
-            handle.write(f"# {project_name}\n\n")
-            handle.write("This project is managed by ATHBA - AI Development Team.\n")
+        readme_path = repo_path / "README.md"
+        readme_path.write_text(
+            f"# {project_name}\n\nThis project is managed by ATHBA - AI Development Team.\n",
+            encoding="utf-8",
+        )
         repo.index.add(["README.md"])
         repo.index.commit("Initial commit")
         if repo.active_branch.name != "main":
             main_branch = repo.create_head("main")
             main_branch.checkout()
-        return {"repo_path": repo_path, "initial_branch": "main", "status": "initialized"}
+        return {"repo_path": str(repo_path), "initial_branch": "main", "status": "initialized"}
 
     def _branch_request(self, request_or_project_id, args) -> BranchCreateRequest:
         if isinstance(request_or_project_id, BranchCreateRequest):
@@ -87,11 +89,10 @@ class GitService:
         repo = Repo(repo_path)
         committed_files: list[str] = []
         for file_path, content in request.files.items():
-            full_path = os.path.join(repo_path, file_path)
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, "w") as handle:
-                handle.write(content)
-            committed_files.append(file_path)
+            full_path = resolve_relative_path(repo_path, file_path, "repository file path")
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            full_path.write_text(content, encoding="utf-8")
+            committed_files.append(Path(file_path.replace("\\", "/")).as_posix())
         repo.index.add(committed_files)
         commit = repo.index.commit(request.commit_message)
         return {
@@ -143,11 +144,10 @@ class GitService:
     async def get_file_content(self, request_or_project_id, *args) -> Optional[str]:
         request = self._content_request(request_or_project_id, args)
         repo_path = self._require_repo_path(request.project_id)
-        full_path = os.path.join(repo_path, request.file_path)
-        if not os.path.exists(full_path):
+        full_path = resolve_relative_path(repo_path, request.file_path, "repository file path")
+        if not full_path.exists():
             return None
-        with open(full_path, "r") as handle:
-            return handle.read()
+        return full_path.read_text(encoding="utf-8")
 
     async def checkout_branch(self, project_id: str, branch_name: str) -> Dict[str, str]:
         repo = Repo(self._require_repo_path(project_id))
@@ -157,5 +157,8 @@ class GitService:
         return {"branch_name": branch_name, "status": "checked_out"}
 
     def repo_exists(self, project_id: str) -> bool:
-        repo_path = self._get_repo_path(project_id)
-        return os.path.exists(repo_path) and os.path.exists(os.path.join(repo_path, ".git"))
+        try:
+            repo_path = self._get_repo_path(project_id)
+        except ValueError:
+            return False
+        return repo_path.exists() and (repo_path / ".git").exists()

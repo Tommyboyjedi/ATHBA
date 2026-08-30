@@ -5,11 +5,13 @@ This module provides test execution capabilities using pytest, allowing
 the Tester agent to run tests on ticket branches and capture results.
 """
 
+from pathlib import Path
 import os
 import re
 import subprocess
 from typing import Dict, List
 
+from core.filesystem_policy import resolve_identifier_path, resolve_relative_path
 from core.services.service_requests import TestRunRequest
 
 
@@ -18,12 +20,12 @@ TEST_TIMEOUT_SECONDS = 300
 
 class TestExecutionService:
     def __init__(self, repos_base_path: str = "/tmp/athba_repos"):
-        self.repos_base_path = repos_base_path
+        self.repos_base_path = Path(repos_base_path).resolve()
 
-    def _get_repo_path(self, project_id: str) -> str:
-        return os.path.join(self.repos_base_path, project_id)
+    def _get_repo_path(self, project_id: str) -> Path:
+        return resolve_identifier_path(self.repos_base_path, project_id, "project id")
 
-    def _missing_repo_result(self, repo_path: str) -> Dict:
+    def _missing_repo_result(self, repo_path: Path) -> Dict:
         return {
             "status": "error",
             "passed": 0,
@@ -75,24 +77,27 @@ class TestExecutionService:
             "duration": 0.0,
         }
 
-    def _build_command(self, request: TestRunRequest, repo_path: str) -> Dict | list[str]:
+    def _build_command(self, request: TestRunRequest, repo_path: Path) -> Dict | list[str]:
         cmd = ["pytest"]
         if request.test_files:
             for test_file in request.test_files:
-                test_path = os.path.join(repo_path, test_file)
-                if not os.path.exists(test_path):
+                test_path = resolve_relative_path(repo_path, test_file, "test file path")
+                if not test_path.exists():
                     return self._missing_test_file_result(test_file)
-                cmd.append(test_path)
+                cmd.append(str(test_path))
         else:
-            cmd.append(repo_path)
+            cmd.append(str(repo_path))
         cmd.extend(["-v" if request.verbose else "-q", "--tb=short", "--no-header", "-ra"])
         return cmd
 
     async def run_tests(self, request: TestRunRequest) -> Dict:
-        repo_path = self._get_repo_path(request.project_id)
-        if not os.path.exists(repo_path):
-            return self._missing_repo_result(repo_path)
-        cmd = self._build_command(request, repo_path)
+        try:
+            repo_path = self._get_repo_path(request.project_id)
+            if not repo_path.exists():
+                return self._missing_repo_result(repo_path)
+            cmd = self._build_command(request, repo_path)
+        except ValueError as error:
+            return self._execution_error_result(error)
         if isinstance(cmd, dict):
             return cmd
         try:
@@ -112,7 +117,7 @@ class TestExecutionService:
     def _parse_pytest_output(self, output: str, return_code: int) -> Dict:
         passed = failed = errors = skipped = 0
         duration = 0.0
-        for line in output.split("\n"):
+        for line in output.splitlines():
             if " passed" not in line and " failed" not in line and " error" not in line:
                 continue
             passed_match = re.search(r"(\d+) passed", line)
@@ -145,18 +150,21 @@ class TestExecutionService:
         }
 
     def get_test_files(self, project_id: str) -> List[str]:
-        repo_path = self._get_repo_path(project_id)
+        try:
+            repo_path = self._get_repo_path(project_id)
+        except ValueError:
+            return []
         test_files: list[str] = []
-        if not os.path.exists(repo_path):
+        if not repo_path.exists():
             return test_files
         for root, dirs, files in os.walk(repo_path):
             if ".git" in dirs:
                 dirs.remove(".git")
             for file_name in files:
                 if file_name.startswith("test_") and file_name.endswith(".py"):
-                    full_path = os.path.join(root, file_name)
-                    test_files.append(os.path.relpath(full_path, repo_path))
+                    full_path = Path(root) / file_name
+                    test_files.append(full_path.relative_to(repo_path).as_posix())
                 elif file_name.endswith("_test.py"):
-                    full_path = os.path.join(root, file_name)
-                    test_files.append(os.path.relpath(full_path, repo_path))
+                    full_path = Path(root) / file_name
+                    test_files.append(full_path.relative_to(repo_path).as_posix())
         return sorted(test_files)

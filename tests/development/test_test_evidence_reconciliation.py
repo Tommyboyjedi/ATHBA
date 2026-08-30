@@ -3,10 +3,7 @@ import subprocess
 
 import pytest
 
-from core.development.test_evidence_reconciliation import (
-    GitAcceptedTestCatalog,
-    TestEvidenceReconciler,
-)
+from core.development.test_evidence_reconciliation import GitAcceptedTestCatalog, TestEvidenceReconciler
 from core.development.tdd_progression import (
     BehaviorContract,
     BehaviorContractRequirement,
@@ -87,20 +84,26 @@ def _run_state(revision: str) -> BehaviorContractRunState:
     )
 
 
+def _head_revision(root):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, text=True, capture_output=True).stdout.strip()
+
+
+def _commit_all(root, message):
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", message],
+        cwd=root,
+        check=True,
+    )
+    return _head_revision(root)
+
+
 def _repository(tmp_path):
     (tmp_path / "tests").mkdir()
     (tmp_path / "reservation_book.py").write_text("class ReservationBook:\n    pass\n", encoding="utf-8")
-    (tmp_path / "tests" / "test_reservation_book.py").write_text(
-        "def test_add_resource():\n    assert True\n", encoding="utf-8"
-    )
+    (tmp_path / "tests" / "test_reservation_book.py").write_text("def test_add_resource():\n    assert True\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "seed"],
-        cwd=tmp_path,
-        check=True,
-    )
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout.strip()
+    return _commit_all(tmp_path, "seed")
 
 
 def _checklist() -> SpecificationChecklist:
@@ -165,23 +168,34 @@ async def test_reconciliation_is_pure_and_covers_every_checklist_item_once(tmp_p
 async def test_reconciler_rejects_accepted_test_missing_from_final_trusted_revision(tmp_path):
     initial_revision = _repository(tmp_path)
     (tmp_path / "tests" / "test_reservation_book.py").write_text("def test_other_behavior():\n    assert True\n", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
-    subprocess.run(
-        ["git", "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", "remove accepted test"],
-        cwd=tmp_path,
-        check=True,
-    )
-    final_revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, check=True, text=True, capture_output=True).stdout.strip()
+    final_revision = _commit_all(tmp_path, "remove accepted test")
     gateway = FakeReasoningGateway([
         {"answer": "YES", "selected_test_names": ["tests/test_reservation_book.py::test_add_resource"], "rationale": "older accepted test"},
         {"answer": "NO", "selected_test_names": [], "rationale": "no unit test proves readability"},
     ])
 
-    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, final_revision)).reconcile(
-        _checklist(),
-        _run_state(initial_revision),
-    )
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, final_revision)).reconcile(_checklist(), _run_state(initial_revision))
 
     assert results[0].answer == "NO"
     assert results[0].accepted_test_names == []
-    assert "not present" in results[0].rationale
+    assert "preserved" in results[0].rationale
+
+
+@pytest.mark.asyncio
+async def test_reconciler_rejects_changed_test_body_at_final_trusted_revision(tmp_path):
+    accepted_revision = _repository(tmp_path)
+    (tmp_path / "tests" / "test_reservation_book.py").write_text(
+        "def test_add_resource():\n    value = False\n    assert value\n",
+        encoding="utf-8",
+    )
+    final_revision = _commit_all(tmp_path, "change accepted test body")
+    gateway = FakeReasoningGateway([
+        {"answer": "YES", "selected_test_names": ["tests/test_reservation_book.py::test_add_resource"], "rationale": "same node id"},
+        {"answer": "NO", "selected_test_names": [], "rationale": "no unit test proves readability"},
+    ])
+
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, final_revision)).reconcile(_checklist(), _run_state(accepted_revision))
+
+    assert results[0].answer == "NO"
+    assert results[0].accepted_test_names == []
+    assert "preserved" in results[0].rationale

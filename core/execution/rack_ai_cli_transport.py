@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.execution.rack_ai_request import RackAiChangeRequest
+from core.filesystem_policy import resolve_confined_absolute_path
 
 
 RackAiCliTransportError = RuntimeError
@@ -37,6 +38,7 @@ class RackAiCliSummary:
     worktree: str | None = None
     status: str | None = None
     acceptance_verdict: str | None = None
+    base_sha: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,12 +92,17 @@ class RackAiCliSummaryParser:
             worktree=summary.get("worktree"),
             status=summary.get("status"),
             acceptance_verdict=summary.get("acceptance_verdict"),
+            base_sha=summary.get("base_sha"),
         )
 
 
 class RackAiPacketLoader:
+    def __init__(self, state_root: str | Path):
+        self.state_root = Path(state_root).resolve()
+
     def load(self, path: Path) -> dict[str, Any]:
-        return json.loads(path.read_text(encoding="utf-8"))
+        packet_path = resolve_confined_absolute_path(self.state_root, path, "Rack AI packet path")
+        return json.loads(packet_path.read_text(encoding="utf-8"))
 
 
 class RackAiCliTransport:
@@ -103,7 +110,7 @@ class RackAiCliTransport:
         self.config = config
         self.commands = RackAiCliCommandFactory(config)
         self.summary_parser = RackAiCliSummaryParser()
-        self.packet_loader = RackAiPacketLoader()
+        self.packet_loader = RackAiPacketLoader(config.state_root)
 
     async def execute(self, request: RackAiChangeRequest) -> RackAiCliResponse:
         spec_path: Path | None = None

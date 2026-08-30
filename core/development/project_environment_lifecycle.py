@@ -24,6 +24,7 @@ from core.development.project_environment_state import (
 )
 from core.development.project_environment_store import ProjectEnvironmentRepo
 from core.development.python_test_runtime import PythonPytestRuntime
+from core.filesystem_policy import resolve_identifier_path
 
 
 DEFAULT_ATHBA_PYTHON = "/srv/ATHBA/.venv/bin/python"
@@ -204,7 +205,7 @@ class ProjectEnvironmentService:
 
 
 def _project_paths(root: Path, project_id: str) -> ProjectWorkspacePaths:
-    project_root = (root / project_id).resolve()
+    project_root = resolve_identifier_path(root, project_id, "project id")
     return ProjectWorkspacePaths(project_root=project_root, repository_root=(project_root / "repository").resolve())
 
 

@@ -35,8 +35,16 @@ FORBIDDEN_RESOURCE_SELECTION_KEYS = {
 
 
 @dataclass(frozen=True)
-class RackAiGatewayResult:
+class RackAiExpectedIdentity:
     work_unit_id: str
+    change_id: str
+    repository_id: str
+    base_sha: str | None = None
+
+
+@dataclass(frozen=True)
+class RackAiGatewayResult:
+    expected: RackAiExpectedIdentity
     summary: object
     packet_payload: Mapping[str, Any]
 
@@ -75,21 +83,49 @@ class RackAiResultParser:
         )
 
 
+class RackAiIdentityVerifier:
+    def verify(self, result: RackAiGatewayResult) -> dict[str, Any]:
+        packet = dict(result.packet_payload)
+        summary = result.summary
+        expected = result.expected
+        _match_required(packet.get("change_id"), expected.change_id, "Rack AI packet change id")
+        _match_required(packet.get("repository_id"), expected.repository_id, "Rack AI packet repository id")
+        _match_optional(packet.get("base_sha"), expected.base_sha, "Rack AI packet base sha")
+        _match_optional(getattr(summary, "change_id"), expected.change_id, "Rack AI summary change id")
+        _match_optional(getattr(summary, "base_sha"), expected.base_sha, "Rack AI summary base sha")
+        status = _coalesce(getattr(summary, "status"), packet.get("status"), "Rack AI status")
+        verdict = _coalesce(
+            getattr(summary, "acceptance_verdict"),
+            packet.get("acceptance_verdict"),
+            "Rack AI acceptance verdict",
+        )
+        branch = _coalesce_optional(getattr(summary, "branch"), packet.get("branch"), "Rack AI branch")
+        worktree = _coalesce_optional(
+            getattr(summary, "worktree"),
+            packet.get("worktree_path") or packet.get("worktree"),
+            "Rack AI worktree path",
+        )
+        return {
+            **packet,
+            "work_unit_id": expected.work_unit_id,
+            "change_id": expected.change_id,
+            "status": status,
+            "acceptance_verdict": verdict,
+            "branch": branch,
+            "worktree_path": worktree,
+            "packet_path": str(getattr(summary, "packet_path")),
+        }
+
+
 class RackAiExecutionResultMapper:
+    def __init__(self):
+        self.verifier = RackAiIdentityVerifier()
+        self.parser = RackAiResultParser()
+
     def map(self, result: RackAiGatewayResult):
         from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
-        payload = {
-            **dict(result.packet_payload),
-            "work_unit_id": result.work_unit_id,
-            "change_id": getattr(result.summary, "change_id") or result.packet_payload.get("change_id"),
-            "branch": getattr(result.summary, "branch") or result.packet_payload.get("branch"),
-            "worktree_path": getattr(result.summary, "worktree") or result.packet_payload.get("worktree_path"),
-            "status": getattr(result.summary, "status") or result.packet_payload.get("status"),
-            "acceptance_verdict": getattr(result.summary, "acceptance_verdict") or result.packet_payload.get("acceptance_verdict"),
-            "packet_path": str(getattr(result.summary, "packet_path")),
-        }
-        attempt = RackAiResultParser().parse(payload)
+        attempt = self.parser.parse(self.verifier.verify(result))
         return WorkUnitExecutionResult(
             work_unit_id=attempt.work_unit_id,
             accepted=attempt.accepted,
@@ -135,6 +171,36 @@ def find_forbidden_resource_selection_keys(payload: Any, forbidden_keys: set[str
     return ForbiddenResourceSelectionScanner().scan(payload, keys)
 
 
+def _coalesce(summary_value: object, packet_value: object, label: str) -> str:
+    _match_optional(summary_value, packet_value, label)
+    if summary_value is not None:
+        return _string_value(summary_value, label)
+    if packet_value is not None:
+        return _string_value(packet_value, label)
+    raise ValueError(f"{label} is missing")
+
+
+def _coalesce_optional(summary_value: object, packet_value: object, label: str) -> str | None:
+    _match_optional(summary_value, packet_value, label)
+    if summary_value is not None:
+        return _string_value(summary_value, label)
+    if packet_value is not None:
+        return _string_value(packet_value, label)
+    return None
+
+
+def _match_required(actual: object, expected: str, label: str) -> None:
+    if _string_value(actual, label) != expected:
+        raise ValueError(f"{label} did not match the submitted request")
+
+
+def _match_optional(actual: object, expected: object, label: str) -> None:
+    if actual is None or expected is None:
+        return
+    if _string_value(actual, label) != _string_value(expected, label):
+        raise ValueError(f"{label} contradicted the submitted request")
+
+
 def _required_string(payload: Mapping[str, Any], field_name: str) -> str:
     value = _optional_string(payload, field_name)
     if value is None:
@@ -157,3 +223,9 @@ def _optional_mapping(value: Any, field_name: str) -> dict[str, Any] | None:
     if not isinstance(value, Mapping):
         raise ValueError(f"Rack AI field must be an object: {field_name}")
     return dict(value)
+
+
+def _string_value(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be a non-empty string")
+    return value

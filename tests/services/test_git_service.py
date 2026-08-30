@@ -249,3 +249,29 @@ class TestGitService:
         status = await git_service.get_branch_status(project_id)
         assert status["commit_count"] == 3
         assert len(status["commits"]) == 3
+
+
+    @pytest.mark.asyncio
+    async def test_initialize_repo_rejects_unsafe_project_id(self, git_service):
+        with pytest.raises(ValueError, match="project id"):
+            await git_service.initialize_repo("../escape", "Test Project")
+
+    @pytest.mark.asyncio
+    async def test_commit_files_rejects_repository_traversal(self, git_service):
+        project_id = "test_project_012"
+        await git_service.initialize_repo(project_id, "Test Project")
+        await git_service.create_branch(project_id, "feature/traversal")
+
+        with pytest.raises(ValueError, match="repository file path"):
+            await git_service.commit_files(project_id, {"../escape.py": "print('nope')"}, "Bad commit")
+
+    @pytest.mark.asyncio
+    async def test_get_file_content_rejects_absolute_path(self, git_service):
+        project_id = "test_project_013"
+        await git_service.initialize_repo(project_id, "Test Project")
+
+        with pytest.raises(ValueError, match="repository file path"):
+            await git_service.get_file_content(project_id, "/tmp/outside.txt")
+
+    def test_repo_exists_returns_false_for_invalid_project_id(self, git_service):
+        assert git_service.repo_exists("../escape") is False

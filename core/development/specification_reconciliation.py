@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import subprocess
 from dataclasses import dataclass
@@ -71,25 +72,39 @@ class GitAcceptedTestCatalog:
         self.repository_root = Path(repository_root)
         self.semantic_revision = semantic_revision
 
-    def contains(self, test_name: str) -> bool:
+    def contains(self, evidence: AcceptedTestEvidence) -> bool:
+        accepted_digest = self._test_digest(evidence.semantic_revision, evidence.test_name)
+        final_digest = self._test_digest(self.semantic_revision, evidence.test_name)
+        if accepted_digest is None or final_digest is None:
+            return False
+        return accepted_digest == final_digest
+
+    def _test_digest(self, revision: str, test_name: str) -> str | None:
+        source = self._test_source(revision, test_name)
+        if source is None:
+            return None
+        return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+    def _test_source(self, revision: str, test_name: str) -> str | None:
         path, separator, function = test_name.partition("::")
         if not separator or not path or not function or "::" in function:
-            return False
+            return None
         normalized = PurePosixPath(path)
         if normalized.is_absolute() or ".." in normalized.parts:
-            return False
+            return None
         try:
-            source = self._git("show", f"{self.semantic_revision}:{normalized.as_posix()}")
+            source = self._git("show", f"{revision}:{normalized.as_posix()}")
         except subprocess.CalledProcessError:
-            return False
+            return None
         try:
             tree = ast.parse(source)
         except SyntaxError:
-            return False
-        return any(
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function
-            for node in tree.body
-        )
+            return None
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function:
+                segment = ast.get_source_segment(source, node)
+                return None if segment is None else segment.strip()
+        return None
 
     def _git(self, *args: str) -> str:
         return subprocess.run(
@@ -185,13 +200,22 @@ def _verified_yes_or_no(
             "The reconciler claimed YES without naming accepted test evidence.",
         )
     by_name = {evidence.test_name: evidence for evidence in accepted}
-    if any(name not in by_name or not catalog.contains(name) for name in names):
-        return ChecklistTestReconciliation(
-            checklist_ref,
-            "NO",
-            [],
-            "The reconciler named a test that is not present in accepted semantically approved history.",
-        )
+    for name in names:
+        evidence = by_name.get(name)
+        if evidence is None:
+            return ChecklistTestReconciliation(
+                checklist_ref,
+                "NO",
+                [],
+                "The reconciler named a test that is not present in accepted semantically approved history.",
+            )
+        if not catalog.contains(evidence):
+            return ChecklistTestReconciliation(
+                checklist_ref,
+                "NO",
+                [],
+                "The reconciler named a test whose accepted body is not preserved at the final trusted revision.",
+            )
     return ChecklistTestReconciliation(checklist_ref, "YES", list(dict.fromkeys(names)), rationale)
 
 
