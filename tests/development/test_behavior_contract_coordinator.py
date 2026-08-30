@@ -1805,7 +1805,8 @@ async def test_rejected_red_is_persisted_and_cannot_become_green_base():
 
     saved_cycle = state_repo.snapshot.contract_runs[contract().id].cycles[0]
     assert result.current_pool == "replan_ready"
-    assert [call[0] for call in execution.calls] == [step.step_id + "--red"]
+    assert [call[0] for call in execution.calls] == [step.step_id + "--red"] * 3
+    assert all("green" not in call[0] for call in execution.calls)
     assert saved_cycle.red_phase is not None
     assert saved_cycle.red_phase.status == "checks_failed"
     assert saved_cycle.red_phase.change_id == "red-collection-failure"
