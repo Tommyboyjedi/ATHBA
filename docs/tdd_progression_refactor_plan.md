@@ -22,33 +22,33 @@ Target module: `core/development/tdd_progression.py`
 - [x] Run focused baseline tests before refactor.
   Evidence: `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q tests/development/test_behavior_contract_coordinator.py tests/development/test_specification_gatekeeper.py tests/development/test_test_evidence_reconciliation.py tests/development/test_tdd_coordinator.py` passed with `93 passed`.
   Commit SHA: `WORKTREE`
-- [ ] Split `core/development/tdd_progression.py` into cohesive domain modules while preserving public import compatibility.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Extend `scripts/check_coding_principles.py` to cover all Session 1 changed/new application classes without broad exemptions.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Add or update compatibility coverage where persisted state behavior is not already explicit.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Run post-refactor focused tests.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Run full suite.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Run compileall.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Run `git diff --check`.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Confirm clean `legacy` snapshot and push all commits to PR17.
-  Evidence: pending.
-  Commit SHA: `PENDING`
-- [ ] Finalize this ledger with `INCOMPLETE_ITEMS = NONE` only after every mandatory item is complete.
-  Evidence: pending.
-  Commit SHA: `PENDING`
+- [x] Split `core/development/tdd_progression.py` into cohesive domain modules while preserving public import compatibility.
+  Evidence: implementation moved into `core/development/tdd_domain.py`, `core/development/specification_domain.py`, `core/development/behavior_contract_domain.py`, `core/development/contract_run_domain.py`, `core/development/tdd_progression_values.py`, and `core/development/tdd_progression_validation.py`; `core/development/tdd_progression.py` is now a compatibility facade with re-exports and compatibility status sets.
+  Commit SHA: `1b74b4f`
+- [x] Extend `scripts/check_coding_principles.py` to cover all Session 1 changed/new application classes without broad exemptions.
+  Evidence: the gate now targets the Session 1 domain modules plus the prior coordinator scope, subtracts `self` and `cls` for parameter counting, and permits only external `Enum`, `str`, and `Protocol` bases. `./.venv/bin/python scripts/check_coding_principles.py` returned `coding principles gate passed`.
+  Commit SHA: `1b74b4f`
+- [x] Add or update compatibility coverage where persisted state behavior is not already explicit.
+  Evidence: existing explicit persistence and compatibility coverage remained in the focused files, and `tests/development/test_behavior_contract_coordinator.py` was updated for the typed `BehaviorContractLoadOptions` boundary while preserving the same round-trip and allowed-path validation assertions.
+  Commit SHA: `1b74b4f`
+- [x] Run post-refactor focused tests.
+  Evidence: `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q tests/development/test_behavior_contract_coordinator.py tests/development/test_specification_gatekeeper.py tests/development/test_test_evidence_reconciliation.py tests/development/test_tdd_coordinator.py` passed with `93 passed`.
+  Commit SHA: `1b74b4f`
+- [x] Run full suite.
+  Evidence: `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q` passed with `192 passed`.
+  Commit SHA: `1b74b4f`
+- [x] Run compileall.
+  Evidence: `./.venv/bin/python -m compileall athba core llm_service tests scripts` completed without errors.
+  Commit SHA: `1b74b4f`
+- [x] Run `git diff --check`.
+  Evidence: `git diff --check` produced no output after the refactor validation pass.
+  Commit SHA: `1b74b4f`
+- [x] Confirm clean `legacy` snapshot and push all commits to PR17.
+  Evidence: `git rev-parse legacy` remained `8334f42a8865b9360972f5e0422a8f61d02dedb6`; `git push origin pr17-specification-gatekeeper` advanced the branch on `origin` from `156aeec` to `1b74b4f`.
+  Commit SHA: `1b74b4f`
+- [x] Finalize this ledger with `INCOMPLETE_ITEMS = NONE` only after every mandatory item is complete.
+  Evidence: all mandatory Session 1 checklist items in this ledger are now recorded with concrete validation evidence and milestone SHAs.
+  Commit SHA: `PENDING_LEDGER_COMMIT`
 
 ## Current module responsibilities
 
@@ -144,4 +144,27 @@ Target module: `core/development/tdd_progression.py`
 - Prefer a compatibility facade over widespread importer churn.
 - If a typed enum is introduced internally, serialize via stable `.value` strings.
 
-INCOMPLETE_ITEMS = PRESENT
+## Post-refactor class audit
+
+- `core/development/tdd_domain.py:TddBehavior` — responsibility: TDD behavior input/state record; executable lines: `24`; constructor inputs: `0`; max method inputs: `0`; inheritance: `composition-only`.
+- `core/development/tdd_domain.py:TddPhaseState` — responsibility: persisted phase execution state; executable lines: `21`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/tdd_domain.py:TddBehaviorProgress` — responsibility: persisted per-behavior TDD progress; executable lines: `18`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:SourceRequirementClause` — responsibility: source-specification clause and default evidence normalization; executable lines: `15`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:SpecificationChecklistItem` — responsibility: atomic checklist item state; executable lines: `12`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:SpecificationChecklist` — responsibility: checklist aggregate and unique-ref validation; executable lines: `19`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:ChecklistEvidence` — responsibility: checklist proof evidence record; executable lines: `26`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:SpecificationGap` — responsibility: unresolved checklist gap state; executable lines: `20`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:ChecklistItemAssessment` — responsibility: per-item assessment state; executable lines: `18`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:GatekeeperAssessmentRecord` — responsibility: aggregate gatekeeper assessment state; executable lines: `22`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/specification_domain.py:SpecificationGatekeeperRunState` — responsibility: checklist assessment history and completion view; executable lines: `21`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/behavior_contract_domain.py:BehaviorContractLoadOptions` — responsibility: typed contract-load path restrictions; executable lines: `3`; constructor inputs: `0`; max method inputs: `0`; inheritance: `composition-only`.
+- `core/development/behavior_contract_domain.py:BehaviorContractRequirement` — responsibility: observable requirement state and dependency validation; executable lines: `26`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/behavior_contract_domain.py:BehaviorContract` — responsibility: contract aggregate, traceability validation, and serialization; executable lines: `65`; constructor inputs: `0`; max method inputs: `2`; inheritance: `composition-only`.
+- `core/development/contract_run_domain.py:TddStepProposal` — responsibility: smallest next-step proposal state; executable lines: `34`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/contract_run_domain.py:TddStepDecision` — responsibility: planner decision state; executable lines: `19`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/contract_run_domain.py:SemanticReviewResult` — responsibility: semantic review verdict state; executable lines: `24`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/contract_run_domain.py:ContractCycleRecord` — responsibility: one contract-cycle execution record; executable lines: `24`; constructor inputs: `0`; max method inputs: `2`; inheritance: `composition-only`.
+- `core/development/contract_run_domain.py:BehaviorContractRunState` — responsibility: authoritative contract-run state including gatekeeper and failure progression; executable lines: `39`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+- `core/development/contract_run_domain.py:TddSnapshot` — responsibility: persisted repository-level TDD snapshot; executable lines: `26`; constructor inputs: `0`; max method inputs: `1`; inheritance: `composition-only`.
+
+INCOMPLETE_ITEMS = NONE
