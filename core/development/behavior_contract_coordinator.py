@@ -1418,6 +1418,7 @@ def _tester_objective(
         f"Target behavior: {step.focused_behavior}. Expected observable result: {step.expected_result}. "
         f"Requirement refs: {', '.join(step.requirement_refs)}. "
         "Do not edit production code. Do not try to make the test pass. "
+        "Make the test data actually satisfy the target behavior's precondition and invoke the operation that should produce the stated result; do not assert a failure using inputs that leave that condition untriggered. "
         "Do not add helper functions, fixtures, comments, or docstrings unless strictly required. "
         "This target is a standalone external repository, not ATHBA. Use only modules and files visible in the supplied repository material. "
         "Do not import ATHBA internals unless they are explicitly present in that material. "
