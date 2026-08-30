@@ -6,12 +6,13 @@ import ast
 import json
 import re
 import subprocess
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from core.datastore.repos.tdd_state_repo import TddStateRepo
+from core.development.contract_run_store import ContractRunStore
 from core.development.failure_progression import (
     DependencyDecision,
     DependencyDisposition,
@@ -66,20 +67,81 @@ class BehaviorContractCoordinationResult:
     blocked_reason: str | None = None
 
 
+@dataclass(frozen=True)
+class RepositoryMaterialRequest:
+    contract: BehaviorContract
+    run_state: BehaviorContractRunState
+    revision: str | None = None
+
+
+@dataclass(frozen=True)
+class ReviewMaterialRequest:
+    contract: BehaviorContract
+    run_state: BehaviorContractRunState
+    cycle: ContractCycleRecord
+
+
+@dataclass(frozen=True)
+class ContractPlanningRequest:
+    project_id: str
+    requirement_text: str
+    production_paths: list[str] | None = None
+    test_paths: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class StepDecisionRequest:
+    contract: BehaviorContract
+    run_state: BehaviorContractRunState
+
+
+@dataclass(frozen=True)
+class StepDecisionValidationRequest:
+    contract: BehaviorContract
+    run_state: BehaviorContractRunState
+    decision: TddStepDecision
+
+
+@dataclass(frozen=True)
+class DependencyDecisionRequest:
+    contract: BehaviorContract
+    step: TddStepProposal
+    evidence: FailureObservation
+    trusted_revision: str | None
+
+
+@dataclass(frozen=True)
+class SemanticReviewRequest:
+    contract: BehaviorContract
+    run_state: BehaviorContractRunState
+    cycle: ContractCycleRecord
+    candidate_revision: str
+    review_material: str
+
+
+@dataclass(frozen=True)
+class WorkUnitBuildRequest:
+    contract: BehaviorContract
+    step: TddStepProposal
+    repository_material: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class RepairWorkUnitBuildRequest:
+    contract: BehaviorContract
+    cycle: ContractCycleRecord
+    review: SemanticReviewResult
+
+
 class ReviewMaterialProvider(Protocol):
-    def render(self, contract: BehaviorContract, run_state: BehaviorContractRunState, cycle: ContractCycleRecord) -> str:
+    def render(self, request: ReviewMaterialRequest) -> str:
         ...
 
 
 class TesterRepositoryMaterialProvider(Protocol):
     """Supply bounded, revision-pinned repository facts for TDD planning."""
 
-    def render(
-        self,
-        contract: BehaviorContract,
-        run_state: BehaviorContractRunState,
-        revision: str | None = None,
-    ) -> dict[str, object]:
+    def render(self, request: RepositoryMaterialRequest) -> dict[str, object]:
         ...
 
 
@@ -96,23 +158,23 @@ class GitReviewMaterialProvider:
     def __init__(self, repository_root: str | Path):
         self.repository_root = Path(repository_root)
 
-    def render(self, contract: BehaviorContract, run_state: BehaviorContractRunState, cycle: ContractCycleRecord) -> str:
-        candidate_revision = cycle.candidate_revision
-        prior_semantic_revision = run_state.semantic_base_revision
+    def render(self, request: ReviewMaterialRequest) -> str:
+        candidate_revision = request.cycle.candidate_revision
+        prior_semantic_revision = request.run_state.semantic_base_revision
         if candidate_revision is None:
             raise ValueError("review material requires a candidate revision")
         if prior_semantic_revision is None:
             raise ValueError("review material requires a prior semantic revision")
 
-        production_path = _repository_relative_path(cycle.step.production_path, label="production path")
-        test_path = _repository_relative_path(cycle.step.test_path, label="test path")
+        production_path = _repository_relative_path(request.cycle.step.production_path, label="production path")
+        test_path = _repository_relative_path(request.cycle.step.test_path, label="test path")
         self._verify_revision(candidate_revision)
         self._verify_revision(prior_semantic_revision)
 
         payload = {
             "candidate_revision": candidate_revision,
             "prior_semantic_revision": prior_semantic_revision,
-            "focused_tdd_step": cycle.step.to_dict(),
+            "focused_tdd_step": request.cycle.step.to_dict(),
             "production_diff": self._git(
                 "diff",
                 "--unified=3",
@@ -131,8 +193,8 @@ class GitReviewMaterialProvider:
                 "content": self._git("show", f"{candidate_revision}:{test_path}"),
             },
             "rack_ai_evidence": {
-                "evidence_location": cycle.green_phase.evidence_location if cycle.green_phase else None,
-                "change_id": cycle.green_phase.change_id if cycle.green_phase else None,
+                "evidence_location": request.cycle.green_phase.evidence_location if request.cycle.green_phase else None,
+                "change_id": request.cycle.green_phase.change_id if request.cycle.green_phase else None,
             },
         }
         return json.dumps(payload, indent=2, sort_keys=True)
@@ -162,19 +224,14 @@ class GitTesterRepositoryMaterialProvider:
     def __init__(self, repository_root: str | Path):
         self.repository_root = Path(repository_root)
 
-    def render(
-        self,
-        contract: BehaviorContract,
-        run_state: BehaviorContractRunState,
-        revision: str | None = None,
-    ) -> dict[str, object]:
-        selected_revision = revision or run_state.semantic_base_revision or run_state.repository_binding.base_sha
+    def render(self, request: RepositoryMaterialRequest) -> dict[str, object]:
+        selected_revision = request.revision or request.run_state.semantic_base_revision or request.run_state.repository_binding.base_sha
         if selected_revision is None:
             raise ValueError("repository context requires a trusted revision")
         self._verify_revision(selected_revision)
         files = self._git("ls-tree", "-r", "--name-only", selected_revision).splitlines()
-        production_files = [self._file_material(selected_revision, path) for path in contract.production_paths]
-        test_files = [self._file_material(selected_revision, path) for path in contract.test_paths]
+        production_files = [self._file_material(selected_revision, path) for path in request.contract.production_paths]
+        test_files = [self._file_material(selected_revision, path) for path in request.contract.test_paths]
         return {
             "repository_kind": "external_registered_repository",
             "trusted_revision": selected_revision,
@@ -237,13 +294,13 @@ class RequirementClausePlanner:
         self.gateway = gateway
 
     async def create_clauses(self, *, project_id: str, requirement_text: str) -> list[SourceRequirementClause]:
-        request = ReasoningRequest(
+        reasoning_request = ReasoningRequest(
             purpose="athba_source_requirement_clauses",
             prompt=_source_clause_prompt(project_id=project_id, requirement_text=requirement_text),
             project_id=project_id,
             requires_large_context=False,
         )
-        result = await self.gateway.reason(request)
+        result = await self.gateway.reason(reasoning_request)
         payload = _json_object(result.text, label="source requirement clauses")
         raw_clauses = payload.get("clauses")
         if not isinstance(raw_clauses, list):
@@ -265,30 +322,32 @@ class BehaviorContractPlanner:
         self.gateway = gateway
         self.clause_planner = clause_planner or RequirementClausePlanner(gateway)
 
-    async def create_contract(
-        self,
-        *,
-        project_id: str,
-        requirement_text: str,
-        production_paths: list[str] | None = None,
-        test_paths: list[str] | None = None,
-    ) -> BehaviorContract:
-        normalized_production_paths = _normalize_allowed_paths(production_paths, label="allowed production paths")
-        normalized_test_paths = _normalize_allowed_paths(test_paths, label="allowed test paths")
-        source_clauses = await self.clause_planner.create_clauses(project_id=project_id, requirement_text=requirement_text)
-        request = ReasoningRequest(
+    async def create_contract(self, request: ContractPlanningRequest | None = None, **legacy) -> BehaviorContract:
+        request = request or ContractPlanningRequest(
+            legacy["project_id"],
+            legacy["requirement_text"],
+            legacy.get("production_paths"),
+            legacy.get("test_paths"),
+        )
+        normalized_production_paths = _normalize_allowed_paths(request.production_paths, label="allowed production paths")
+        normalized_test_paths = _normalize_allowed_paths(request.test_paths, label="allowed test paths")
+        source_clauses = await self.clause_planner.create_clauses(
+            project_id=request.project_id,
+            requirement_text=request.requirement_text,
+        )
+        reasoning_request = ReasoningRequest(
             purpose="athba_behavior_contract",
             prompt=_contract_prompt(
-                project_id=project_id,
-                requirement_text=requirement_text,
+                project_id=request.project_id,
+                requirement_text=request.requirement_text,
                 source_clauses=source_clauses,
                 production_paths=normalized_production_paths,
                 test_paths=normalized_test_paths,
             ),
-            project_id=project_id,
+            project_id=request.project_id,
             requires_large_context=False,
         )
-        result = await self.gateway.reason(request)
+        result = await self.gateway.reason(reasoning_request)
         try:
             return _contract_from_response(
                 result.text,
@@ -302,15 +361,15 @@ class BehaviorContractPlanner:
             repair_request = ReasoningRequest(
                 purpose="athba_behavior_contract_repair",
                 prompt=_contract_repair_prompt(
-                    project_id=project_id,
-                    requirement_text=requirement_text,
+                    project_id=request.project_id,
+                    requirement_text=request.requirement_text,
                     source_clauses=source_clauses,
                     production_paths=normalized_production_paths,
                     test_paths=normalized_test_paths,
                     invalid_contract_text=result.text,
                     validation_error=str(error),
                 ),
-                project_id=project_id,
+                project_id=request.project_id,
                 requires_large_context=False,
             )
             repair_result = await self.gateway.reason(repair_request)
@@ -333,45 +392,49 @@ class DynamicTddPlanner:
         self.gateway = gateway
         self.repository_material_provider = repository_material_provider
 
-    async def decide_next_step(self, contract: BehaviorContract, run_state: BehaviorContractRunState) -> TddStepDecision:
+    async def decide_next_step(
+        self,
+        request: StepDecisionRequest | BehaviorContract,
+        run_state: BehaviorContractRunState | None = None,
+    ) -> TddStepDecision:
+        request = request if isinstance(request, StepDecisionRequest) else StepDecisionRequest(request, _require_run_state(run_state))
         repository_material = _repository_material_for_run_state(
-            contract,
-            run_state,
+            request.contract,
+            request.run_state,
             provider=self.repository_material_provider,
         )
-        request = ReasoningRequest(
+        context = request
+        reasoning_request = ReasoningRequest(
             purpose="athba_tdd_step_selection",
-            prompt=_step_prompt(contract=contract, run_state=run_state, repository_material=repository_material),
-            project_id=contract.project_id,
+            prompt=_step_prompt(contract=context.contract, run_state=context.run_state, repository_material=repository_material),
+            project_id=context.contract.project_id,
             requires_large_context=False,
         )
-        result = await self.gateway.reason(request)
+        result = await self.gateway.reason(reasoning_request)
         try:
-            return _decision_from_response(contract, run_state, result.text, label="step decision")
+            return _decision_from_response(context.contract, context.run_state, result.text, label="step decision")
         except ValueError as error:
             if not _is_recoverable_step_error(error):
                 raise
             repair_request = ReasoningRequest(
                 purpose="athba_tdd_step_selection_repair",
                 prompt=_step_repair_prompt(
-                    contract=contract,
-                    run_state=run_state,
+                    contract=context.contract,
+                    run_state=context.run_state,
                     invalid_step_text=result.text,
                     validation_error=str(error),
                     repository_material=repository_material,
                 ),
-                project_id=contract.project_id,
+                project_id=context.contract.project_id,
                 requires_large_context=False,
             )
             repair_result = await self.gateway.reason(repair_request)
-            return _decision_from_response(contract, run_state, repair_result.text, label="step decision repair")
+            return _decision_from_response(context.contract, context.run_state, repair_result.text, label="step decision repair")
 
-    def _validate_decision(
-        self,
-        contract: BehaviorContract,
-        run_state: BehaviorContractRunState,
-        decision: TddStepDecision,
-    ) -> TddStepDecision:
+    def _validate_decision(self, request: StepDecisionValidationRequest) -> TddStepDecision:
+        contract = request.contract
+        run_state = request.run_state
+        decision = request.decision
         requirement_refs = run_state.active_requirement_refs()
         requirement_ref_set = set(requirement_refs)
         approved_ref_set = set(run_state.completed_requirement_refs)
@@ -416,26 +479,32 @@ class DependencyPrerequisitePlanner:
     def __init__(self, gateway: ReasoningGateway):
         self.gateway = gateway
 
-    async def decide(self, *, contract: BehaviorContract, step: TddStepProposal, evidence: FailureObservation, trusted_revision: str | None) -> DependencyDecision:
-        request = ReasoningRequest(
+    async def decide(self, request: DependencyDecisionRequest | None = None, **legacy) -> DependencyDecision:
+        request = request or DependencyDecisionRequest(
+            legacy["contract"],
+            legacy["step"],
+            legacy["evidence"],
+            legacy.get("trusted_revision"),
+        )
+        reasoning_request = ReasoningRequest(
             purpose="athba_dependency_prerequisite_decision",
-            project_id=contract.project_id,
+            project_id=request.contract.project_id,
             requires_large_context=False,
             prompt=json.dumps({
                 "instruction": "Choose exactly one bounded dependency decision as raw JSON. For add_prerequisite, prerequisite_observable must state one externally observable capability, not an implementation, API invocation, test, or patch instruction. Do not redesign.",
-                "blocked_requirement_ref": step.requirement_refs[0],
-                "planned_requirements": [item.to_dict() for item in contract.observable_requirements],
-                "trusted_revision": trusted_revision,
-                "mechanical_failure": evidence.to_dict(),
+                "blocked_requirement_ref": request.step.requirement_refs[0],
+                "planned_requirements": [item.to_dict() for item in request.contract.observable_requirements],
+                "trusted_revision": request.trusted_revision,
+                "mechanical_failure": request.evidence.to_dict(),
                 "schema": {"disposition": "already_planned|add_prerequisite|reject_dependency", "parent_requirement_ref": "string", "prerequisite_refs": ["string"], "prerequisite_observable": "string|null", "rationale": "string"},
             }, sort_keys=True),
         )
         result = await self.gateway.reason(request)
         decision = DependencyDecision.from_dict(_json_object(result.text, label="dependency decision"))
-        if decision.parent_requirement_ref != step.requirement_refs[0]:
+        if decision.parent_requirement_ref != request.step.requirement_refs[0]:
             raise ValueError("dependency decision must retain the blocked requirement")
         if decision.disposition is DependencyDisposition.ALREADY_PLANNED:
-            known = set(contract.requirement_refs())
+            known = set(request.contract.requirement_refs())
             if not set(decision.prerequisite_refs).issubset(known):
                 raise ValueError("existing planned dependency must reference contract requirements")
         if decision.disposition is DependencyDisposition.ADD_PREREQUISITE and len(decision.prerequisite_refs) != 1:
@@ -449,32 +518,31 @@ class SeniorReviewer:
     def __init__(self, gateway: ReasoningGateway):
         self.gateway = gateway
 
-    async def review(
-        self,
-        *,
-        contract: BehaviorContract,
-        run_state: BehaviorContractRunState,
-        cycle: ContractCycleRecord,
-        candidate_revision: str,
-        review_material: str,
-    ) -> SemanticReviewResult:
-        request = ReasoningRequest(
+    async def review(self, request: SemanticReviewRequest | None = None, **legacy) -> SemanticReviewResult:
+        request = request or SemanticReviewRequest(
+            legacy["contract"],
+            legacy["run_state"],
+            legacy["cycle"],
+            legacy["candidate_revision"],
+            legacy["review_material"],
+        )
+        reasoning_request = ReasoningRequest(
             purpose="athba_senior_review",
             prompt=_review_prompt(
-                contract=contract,
-                run_state=run_state,
-                cycle=cycle,
-                candidate_revision=candidate_revision,
-                review_material=review_material,
+                contract=request.contract,
+                run_state=request.run_state,
+                cycle=request.cycle,
+                candidate_revision=request.candidate_revision,
+                review_material=request.review_material,
             ),
-            project_id=contract.project_id,
+            project_id=request.contract.project_id,
             requires_large_context=True,
         )
-        result = await self.gateway.reason(request)
+        result = await self.gateway.reason(reasoning_request)
         review = SemanticReviewResult.from_dict(_json_object(result.text, label="semantic review"))
-        if review.candidate_revision != candidate_revision:
+        if review.candidate_revision != request.candidate_revision:
             raise ValueError("semantic review candidate revision mismatch")
-        if review.step_id != cycle.step.step_id:
+        if review.step_id != request.cycle.step.step_id:
             raise ValueError("semantic review step id mismatch")
         return review
 
@@ -483,21 +551,16 @@ class ContractTesterWorkUnitFactory:
     def __init__(self, runtime: PythonPytestRuntime | None = None):
         self.runtime = runtime or PythonPytestRuntime()
 
-    def build(
-        self,
-        contract: BehaviorContract,
-        step: TddStepProposal,
-        repository_material: dict[str, object] | None = None,
-    ) -> DevelopmentWorkUnit:
+    def build(self, request: WorkUnitBuildRequest) -> DevelopmentWorkUnit:
         return DevelopmentWorkUnit(
-            id=red_work_unit_id(step.step_id),
-            project_id=contract.project_id,
-            parent_ticket_id=contract.id,
-            objective=_tester_objective(contract, step, repository_material),
-            allowed_paths=[step.test_path],
+            id=red_work_unit_id(request.step.step_id),
+            project_id=request.contract.project_id,
+            parent_ticket_id=request.contract.id,
+            objective=_tester_objective(request.contract, request.step, request.repository_material),
+            allowed_paths=[request.step.test_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.red_command(step.test_name)],
-                required_artifacts=[step.test_path],
+                commands=[self.runtime.red_command(request.step.test_name)],
+                required_artifacts=[request.step.test_path],
             ),
             status=WorkUnitStatus.READY,
         )
@@ -507,21 +570,16 @@ class ContractDeveloperWorkUnitFactory:
     def __init__(self, runtime: PythonPytestRuntime | None = None):
         self.runtime = runtime or PythonPytestRuntime()
 
-    def build(
-        self,
-        contract: BehaviorContract,
-        step: TddStepProposal,
-        repository_material: dict[str, object] | None = None,
-    ) -> DevelopmentWorkUnit:
+    def build(self, request: WorkUnitBuildRequest) -> DevelopmentWorkUnit:
         return DevelopmentWorkUnit(
-            id=green_work_unit_id(step.step_id),
-            project_id=contract.project_id,
-            parent_ticket_id=contract.id,
-            objective=_developer_objective(contract, step, repository_material),
-            allowed_paths=[step.production_path],
+            id=green_work_unit_id(request.step.step_id),
+            project_id=request.contract.project_id,
+            parent_ticket_id=request.contract.id,
+            objective=_developer_objective(request.contract, request.step, request.repository_material),
+            allowed_paths=[request.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.pytest_command(step.test_name), self.runtime.pytest_command(step.test_path)],
-                required_artifacts=[step.production_path],
+                commands=[self.runtime.pytest_command(request.step.test_name), self.runtime.pytest_command(request.step.test_path)],
+                required_artifacts=[request.step.production_path],
             ),
             status=WorkUnitStatus.READY,
         )
@@ -531,560 +589,160 @@ class ContractRepairWorkUnitFactory:
     def __init__(self, runtime: PythonPytestRuntime | None = None):
         self.runtime = runtime or PythonPytestRuntime()
 
-    def build(
-        self,
-        contract: BehaviorContract,
-        cycle: ContractCycleRecord,
-        review: SemanticReviewResult,
-    ) -> DevelopmentWorkUnit:
-        attempt_number = cycle.repair_attempts + 1
+    def build(self, request: RepairWorkUnitBuildRequest) -> DevelopmentWorkUnit:
+        attempt_number = request.cycle.repair_attempts + 1
         return DevelopmentWorkUnit(
-            id=repair_work_unit_id(cycle.step.step_id, attempt_number),
-            project_id=contract.project_id,
-            parent_ticket_id=contract.id,
-            objective=_repair_objective(contract, cycle.step, review),
-            allowed_paths=[cycle.step.production_path],
+            id=repair_work_unit_id(request.cycle.step.step_id, attempt_number),
+            project_id=request.contract.project_id,
+            parent_ticket_id=request.contract.id,
+            objective=_repair_objective(request.contract, request.cycle.step, request.review),
+            allowed_paths=[request.cycle.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.pytest_command(cycle.step.test_name), self.runtime.pytest_command(cycle.step.test_path)],
-                required_artifacts=[cycle.step.production_path],
+                commands=[self.runtime.pytest_command(request.cycle.step.test_name), self.runtime.pytest_command(request.cycle.step.test_path)],
+                required_artifacts=[request.cycle.step.production_path],
             ),
             status=WorkUnitStatus.READY,
         )
 
 
-class BehaviorContractCoordinator:
-    """Drive a contract through dynamic RED/GREEN cycles, review, and repair."""
 
-    def __init__(
-        self,
-        *,
-        execution_gateway: WorkUnitExecutionGateway,
-        reasoning_gateway: ReasoningGateway,
-        repository_binding: RepositoryBinding,
-        state_repo: TddStateRepository | None = None,
-        contract_planner: BehaviorContractPlanner | None = None,
-        step_planner: DynamicTddPlanner | None = None,
-        reviewer: SeniorReviewer | None = None,
-        tester_factory: ContractTesterWorkUnitFactory | None = None,
-        developer_factory: ContractDeveloperWorkUnitFactory | None = None,
-        repair_factory: ContractRepairWorkUnitFactory | None = None,
-        review_material_provider: ReviewMaterialProvider | None = None,
-        repository_material_provider: TesterRepositoryMaterialProvider | None = None,
-        max_semantic_repairs: int = 2,
-        gatekeeper: SpecificationGatekeeper | None = None,
-        gap_adapter: SpecificationGapTddAdapter | None = None,
-        failure_policy: FailureProgressionPolicy | None = None,
-        max_tester_repairs: int = 2,
-        max_developer_repairs: int = 2,
-        environment_recovery: EnvironmentRecovery | None = None,
-        dependency_planner: DependencyPrerequisitePlanner | None = None,
-    ):
+@dataclass(frozen=True)
+class CoordinatorDependencies:
+    execution_gateway: WorkUnitExecutionGateway
+    reasoning_gateway: ReasoningGateway
+    repository_binding: RepositoryBinding
+    state_repo: TddStateRepository | None = None
+    step_planner: DynamicTddPlanner | None = None
+    reviewer: SeniorReviewer | None = None
+    tester_factory: ContractTesterWorkUnitFactory | None = None
+    developer_factory: ContractDeveloperWorkUnitFactory | None = None
+    repair_factory: ContractRepairWorkUnitFactory | None = None
+    review_material_provider: ReviewMaterialProvider | None = None
+    repository_material_provider: TesterRepositoryMaterialProvider | None = None
+    max_semantic_repairs: int = 2
+    gatekeeper: SpecificationGatekeeper | None = None
+    gap_adapter: SpecificationGapTddAdapter | None = None
+    failure_policy: FailureProgressionPolicy | None = None
+    max_tester_repairs: int = 2
+    max_developer_repairs: int = 2
+    environment_recovery: EnvironmentRecovery | None = None
+    dependency_planner: DependencyPrerequisitePlanner | None = None
+
+
+@dataclass(frozen=True)
+class RunAdvance:
+    run_state: BehaviorContractRunState
+    return_now: bool = False
+
+
+@dataclass(frozen=True)
+class PhaseExecutionRequest:
+    phase: TddPhase
+    work_unit: DevelopmentWorkUnit
+    base_binding: RepositoryBinding
+
+
+@dataclass(frozen=True)
+class FailureObservationRequest:
+    phase: TddPhase
+    outcome: _PhaseOutcome
+
+
+@dataclass(frozen=True)
+class FailureRoutingRequest:
+    run_state: BehaviorContractRunState
+    phase: TddPhase
+    work_unit: DevelopmentWorkUnit
+    outcome: _PhaseOutcome
+
+
+@dataclass(frozen=True)
+class FailureRouterDependencies:
+    failure_policy: FailureProgressionPolicy
+    environment_recovery: EnvironmentRecovery | None
+    dependency_planner: DependencyPrerequisitePlanner
+    max_tester_repairs: int
+    max_developer_repairs: int
+
+
+@dataclass(frozen=True)
+class ReadyPoolDependencies:
+    step_planner: DynamicTddPlanner
+    gatekeeper: SpecificationGatekeeper | None
+    gap_adapter: SpecificationGapTddAdapter | None
+    repository_binding: RepositoryBinding
+
+
+@dataclass(frozen=True)
+class CycleProgressionDependencies:
+    tester_factory: ContractTesterWorkUnitFactory
+    developer_factory: ContractDeveloperWorkUnitFactory
+    repository_material_provider: TesterRepositoryMaterialProvider | None
+    phase_executor: 'PhaseExecutor'
+    failure_router: 'FailedCandidateRouter'
+
+
+@dataclass(frozen=True)
+class ReviewProgressionDependencies:
+    reviewer: SeniorReviewer
+    review_material_provider: ReviewMaterialProvider | None
+    gatekeeper: SpecificationGatekeeper | None
+    max_semantic_repairs: int
+
+
+@dataclass(frozen=True)
+class RepairProgressionDependencies:
+    repair_factory: ContractRepairWorkUnitFactory
+    phase_executor: 'PhaseExecutor'
+
+
+class PhaseExecutor:
+    def __init__(self, execution_gateway: WorkUnitExecutionGateway):
         self.execution_gateway = execution_gateway
-        self.reasoning_gateway = reasoning_gateway
-        self.repository_binding = repository_binding
-        self.state_repo = state_repo or TddStateRepo()
-        self.contract_planner = contract_planner or BehaviorContractPlanner(reasoning_gateway)
-        self.repository_material_provider = repository_material_provider or _default_tester_repository_material_provider(repository_binding)
-        self.step_planner = step_planner or DynamicTddPlanner(
-            reasoning_gateway,
-            repository_material_provider=self.repository_material_provider,
-        )
-        self.reviewer = reviewer or SeniorReviewer(reasoning_gateway)
-        self.tester_factory = tester_factory or ContractTesterWorkUnitFactory()
-        self.developer_factory = developer_factory or ContractDeveloperWorkUnitFactory()
-        self.repair_factory = repair_factory or ContractRepairWorkUnitFactory()
-        self.review_material_provider = review_material_provider or _default_review_material_provider(repository_binding)
-        self.max_semantic_repairs = max_semantic_repairs
-        self.gatekeeper = gatekeeper
-        self.gap_adapter = gap_adapter
-        self.failure_policy = failure_policy or FailureProgressionPolicy()
-        self.max_tester_repairs = max_tester_repairs
-        self.max_developer_repairs = max_developer_repairs
-        self.environment_recovery = environment_recovery
-        self.dependency_planner = dependency_planner or DependencyPrerequisitePlanner(reasoning_gateway)
 
-    async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
-        project_id = contract.project_id
-        snapshot = self.state_repo.load(project_id) or TddSnapshot(
-            project_id=project_id,
-            repository_binding=self.repository_binding,
-            current_trusted_revision=self.repository_binding.base_sha,
-        )
-        run_state = snapshot.contract_runs.get(contract.id)
-        if run_state is None:
-            run_state = BehaviorContractRunState(
-                contract=contract,
-                repository_binding=self.repository_binding,
-                semantic_base_revision=self.repository_binding.base_sha,
+    async def execute(self, request: PhaseExecutionRequest) -> _PhaseOutcome:
+        recorded_at = _utc_now()
+        base_sha = request.base_binding.base_sha
+        try:
+            result = await self.execution_gateway.execute(request.work_unit, request.base_binding)
+        except Exception as error:
+            return _PhaseOutcome(
+                attempt=None,
+                phase_state=_transport_failure_state(request.phase, request.work_unit.id, base_sha, recorded_at, str(error)),
+                accepted=False,
+                blocked_reason=f"{request.phase.value} phase transport failure",
             )
-            snapshot = self._save_run_state(snapshot, run_state)
-
-        while True:
-            # The persisted run state owns mutable contract evolution (for example,
-            # targeted gaps and synthesized prerequisites) across coordinator resumes.
-            contract = run_state.contract
-            if run_state.current_pool == "completed":
-                return self._result_from_run_state(run_state)
-            if run_state.current_pool == "replan_ready":
-                return self._result_from_run_state(run_state)
-            if run_state.current_pool in {"tdd_ready", "approved"}:
-                if (
-                    run_state.current_pool == "tdd_ready"
-                    and run_state.targeted_requirement_ref is None
-                    and self.gatekeeper is not None
-                    and self.gap_adapter is not None
-                ):
-                    gatekeeper_state = await self.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
-                    gatekeeper_state = await self.gatekeeper.assess(contract, run_state, gatekeeper_state)
-                    gap = _first_executable_gap(contract, gatekeeper_state)
-                    if gap is not None:
-                        updated_contract = self.gap_adapter.extend_contract_for_gap(contract, gap)
-                        targeted_requirement = _targeted_requirement_for_gap(updated_contract, gap)
-                        run_state = replace(
-                            run_state,
-                            contract=updated_contract,
-                            gatekeeper_state=gatekeeper_state,
-                            targeted_requirement_ref=targeted_requirement.ref,
-                            targeted_checklist_ref=gap.checklist_ref,
-                            blocked_reason="targeted specification gap selected",
-                        )
-                        snapshot = self._save_run_state(snapshot, run_state)
-                        contract = updated_contract
-                        continue
-                    if _has_untraceable_executable_gap(gatekeeper_state):
-                        run_state = replace(
-                            run_state,
-                            current_pool="replan_ready",
-                            contract=replace(contract, status="replan_ready"),
-                            gatekeeper_state=gatekeeper_state,
-                            blocked_reason="specification checklist has no traceable executable gap",
-                        )
-                        snapshot = self._save_run_state(snapshot, run_state)
-                        return self._result_from_run_state(run_state)
-                decision = await self.step_planner.decide_next_step(contract, run_state)
-                if decision.status == "complete":
-                    if self.gatekeeper is not None:
-                        gatekeeper_state = await self.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
-                        gatekeeper_state = await self.gatekeeper.assess(contract, run_state, gatekeeper_state)
-                        if gatekeeper_state.is_complete():
-                            run_state = replace(
-                                run_state,
-                                current_pool="completed",
-                                completed_requirement_refs=_ordered_completed_requirement_refs(contract, run_state.completed_requirement_refs),
-                                contract=replace(contract, status="completed"),
-                                repository_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
-                                gatekeeper_state=gatekeeper_state,
-                            )
-                            snapshot = self._save_run_state(snapshot, run_state)
-                            return self._result_from_run_state(run_state)
-                        latest_assessment = gatekeeper_state.latest_assessment
-                        if self.gap_adapter is not None and latest_assessment is not None and latest_assessment.gaps:
-                            updated_contract = self.gap_adapter.extend_contract_for_gap(contract, latest_assessment.gaps[0])
-                            run_state = replace(
-                                run_state,
-                                current_pool="tdd_ready",
-                                contract=replace(updated_contract, status="tdd_ready"),
-                                blocked_reason="specification checklist incomplete",
-                                gatekeeper_state=gatekeeper_state,
-                            )
-                            snapshot = self._save_run_state(snapshot, run_state)
-                            contract = updated_contract
-                            continue
-                        run_state = replace(
-                            run_state,
-                            current_pool="approved",
-                            contract=replace(contract, status="approved"),
-                            blocked_reason="specification checklist incomplete",
-                            gatekeeper_state=gatekeeper_state,
-                        )
-                        snapshot = self._save_run_state(snapshot, run_state)
-                        return self._result_from_run_state(run_state)
-                    run_state = replace(
-                        run_state,
-                        current_pool="completed",
-                        completed_requirement_refs=_ordered_completed_requirement_refs(contract, run_state.completed_requirement_refs),
-                        contract=replace(contract, status="completed"),
-                        repository_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
-                    )
-                    snapshot = self._save_run_state(snapshot, run_state)
-                    return self._result_from_run_state(run_state)
-                cycle = ContractCycleRecord.from_step(decision.proposal, base_revision=run_state.semantic_base_revision)
-                run_state = replace(
-                    run_state,
-                    current_pool="cycle_active",
-                    contract=replace(contract, status="cycle_active"),
-                    cycles=[*run_state.cycles, cycle],
-                )
-                snapshot = self._save_run_state(snapshot, run_state)
-                continue
-            if run_state.current_pool == "cycle_active":
-                cycle = run_state.current_cycle()
-                if cycle is None:
-                    raise ValueError("cycle_active run state requires an active cycle")
-                if cycle.red_phase is not None and cycle.red_phase.accepted_revision is None:
-                    red_outcome = await self._execute_phase(
-                        phase=TddPhase.RED,
-                        work_unit=self.tester_factory.build(
-                            contract,
-                            cycle.step,
-                            self._repository_material(contract, run_state),
-                        ),
-                        base_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
-                    )
-                    if not red_outcome.accepted:
-                        if _is_red_already_satisfied_from_phase(red_outcome):
-                            run_state = replace(
-                                run_state,
-                                current_pool="tdd_ready",
-                                contract=replace(contract, status="tdd_ready"),
-                                blocked_reason="step already satisfied before RED",
-                                cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, red_phase=red_outcome.phase_state, pool="approved")),
-                            )
-                            snapshot = self._save_run_state(snapshot, run_state)
-                            continue
-                        run_state = await self._route_failed_candidate(
-                            run_state=run_state,
-                            contract=contract,
-                            cycle=cycle,
-                            phase=TddPhase.RED,
-                            work_unit=self.tester_factory.build(contract, cycle.step, self._repository_material(contract, run_state)),
-                            outcome=red_outcome,
-                        )
-                        snapshot = self._save_run_state(snapshot, run_state)
-                        if run_state.current_pool == "cycle_active":
-                            continue
-                        return self._result_from_run_state(run_state)
-                    cycle = replace(cycle, red_phase=red_outcome.phase_state)
-                    run_state = replace(run_state, cycles=self._replace_current_cycle(run_state.cycles, cycle))
-                    snapshot = self._save_run_state(snapshot, run_state)
-                if cycle.green_phase is not None and cycle.green_phase.accepted_revision is None:
-                    base_binding = run_state.repository_binding.with_base_sha(cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision)
-                    green_outcome = await self._execute_phase(
-                        phase=TddPhase.GREEN,
-                        work_unit=self.developer_factory.build(
-                            contract,
-                            cycle.step,
-                            self._repository_material(contract, run_state, cycle.red_phase.accepted_revision if cycle.red_phase else None),
-                        ),
-                        base_binding=base_binding,
-                    )
-                    if not green_outcome.accepted:
-                        run_state = await self._route_failed_candidate(
-                            run_state=run_state,
-                            contract=contract,
-                            cycle=cycle,
-                            phase=TddPhase.GREEN,
-                            work_unit=self.developer_factory.build(
-                                contract,
-                                cycle.step,
-                                self._repository_material(contract, run_state, cycle.red_phase.accepted_revision if cycle.red_phase else None),
-                            ),
-                            outcome=green_outcome,
-                        )
-                        snapshot = self._save_run_state(snapshot, run_state)
-                        if run_state.current_pool == "cycle_active":
-                            continue
-                        return self._result_from_run_state(run_state)
-                    cycle = replace(
-                        cycle,
-                        green_phase=green_outcome.phase_state,
-                        candidate_revision=green_outcome.phase_state.accepted_revision,
-                        pool="review_ready",
-                    )
-                    run_state = replace(
-                        run_state,
-                        current_pool="review_ready",
-                        contract=replace(contract, status="review_ready"),
-                        cycles=self._replace_current_cycle(run_state.cycles, cycle),
-                    )
-                    snapshot = self._save_run_state(snapshot, run_state)
-                    continue
-                raise ValueError("cycle_active run state has no remaining executable phase")
-            if run_state.current_pool == "review_ready":
-                cycle = run_state.current_cycle()
-                if cycle is None or cycle.candidate_revision is None:
-                    raise ValueError("review_ready run state requires a candidate revision")
-                review_material = self._review_material(contract, run_state, cycle)
-                review = await self.reviewer.review(
-                    contract=contract,
-                    run_state=run_state,
-                    cycle=cycle,
-                    candidate_revision=cycle.candidate_revision,
-                    review_material=review_material,
-                )
-                cycle = replace(cycle, review_result=review, review_history=[*cycle.review_history, review])
-                if review.verdict == "approved":
-                    completed_refs = sorted(set(run_state.completed_requirement_refs).union(cycle.step.requirement_refs))
-                    cycle = replace(cycle, semantic_revision=cycle.candidate_revision, pool="approved")
-                    approved_run_state = replace(
-                        run_state,
-                        current_pool="approved",
-                        contract=replace(contract, status="approved"),
-                        semantic_base_revision=cycle.candidate_revision,
-                        repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
-                        completed_requirement_refs=completed_refs,
-                        blocked_reason=None,
-                        cycles=self._replace_current_cycle(run_state.cycles, cycle),
-                    )
-                    if approved_run_state.targeted_checklist_ref is not None and self.gatekeeper is not None:
-                        gatekeeper_state = await self.gatekeeper.assess(
-                            contract,
-                            approved_run_state,
-                            approved_run_state.gatekeeper_state or await self.gatekeeper.ensure_state(contract, None),
-                        )
-                        target_assessment = _checklist_assessment(gatekeeper_state, approved_run_state.targeted_checklist_ref)
-                        target_proven = target_assessment is not None and target_assessment.status == "proven"
-                        checklist_complete = gatekeeper_state.is_complete()
-                        run_state = replace(
-                            approved_run_state,
-                            current_pool="completed" if checklist_complete else ("approved" if target_proven else "replan_ready"),
-                            contract=replace(contract, status="completed") if checklist_complete else approved_run_state.contract,
-                            blocked_reason=(
-                                None
-                                if checklist_complete
-                                else ("additional specification checklist items remain unproven" if target_proven else "targeted specification gap remains unproven")
-                            ),
-                            gatekeeper_state=gatekeeper_state,
-                        )
-                        snapshot = self._save_run_state(snapshot, run_state)
-                        return self._result_from_run_state(run_state)
-                    run_state = replace(
-                        run_state,
-                        current_pool="approved",
-                        contract=replace(contract, status="approved"),
-                        semantic_base_revision=cycle.candidate_revision,
-                        repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
-                        completed_requirement_refs=completed_refs,
-                        blocked_reason=None,
-                        gatekeeper_state=run_state.gatekeeper_state,
-                        cycles=self._replace_current_cycle(run_state.cycles, cycle),
-                    )
-                    snapshot = self._save_run_state(snapshot, run_state)
-                    continue
-                if review.verdict == "repair_required":
-                    if cycle.repair_attempts >= self.max_semantic_repairs:
-                        run_state = replace(
-                            run_state,
-                            current_pool="replan_ready",
-                            contract=replace(contract, status="replan_ready"),
-                            blocked_reason="semantic repair budget exhausted",
-                            cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready")),
-                        )
-                        snapshot = self._save_run_state(snapshot, run_state)
-                        return self._result_from_run_state(run_state)
-                    run_state = replace(
-                        run_state,
-                        current_pool="repair_ready",
-                        contract=replace(contract, status="repair_ready"),
-                        blocked_reason=None,
-                        cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, pool="repair_ready")),
-                    )
-                    snapshot = self._save_run_state(snapshot, run_state)
-                    continue
-                run_state = replace(
-                    run_state,
-                    current_pool="replan_ready",
-                    contract=replace(contract, status="replan_ready"),
-                    blocked_reason=review.rationale,
-                    cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready")),
-                )
-                snapshot = self._save_run_state(snapshot, run_state)
-                return self._result_from_run_state(run_state)
-            if run_state.current_pool == "repair_ready":
-                cycle = run_state.current_cycle()
-                if cycle is None or cycle.review_result is None or cycle.candidate_revision is None:
-                    raise ValueError("repair_ready run state requires a review result and candidate revision")
-                repair_outcome = await self._execute_phase(
-                    phase=TddPhase.GREEN,
-                    work_unit=self.repair_factory.build(contract, cycle, cycle.review_result),
-                    base_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
-                )
-                if not repair_outcome.accepted:
-                    run_state = replace(
-                        run_state,
-                        current_pool="replan_ready",
-                        contract=replace(contract, status="replan_ready"),
-                        blocked_reason=repair_outcome.blocked_reason,
-                        cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready", green_phase=repair_outcome.phase_state)),
-                    )
-                    snapshot = self._save_run_state(snapshot, run_state)
-                    return self._result_from_run_state(run_state)
-                cycle = replace(
-                    cycle,
-                    repair_attempts=cycle.repair_attempts + 1,
-                    green_phase=repair_outcome.phase_state,
-                    candidate_revision=repair_outcome.phase_state.accepted_revision,
-                    pool="review_ready",
-                )
-                run_state = replace(
-                    run_state,
-                    current_pool="review_ready",
-                    contract=replace(contract, status="review_ready"),
-                    cycles=self._replace_current_cycle(run_state.cycles, cycle),
-                )
-                snapshot = self._save_run_state(snapshot, run_state)
-                continue
-            raise ValueError(f"unsupported contract run pool: {run_state.current_pool}")
-
-    def _repository_material(
-        self,
-        contract: BehaviorContract,
-        run_state: BehaviorContractRunState,
-        revision: str | None = None,
-    ) -> dict[str, object] | None:
-        if self.repository_material_provider is None:
-            return None
-        return self.repository_material_provider.render(contract, run_state, revision)
-
-    def _save_run_state(self, snapshot: TddSnapshot, run_state: BehaviorContractRunState) -> TddSnapshot:
-        updated_snapshot = replace(
-            snapshot,
-            repository_binding=run_state.repository_binding,
-            current_trusted_revision=run_state.semantic_base_revision,
-            contract_runs={**snapshot.contract_runs, run_state.contract.id: run_state},
-        )
-        self.state_repo.save(updated_snapshot)
-        return updated_snapshot
-
-    def _replace_current_cycle(self, cycles: list[ContractCycleRecord], replacement: ContractCycleRecord) -> list[ContractCycleRecord]:
-        if not cycles:
-            raise ValueError("expected at least one cycle to replace")
-        return [*cycles[:-1], replacement]
-
-    def _result_from_run_state(self, run_state: BehaviorContractRunState) -> BehaviorContractCoordinationResult:
-        return BehaviorContractCoordinationResult(
-            contract_id=run_state.contract.id,
-            current_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
-            semantic_revision=run_state.semantic_base_revision,
-            current_pool=run_state.current_pool,
-            cycles=list(run_state.cycles),
-            completed_requirement_refs=list(run_state.completed_requirement_refs),
-            blocked_reason=run_state.blocked_reason,
-        )
-
-    async def _route_failed_candidate(
-        self,
-        *,
-        run_state: BehaviorContractRunState,
-        contract: BehaviorContract,
-        cycle: ContractCycleRecord,
-        phase: TddPhase,
-        work_unit: DevelopmentWorkUnit,
-        outcome: _PhaseOutcome,
-    ) -> BehaviorContractRunState:
-        """Persist one dominant policy decision before any retry or stop."""
-        observation = self._failure_observation(phase, outcome)
-        decision = self.failure_policy.decide([observation])
-        if decision.dominant is FailureClassification.ENVIRONMENT_FAILURE:
-            if self.environment_recovery is not None and self.failure_policy.retry_allowed(
-                run_state.failure_progress, "environment_recovery", budget=1
-            ) and await self.environment_recovery.recover_and_verify(contract.project_id):
-                progress = self.failure_policy.record(
-                    run_state.failure_progress,
-                    decision,
-                    route="environment_recovery",
-                    next_state=FailureRouteState.ACTIVE,
-                )
-                replacement = replace(cycle, pool="cycle_active", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state}))
-                return replace(
-                    run_state,
-                    current_pool="cycle_active",
-                    contract=replace(contract, status="cycle_active"),
-                    blocked_reason="environment recovered; rerunning from trusted revision",
-                    cycles=self._replace_current_cycle(run_state.cycles, replacement),
-                    failure_progress=progress,
-                )
-        if decision.dominant in {
-            FailureClassification.SYNTAX_OR_PARSE_FAILURE,
-            FailureClassification.BUILD_OR_LINK_FAILURE,
-            FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE,
-        }:
-            planner_decision = await self.dependency_planner.decide(
-                contract=contract, step=cycle.step, evidence=observation, trusted_revision=run_state.semantic_base_revision,
+        phase_state = _phase_state_from_result(request.phase, request.work_unit.id, base_sha, recorded_at, result)
+        if not result.accepted:
+            return _PhaseOutcome(
+                attempt=None,
+                phase_state=phase_state,
+                accepted=False,
+                blocked_reason=_blocked_reason_for_result(request.phase, result),
+                execution_result=result,
             )
-            if planner_decision.disposition is not DependencyDisposition.REJECT_DEPENDENCY:
-                prerequisites = planner_decision.prerequisite_refs
-                if planner_decision.disposition is DependencyDisposition.ADD_PREREQUISITE:
-                    contract = _add_synthesized_prerequisite(contract, planner_decision, run_state)
-                progress = self.failure_policy.defer_for_prerequisites(
-                    run_state.failure_progress,
-                    decision,
-                    requirement_ref=planner_decision.parent_requirement_ref,
-                    prerequisite_refs=prerequisites,
-                )
-                progress = replace(progress, dependency_decisions=[*progress.dependency_decisions[:-1], planner_decision])
-                return replace(
-                    run_state,
-                    current_pool="tdd_ready",
-                    contract=replace(contract, status="tdd_ready"),
-                    blocked_reason=f"{decision.dominant.value}: deferred until {', '.join(prerequisites)} is approved",
-                    cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state}))),
-                    failure_progress=progress,
-                )
-        role = "Tester" if phase is TddPhase.RED else "Developer"
-        route = "tester_repair" if role == "Tester" else "developer_repair"
-        budget = self.max_tester_repairs if role == "Tester" else self.max_developer_repairs
-        packet = RepairPacket(
-            kind=PacketKind.REPAIR,
-            role=role,
-            work_unit_id=work_unit.id,
-            trusted_revision=run_state.semantic_base_revision if phase is TddPhase.RED else (cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision),
-            original_objective=work_unit.objective,
-            allowed_paths=list(work_unit.allowed_paths),
-            classification=decision.dominant,
-            previous_candidate=observation.candidate_revision,
-            evidence=[observation.message, *observation.evidence_refs],
-        )
-
-        repairable = decision.action.value in {"repair_tester", "repair_developer", "repair_regression"} or decision.dominant in {
-            FailureClassification.SYNTAX_OR_PARSE_FAILURE,
-            FailureClassification.BUILD_OR_LINK_FAILURE,
-            FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE,
-        }
-        if repairable and self.failure_policy.retry_allowed(run_state.failure_progress, route, budget=budget):
-            progress = self.failure_policy.record(
-                run_state.failure_progress,
-                decision,
-                route=route,
-                packet=packet,
-                next_state=FailureRouteState.AWAITING_REPAIR,
+        if not result.accepted_revision:
+            return _PhaseOutcome(
+                attempt=None,
+                phase_state=phase_state,
+                accepted=False,
+                blocked_reason=f"accepted {request.phase.value} phase missing trusted accepted revision",
+                execution_result=result,
             )
-            replacement = replace(cycle, pool="cycle_active", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state}))
-            return replace(
-                run_state,
-                current_pool="cycle_active",
-                contract=replace(contract, status="cycle_active"),
-                blocked_reason=f"{decision.dominant.value}: retrying {role} from trusted revision",
-                cycles=self._replace_current_cycle(run_state.cycles, replacement),
-                failure_progress=progress,
-            )
+        return _PhaseOutcome(attempt=None, phase_state=phase_state, accepted=True, execution_result=result)
 
-        next_state = _route_state_for_failure(decision.dominant)
-        progress = self.failure_policy.record(
-            run_state.failure_progress,
-            decision,
-            packet=packet,
-            next_state=next_state,
-            blocker=observation.message if next_state.name.startswith("BLOCKED") else None,
-        )
-        return replace(
-            run_state,
-            current_pool="replan_ready",
-            contract=replace(contract, status="replan_ready"),
-            blocked_reason=f"{decision.dominant.value}: {observation.message}",
-            cycles=self._replace_current_cycle(
-                run_state.cycles,
-                replace(cycle, pool="replan_ready", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state})),
-            ),
-            failure_progress=progress,
-        )
 
-    def _failure_observation(self, phase: TddPhase, outcome: _PhaseOutcome) -> FailureObservation:
-        result = outcome.execution_result
-        message = outcome.blocked_reason or outcome.phase_state.error or f"{phase.value} phase failed"
-        evidence_refs = [item for item in [outcome.phase_state.evidence_location] if item]
-        status = outcome.phase_state.status
-        text = " ".join(item for item in [message, outcome.phase_state.error, None if result is None else result.error, status] if item).lower()
+class FailureObservationBuilder:
+    def build(self, request: FailureObservationRequest) -> FailureObservation:
+        result = request.outcome.execution_result
+        message = request.outcome.blocked_reason or request.outcome.phase_state.error or f"{request.phase.value} phase failed"
+        evidence_refs = [item for item in [request.outcome.phase_state.evidence_location] if item]
+        status = request.outcome.phase_state.status
+        text = " ".join(
+            item
+            for item in [message, request.outcome.phase_state.error, None if result is None else result.error, status]
+            if item
+        ).lower()
         plausible: list[FailureClassification] = []
         if status == "transport_error":
             plausible.append(FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE)
@@ -1103,9 +761,10 @@ class BehaviorContractCoordinator:
         if any(token in text for token in ("changed_paths", "allowed_paths", "out-of-scope")):
             plausible.append(FailureClassification.CHANGE_SCOPE_VIOLATION)
         if not plausible:
-            plausible.append(FailureClassification.TESTER_CANDIDATE_DEFECT if phase is TddPhase.RED else FailureClassification.DEVELOPER_CANDIDATE_DEFECT)
+            fallback = FailureClassification.TESTER_CANDIDATE_DEFECT if request.phase is TddPhase.RED else FailureClassification.DEVELOPER_CANDIDATE_DEFECT
+            plausible.append(fallback)
         return FailureObservation(
-            source=f"{phase.value}_execution",
+            source=f"{request.phase.value}_execution",
             message=message,
             evidence_refs=evidence_refs,
             plausible=plausible,
@@ -1113,52 +772,468 @@ class BehaviorContractCoordinator:
             status=status,
         )
 
-    async def _execute_phase(
-        self,
-        *,
-        phase: TddPhase,
-        work_unit: DevelopmentWorkUnit,
-        base_binding: RepositoryBinding,
-    ) -> _PhaseOutcome:
-        recorded_at = _utc_now()
-        base_sha = base_binding.base_sha
-        try:
-            result = await self.execution_gateway.execute(work_unit, base_binding)
-        except Exception as error:
-            return _PhaseOutcome(
-                attempt=None,  # type: ignore[arg-type]
-                phase_state=_transport_failure_state(phase, work_unit.id, base_sha, recorded_at, str(error)),
-                accepted=False,
-                blocked_reason=f"{phase.value} phase transport failure",
-            )
-        phase_state = _phase_state_from_result(phase, work_unit.id, base_sha, recorded_at, result)
-        if not result.accepted:
-            return _PhaseOutcome(
-                attempt=None,  # type: ignore[arg-type]
-                phase_state=phase_state,
-                accepted=False,
-                blocked_reason=_blocked_reason_for_result(phase, result),
-                execution_result=result,
-            )
-        if not result.accepted_revision:
-            return _PhaseOutcome(
-                attempt=None,  # type: ignore[arg-type]
-                phase_state=phase_state,
-                accepted=False,
-                blocked_reason=f"accepted {phase.value} phase missing trusted accepted revision",
-                execution_result=result,
-            )
-        return _PhaseOutcome(attempt=None, phase_state=phase_state, accepted=True, execution_result=result)
 
-    def _review_material(
-        self,
-        contract: BehaviorContract,
-        run_state: BehaviorContractRunState,
-        cycle: ContractCycleRecord,
-    ) -> str:
-        if self.review_material_provider is None:
-            raise ValueError("semantic review requires a repository review material provider or registered repository root")
-        return self.review_material_provider.render(contract, run_state, cycle)
+@dataclass(frozen=True)
+class FailedCandidateRouter:
+    dependencies: FailureRouterDependencies
+    observation_builder: FailureObservationBuilder = field(default_factory=FailureObservationBuilder)
+
+    async def route(self, request: FailureRoutingRequest) -> BehaviorContractRunState:
+        contract = request.run_state.contract
+        cycle = request.run_state.current_cycle()
+        if cycle is None:
+            raise ValueError("failed candidate routing requires an active cycle")
+        observation = self.observation_builder.build(FailureObservationRequest(request.phase, request.outcome))
+        decision = self.dependencies.failure_policy.decide([observation])
+        if decision.dominant is FailureClassification.ENVIRONMENT_FAILURE and await _environment_recovery_succeeded(self.dependencies, request.run_state, contract.project_id):
+            progress = self.dependencies.failure_policy.record(
+                request.run_state.failure_progress,
+                decision,
+                route="environment_recovery",
+                next_state=FailureRouteState.ACTIVE,
+            )
+            return replace(
+                request.run_state,
+                current_pool="cycle_active",
+                contract=replace(contract, status="cycle_active"),
+                blocked_reason="environment recovered; rerunning from trusted revision",
+                cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "cycle_active")),
+                failure_progress=progress,
+            )
+        if decision.dominant in {FailureClassification.SYNTAX_OR_PARSE_FAILURE, FailureClassification.BUILD_OR_LINK_FAILURE, FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE}:
+            planner_decision = await self.dependencies.dependency_planner.decide(DependencyDecisionRequest(contract, cycle.step, observation, request.run_state.semantic_base_revision))
+            if planner_decision.disposition is not DependencyDisposition.REJECT_DEPENDENCY:
+                updated_contract = contract
+                if planner_decision.disposition is DependencyDisposition.ADD_PREREQUISITE:
+                    updated_contract = _add_synthesized_prerequisite(contract, planner_decision, request.run_state)
+                progress = self.dependencies.failure_policy.defer_for_prerequisites(
+                    request.run_state.failure_progress,
+                    decision,
+                    requirement_ref=planner_decision.parent_requirement_ref,
+                    prerequisite_refs=planner_decision.prerequisite_refs,
+                )
+                progress = replace(progress, dependency_decisions=[*progress.dependency_decisions[:-1], planner_decision])
+                return replace(
+                    request.run_state,
+                    current_pool="tdd_ready",
+                    contract=replace(updated_contract, status="tdd_ready"),
+                    blocked_reason=f"{decision.dominant.value}: deferred until {', '.join(planner_decision.prerequisite_refs)} is approved",
+                    cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "replan_ready")),
+                    failure_progress=progress,
+                )
+        role = "Tester" if request.phase is TddPhase.RED else "Developer"
+        route = "tester_repair" if request.phase is TddPhase.RED else "developer_repair"
+        budget = self.dependencies.max_tester_repairs if request.phase is TddPhase.RED else self.dependencies.max_developer_repairs
+        trusted_revision = request.run_state.semantic_base_revision if request.phase is TddPhase.RED else (cycle.red_phase.accepted_revision if cycle.red_phase else request.run_state.semantic_base_revision)
+        packet = RepairPacket(
+            kind=PacketKind.REPAIR,
+            role=role,
+            work_unit_id=request.work_unit.id,
+            trusted_revision=trusted_revision,
+            original_objective=request.work_unit.objective,
+            allowed_paths=list(request.work_unit.allowed_paths),
+            classification=decision.dominant,
+            previous_candidate=observation.candidate_revision,
+            evidence=[observation.message, *observation.evidence_refs],
+        )
+        repairable = decision.action.value in {"repair_tester", "repair_developer", "repair_regression"} or decision.dominant in {FailureClassification.SYNTAX_OR_PARSE_FAILURE, FailureClassification.BUILD_OR_LINK_FAILURE, FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE}
+        if repairable and self.dependencies.failure_policy.retry_allowed(request.run_state.failure_progress, route, budget=budget):
+            progress = self.dependencies.failure_policy.record(
+                request.run_state.failure_progress,
+                decision,
+                route=route,
+                packet=packet,
+                next_state=FailureRouteState.AWAITING_REPAIR,
+            )
+            return replace(
+                request.run_state,
+                current_pool="cycle_active",
+                contract=replace(contract, status="cycle_active"),
+                blocked_reason=f"{decision.dominant.value}: retrying {role} from trusted revision",
+                cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "cycle_active")),
+                failure_progress=progress,
+            )
+        next_state = _route_state_for_failure(decision.dominant)
+        progress = self.dependencies.failure_policy.record(
+            request.run_state.failure_progress,
+            decision,
+            packet=packet,
+            next_state=next_state,
+            blocker=observation.message if next_state.name.startswith("BLOCKED") else None,
+        )
+        return replace(
+            request.run_state,
+            current_pool="replan_ready",
+            contract=replace(contract, status="replan_ready"),
+            blocked_reason=f"{decision.dominant.value}: {observation.message}",
+            cycles=_replace_current_cycle(request.run_state.cycles, _cycle_with_phase_state(cycle, request.phase, request.outcome.phase_state, "replan_ready")),
+            failure_progress=progress,
+        )
+
+
+@dataclass(frozen=True)
+class ReadyPoolProgressor:
+    dependencies: ReadyPoolDependencies
+
+    async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
+        contract = run_state.contract
+        if run_state.current_pool == "tdd_ready" and run_state.targeted_requirement_ref is None and self.dependencies.gatekeeper is not None and self.dependencies.gap_adapter is not None:
+            gatekeeper_state = await self.dependencies.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
+            gatekeeper_state = await self.dependencies.gatekeeper.assess(contract, run_state, gatekeeper_state)
+            gap = _first_executable_gap(contract, gatekeeper_state)
+            if gap is not None:
+                updated_contract = self.dependencies.gap_adapter.extend_contract_for_gap(contract, gap)
+                targeted_requirement = _targeted_requirement_for_gap(updated_contract, gap)
+                return RunAdvance(
+                    replace(
+                        run_state,
+                        contract=updated_contract,
+                        gatekeeper_state=gatekeeper_state,
+                        targeted_requirement_ref=targeted_requirement.ref,
+                        targeted_checklist_ref=gap.checklist_ref,
+                        blocked_reason="targeted specification gap selected",
+                    )
+                )
+            if _has_untraceable_executable_gap(gatekeeper_state):
+                return RunAdvance(
+                    replace(
+                        run_state,
+                        current_pool="replan_ready",
+                        contract=replace(contract, status="replan_ready"),
+                        gatekeeper_state=gatekeeper_state,
+                        blocked_reason="specification checklist has no traceable executable gap",
+                    ),
+                    return_now=True,
+                )
+        decision = await self.dependencies.step_planner.decide_next_step(StepDecisionRequest(contract, run_state))
+        if decision.status != "complete":
+            cycle = ContractCycleRecord.from_step(decision.proposal, base_revision=run_state.semantic_base_revision)
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="cycle_active",
+                    contract=replace(contract, status="cycle_active"),
+                    cycles=[*run_state.cycles, cycle],
+                )
+            )
+        if self.dependencies.gatekeeper is None:
+            return RunAdvance(_completed_run_state(run_state), return_now=True)
+        gatekeeper_state = await self.dependencies.gatekeeper.ensure_state(contract, run_state.gatekeeper_state)
+        gatekeeper_state = await self.dependencies.gatekeeper.assess(contract, run_state, gatekeeper_state)
+        if gatekeeper_state.is_complete():
+            completed = _completed_run_state(run_state)
+            return RunAdvance(replace(completed, gatekeeper_state=gatekeeper_state), return_now=True)
+        latest_assessment = gatekeeper_state.latest_assessment
+        if self.dependencies.gap_adapter is not None and latest_assessment is not None and latest_assessment.gaps:
+            updated_contract = self.dependencies.gap_adapter.extend_contract_for_gap(contract, latest_assessment.gaps[0])
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="tdd_ready",
+                    contract=replace(updated_contract, status="tdd_ready"),
+                    blocked_reason="specification checklist incomplete",
+                    gatekeeper_state=gatekeeper_state,
+                )
+            )
+        return RunAdvance(
+            replace(
+                run_state,
+                current_pool="approved",
+                contract=replace(contract, status="approved"),
+                blocked_reason="specification checklist incomplete",
+                gatekeeper_state=gatekeeper_state,
+            ),
+            return_now=True,
+        )
+
+
+@dataclass(frozen=True)
+class CycleActiveProgressor:
+    dependencies: CycleProgressionDependencies
+
+    async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
+        contract = run_state.contract
+        cycle = run_state.current_cycle()
+        if cycle is None:
+            raise ValueError("cycle_active run state requires an active cycle")
+        if cycle.red_phase is not None and cycle.red_phase.accepted_revision is None:
+            material = _repository_material(contract, run_state, self.dependencies.repository_material_provider)
+            work_unit = self.dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
+            outcome = await self.dependencies.phase_executor.execute(PhaseExecutionRequest(TddPhase.RED, work_unit, run_state.repository_binding.with_base_sha(run_state.semantic_base_revision)))
+            if not outcome.accepted:
+                if _is_red_already_satisfied_from_phase(outcome):
+                    return RunAdvance(
+                        replace(
+                            run_state,
+                            current_pool="tdd_ready",
+                            contract=replace(contract, status="tdd_ready"),
+                            blocked_reason="step already satisfied before RED",
+                            cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state, pool="approved")),
+                        )
+                    )
+                routed = await self.dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.RED, work_unit, outcome))
+                return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
+            return RunAdvance(replace(run_state, cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state))))
+        if cycle.green_phase is None or cycle.green_phase.accepted_revision is not None:
+            raise ValueError("cycle_active run state has no remaining executable phase")
+        base_revision = cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision
+        material = _repository_material(contract, run_state, self.dependencies.repository_material_provider, base_revision)
+        work_unit = self.dependencies.developer_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
+        outcome = await self.dependencies.phase_executor.execute(PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(base_revision)))
+        if not outcome.accepted:
+            routed = await self.dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.GREEN, work_unit, outcome))
+            return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
+        updated_cycle = replace(cycle, green_phase=outcome.phase_state, candidate_revision=outcome.phase_state.accepted_revision, pool="review_ready")
+        return RunAdvance(
+            replace(
+                run_state,
+                current_pool="review_ready",
+                contract=replace(contract, status="review_ready"),
+                cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
+            )
+        )
+
+
+@dataclass(frozen=True)
+class ReviewReadyProgressor:
+    dependencies: ReviewProgressionDependencies
+
+    async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
+        contract = run_state.contract
+        cycle = run_state.current_cycle()
+        if cycle is None or cycle.candidate_revision is None:
+            raise ValueError("review_ready run state requires a candidate revision")
+        review_material = _review_material(contract, run_state, cycle, self.dependencies.review_material_provider)
+        review = await self.dependencies.reviewer.review(
+            SemanticReviewRequest(contract, run_state, cycle, cycle.candidate_revision, review_material)
+        )
+        cycle = replace(cycle, review_result=review, review_history=[*cycle.review_history, review])
+        if review.verdict == "approved":
+            completed_refs = sorted(set(run_state.completed_requirement_refs).union(cycle.step.requirement_refs))
+            approved_run_state = replace(
+                run_state,
+                current_pool="approved",
+                contract=replace(contract, status="approved"),
+                semantic_base_revision=cycle.candidate_revision,
+                repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
+                completed_requirement_refs=completed_refs,
+                blocked_reason=None,
+                cycles=_replace_current_cycle(run_state.cycles, replace(cycle, semantic_revision=cycle.candidate_revision, pool="approved")),
+            )
+            if approved_run_state.targeted_checklist_ref is not None and self.dependencies.gatekeeper is not None:
+                gatekeeper_state = await self.dependencies.gatekeeper.assess(
+                    contract,
+                    approved_run_state,
+                    approved_run_state.gatekeeper_state or await self.dependencies.gatekeeper.ensure_state(contract, None),
+                )
+                target_assessment = _checklist_assessment(gatekeeper_state, approved_run_state.targeted_checklist_ref)
+                target_proven = target_assessment is not None and target_assessment.status == "proven"
+                checklist_complete = gatekeeper_state.is_complete()
+                pool = "completed" if checklist_complete else ("approved" if target_proven else "replan_ready")
+                status = "completed" if checklist_complete else approved_run_state.contract.status
+                reason = None if checklist_complete else ("additional specification checklist items remain unproven" if target_proven else "targeted specification gap remains unproven")
+                return RunAdvance(replace(approved_run_state, current_pool=pool, contract=replace(contract, status=status), blocked_reason=reason, gatekeeper_state=gatekeeper_state), return_now=True)
+            return RunAdvance(approved_run_state)
+        if review.verdict == "repair_required":
+            if cycle.repair_attempts >= self.dependencies.max_semantic_repairs:
+                return RunAdvance(
+                    replace(
+                        run_state,
+                        current_pool="replan_ready",
+                        contract=replace(contract, status="replan_ready"),
+                        blocked_reason="semantic repair budget exhausted",
+                        cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready")),
+                    ),
+                    return_now=True,
+                )
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="repair_ready",
+                    contract=replace(contract, status="repair_ready"),
+                    blocked_reason=None,
+                    cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="repair_ready")),
+                )
+            )
+        return RunAdvance(
+            replace(
+                run_state,
+                current_pool="replan_ready",
+                contract=replace(contract, status="replan_ready"),
+                blocked_reason=review.rationale,
+                cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready")),
+            ),
+            return_now=True,
+        )
+
+
+@dataclass(frozen=True)
+class RepairReadyProgressor:
+    dependencies: RepairProgressionDependencies
+
+    async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
+        contract = run_state.contract
+        cycle = run_state.current_cycle()
+        if cycle is None or cycle.review_result is None or cycle.candidate_revision is None:
+            raise ValueError("repair_ready run state requires a review result and candidate revision")
+        work_unit = self.dependencies.repair_factory.build(RepairWorkUnitBuildRequest(contract, cycle, cycle.review_result))
+        outcome = await self.dependencies.phase_executor.execute(
+            PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(cycle.candidate_revision))
+        )
+        if not outcome.accepted:
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="replan_ready",
+                    contract=replace(contract, status="replan_ready"),
+                    blocked_reason=outcome.blocked_reason,
+                    cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready", green_phase=outcome.phase_state)),
+                ),
+                return_now=True,
+            )
+        updated_cycle = replace(
+            cycle,
+            repair_attempts=cycle.repair_attempts + 1,
+            green_phase=outcome.phase_state,
+            candidate_revision=outcome.phase_state.accepted_revision,
+            pool="review_ready",
+        )
+        return RunAdvance(
+            replace(
+                run_state,
+                current_pool="review_ready",
+                contract=replace(contract, status="review_ready"),
+                cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
+            )
+        )
+
+
+class BehaviorContractCoordinator:
+    def __init__(self, dependencies: CoordinatorDependencies | None = None, **legacy):
+        self.dependencies = dependencies or CoordinatorDependencies(**legacy)
+        deps = self.dependencies
+        self.repository_binding = deps.repository_binding
+        state_repo = deps.state_repo or TddStateRepo()
+        repository_material_provider = deps.repository_material_provider or _default_tester_repository_material_provider(deps.repository_binding)
+        step_planner = deps.step_planner or DynamicTddPlanner(deps.reasoning_gateway, repository_material_provider=repository_material_provider)
+        reviewer = deps.reviewer or SeniorReviewer(deps.reasoning_gateway)
+        tester_factory = deps.tester_factory or ContractTesterWorkUnitFactory()
+        developer_factory = deps.developer_factory or ContractDeveloperWorkUnitFactory()
+        repair_factory = deps.repair_factory or ContractRepairWorkUnitFactory()
+        review_material_provider = deps.review_material_provider or _default_review_material_provider(deps.repository_binding)
+        failure_policy = deps.failure_policy or FailureProgressionPolicy()
+        dependency_planner = deps.dependency_planner or DependencyPrerequisitePlanner(deps.reasoning_gateway)
+        self.run_store = ContractRunStore(state_repo)
+        phase_executor = PhaseExecutor(deps.execution_gateway)
+        failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, deps.max_tester_repairs, deps.max_developer_repairs))
+        self.ready_progressor = ReadyPoolProgressor(ReadyPoolDependencies(step_planner, deps.gatekeeper, deps.gap_adapter, deps.repository_binding))
+        self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router))
+        self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs))
+        self.repair_progressor = RepairReadyProgressor(RepairProgressionDependencies(repair_factory, phase_executor))
+
+    async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
+        snapshot = self.run_store.load(contract.project_id) or self.run_store.initial(contract.project_id, self.repository_binding)
+        run_state = snapshot.contract_runs.get(contract.id)
+        if run_state is None:
+            run_state = BehaviorContractRunState(contract=contract, repository_binding=self.repository_binding, semantic_base_revision=self.repository_binding.base_sha)
+            snapshot = self.run_store.save(snapshot, run_state)
+        while True:
+            contract = run_state.contract
+            if run_state.current_pool in {"completed", "replan_ready"}:
+                return _result_from_run_state(run_state)
+            advance = await self._advance(run_state)
+            run_state = advance.run_state
+            snapshot = self.run_store.save(snapshot, run_state)
+            if advance.return_now:
+                return _result_from_run_state(run_state)
+
+    async def _advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
+        if run_state.current_pool in {"tdd_ready", "approved"}:
+            return await self.ready_progressor.advance(run_state)
+        if run_state.current_pool == "cycle_active":
+            return await self.cycle_progressor.advance(run_state)
+        if run_state.current_pool == "review_ready":
+            return await self.review_progressor.advance(run_state)
+        if run_state.current_pool == "repair_ready":
+            return await self.repair_progressor.advance(run_state)
+        raise ValueError(f"unsupported contract run pool: {run_state.current_pool}")
+
+
+def _require_run_state(run_state: BehaviorContractRunState | None) -> BehaviorContractRunState:
+    if run_state is None:
+        raise ValueError("run state is required")
+    return run_state
+
+
+def _replace_current_cycle(cycles: list[ContractCycleRecord], replacement: ContractCycleRecord) -> list[ContractCycleRecord]:
+    if not cycles:
+        raise ValueError("expected at least one cycle to replace")
+    return [*cycles[:-1], replacement]
+
+
+def _result_from_run_state(run_state: BehaviorContractRunState) -> BehaviorContractCoordinationResult:
+    return BehaviorContractCoordinationResult(
+        contract_id=run_state.contract.id,
+        current_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
+        semantic_revision=run_state.semantic_base_revision,
+        current_pool=run_state.current_pool,
+        cycles=list(run_state.cycles),
+        completed_requirement_refs=list(run_state.completed_requirement_refs),
+        blocked_reason=run_state.blocked_reason,
+    )
+
+
+def _repository_material(
+    contract: BehaviorContract,
+    run_state: BehaviorContractRunState,
+    provider: TesterRepositoryMaterialProvider | None,
+    revision: str | None = None,
+) -> dict[str, object] | None:
+    if provider is None:
+        return None
+    return provider.render(RepositoryMaterialRequest(contract, run_state, revision))
+
+
+def _review_material(
+    contract: BehaviorContract,
+    run_state: BehaviorContractRunState,
+    cycle: ContractCycleRecord,
+    provider: ReviewMaterialProvider | None,
+) -> str:
+    if provider is None:
+        raise ValueError("semantic review requires a repository review material provider or registered repository root")
+    return provider.render(ReviewMaterialRequest(contract, run_state, cycle))
+
+
+def _cycle_with_phase_state(
+    cycle: ContractCycleRecord,
+    phase: TddPhase,
+    phase_state,
+    pool: str,
+) -> ContractCycleRecord:
+    updates = {"pool": pool, "red_phase" if phase is TddPhase.RED else "green_phase": phase_state}
+    return replace(cycle, **updates)
+
+
+async def _environment_recovery_succeeded(
+    dependencies: FailureRouterDependencies,
+    run_state: BehaviorContractRunState,
+    project_id: str,
+) -> bool:
+    if dependencies.environment_recovery is None:
+        return False
+    return dependencies.failure_policy.retry_allowed(run_state.failure_progress, "environment_recovery", budget=1) and await dependencies.environment_recovery.recover_and_verify(project_id)
+
+
+def _completed_run_state(run_state: BehaviorContractRunState) -> BehaviorContractRunState:
+    contract = run_state.contract
+    return replace(
+        run_state,
+        current_pool="completed",
+        completed_requirement_refs=_ordered_completed_requirement_refs(contract, run_state.completed_requirement_refs),
+        contract=replace(contract, status="completed"),
+        repository_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
+    )
 
 
 def _json_object(text: str, *, label: str) -> dict[str, object]:
@@ -1480,7 +1555,7 @@ def _decision_from_response(
     label: str,
 ) -> TddStepDecision:
     decision = TddStepDecision.from_dict(_json_object(text, label=label))
-    return DynamicTddPlanner(None)._validate_decision(contract, run_state, decision)  # type: ignore[arg-type]
+    return DynamicTddPlanner(None)._validate_decision(StepDecisionValidationRequest(contract, run_state, decision))  # type: ignore[arg-type]
 
 
 def _is_recoverable_step_error(error: ValueError) -> bool:
@@ -1726,7 +1801,7 @@ def _repository_material_for_run_state(
     resolved_provider = provider or _default_tester_repository_material_provider(run_state.repository_binding)
     if resolved_provider is None:
         return None
-    return resolved_provider.render(contract, run_state)
+    return resolved_provider.render(RepositoryMaterialRequest(contract, run_state))
 
 
 def _first_executable_gap(contract: BehaviorContract, gatekeeper_state):

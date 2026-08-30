@@ -15,8 +15,12 @@ from core.development.behavior_contract_coordinator import (
     DynamicTddPlanner,
     GitReviewMaterialProvider,
     GitTesterRepositoryMaterialProvider,
+    RepairWorkUnitBuildRequest,
+    RepositoryMaterialRequest,
     RequirementClausePlanner,
+    ReviewMaterialRequest,
     SeniorReviewer,
+    WorkUnitBuildRequest,
     _first_executable_gap,
 )
 from core.development.tdd_progression import (
@@ -81,7 +85,7 @@ class StaticReviewMaterialProvider:
     def __init__(self, text: str):
         self.text = text
 
-    def render(self, contract, run_state, cycle):
+    def render(self, request):
         return self.text
 
 
@@ -586,8 +590,8 @@ async def test_contract_output_paths_must_match_allowed_path_sets():
 
 def test_no_worker_model_or_gpu_fields_leak_into_contract_or_tdd_requests():
     step = proposal()
-    red_request = to_rack_ai_request("reservation-book", binding(), ContractTesterWorkUnitFactory().build(contract(), step))
-    green_request = to_rack_ai_request("reservation-book", binding(), ContractDeveloperWorkUnitFactory().build(contract(), step))
+    red_request = to_rack_ai_request("reservation-book", binding(), ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step)))
+    green_request = to_rack_ai_request("reservation-book", binding(), ContractDeveloperWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step)))
 
     assert find_forbidden_resource_selection_keys(contract().to_dict()) == []
     assert find_forbidden_resource_selection_keys(red_request) == []
@@ -704,9 +708,9 @@ async def test_tester_planner_receives_bounded_external_repository_material(tmp_
 def test_tester_work_unit_receives_external_repository_context_without_athba_assumptions(tmp_path: Path):
     repo_root, base_revision, _ = create_review_repo(tmp_path)
     state = run_state(semantic_base_revision=base_revision, registered_root=repo_root)
-    material = GitTesterRepositoryMaterialProvider(repo_root).render(contract(), state)
+    material = GitTesterRepositoryMaterialProvider(repo_root).render(RepositoryMaterialRequest(contract(), state))
 
-    work_unit = ContractTesterWorkUnitFactory().build(contract(), proposal(), material)
+    work_unit = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), proposal(), material))
 
     assert "standalone external repository, not ATHBA" in work_unit.objective
     assert "Do not import ATHBA internals" in work_unit.objective
@@ -730,7 +734,7 @@ def test_repository_material_allows_the_first_test_file_to_be_absent(tmp_path: P
     ).stdout.strip()
 
     material = GitTesterRepositoryMaterialProvider(repo_root).render(
-        contract(), run_state(semantic_base_revision=revision, registered_root=repo_root)
+        RepositoryMaterialRequest(contract(), run_state(semantic_base_revision=revision, registered_root=repo_root))
     )
 
     assert material["test_files"] == [{
@@ -749,7 +753,7 @@ def test_empty_external_source_uses_collection_safe_module_access_in_red_objecti
         "production_files": [{"module_name": "reservation_book", "content": ""}],
     }
 
-    work_unit = ContractTesterWorkUnitFactory().build(contract(), proposal(), material)
+    work_unit = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), proposal(), material))
 
     assert "import reservation_book" in work_unit.objective
     assert "getattr(reservation_book, 'ReservationBook')" in work_unit.objective
@@ -1538,20 +1542,22 @@ async def test_completed_contract_is_not_rerun():
 
 def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     step = proposal()
-    red = ContractTesterWorkUnitFactory().build(contract(), step)
-    green = ContractDeveloperWorkUnitFactory().build(contract(), step)
+    red = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
+    green = ContractDeveloperWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
     repair = ContractRepairWorkUnitFactory().build(
-        contract(),
-        ContractCycleRecord.from_step(step, base_revision="a" * 40),
-        SemanticReviewResult(
-            verdict="repair_required",
-            rationale="cleanup",
-            findings=["cleanup"],
-            candidate_revision="c" * 40,
-            step_id=step.step_id,
-            evidence_refs=["review:1"],
-            repair_instructions=["Remove the noisy comment."],
-        ),
+        RepairWorkUnitBuildRequest(
+            contract(),
+            ContractCycleRecord.from_step(step, base_revision="a" * 40),
+            SemanticReviewResult(
+                verdict="repair_required",
+                rationale="cleanup",
+                findings=["cleanup"],
+                candidate_revision="c" * 40,
+                step_id=step.step_id,
+                evidence_refs=["review:1"],
+                repair_instructions=["Remove the noisy comment."],
+            ),
+        )
     )
 
     assert red.allowed_paths == ["tests/test_reservation_book.py"]
@@ -1583,9 +1589,11 @@ def test_git_review_material_provider_includes_real_diff_source_and_evidence(tmp
     )
 
     material = GitReviewMaterialProvider(repo_root).render(
-        contract(),
-        run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
-        cycle,
+        ReviewMaterialRequest(
+            contract(),
+            run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
+            cycle,
+        )
     )
     payload = json.loads(material)
 
@@ -1616,9 +1624,11 @@ def test_git_review_material_provider_is_read_only(tmp_path: Path):
     before_head = run_git(repo_root, "rev-parse", "HEAD")
 
     provider.render(
-        contract(),
-        run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
-        cycle,
+        ReviewMaterialRequest(
+            contract(),
+            run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
+            cycle,
+        )
     )
 
     assert run_git(repo_root, "status", "--short") == before_status == ""
@@ -1635,9 +1645,11 @@ def test_git_review_material_provider_fails_closed_on_missing_candidate_revision
 
     with pytest.raises(ValueError, match="rev-parse"):
         GitReviewMaterialProvider(repo_root).render(
-            contract(),
-            run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
-            cycle,
+            ReviewMaterialRequest(
+                contract(),
+                run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
+                cycle,
+            )
         )
 
 
@@ -1651,9 +1663,11 @@ def test_git_review_material_provider_fails_closed_on_missing_candidate_file(tmp
 
     with pytest.raises(ValueError, match="git show"):
         GitReviewMaterialProvider(repo_root).render(
-            contract(),
-            run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
-            cycle,
+            ReviewMaterialRequest(
+                contract(),
+                run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
+                cycle,
+            )
         )
 
 
@@ -1674,9 +1688,11 @@ async def test_senior_reviewer_prompt_receives_git_review_material(tmp_path: Pat
         pool="review_ready",
     )
     review_material = GitReviewMaterialProvider(repo_root).render(
-        contract(),
-        run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
-        cycle,
+        ReviewMaterialRequest(
+            contract(),
+            run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
+            cycle,
+        )
     )
     gateway = FakeReasoningGateway([
         {

@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from core.development.behavior_contract_coordinator import BehaviorContractCoordinator
+from core.development.behavior_contract_coordinator import BehaviorContractCoordinator, SemanticReviewRequest, StepDecisionRequest
 from core.development.specification_gatekeeper import (
     SpecificationChecklistPlanner,
     SpecificationGapTddAdapter,
@@ -78,7 +78,7 @@ class StaticReviewMaterialProvider:
     def __init__(self, text: str):
         self.text = text
 
-    def render(self, contract, run_state, cycle):
+    def render(self, request):
         return self.text
 
 
@@ -87,8 +87,8 @@ class SequenceStepPlanner:
         self.decisions = list(decisions)
         self.calls = []
 
-    async def decide_next_step(self, contract: BehaviorContract, run_state: BehaviorContractRunState) -> TddStepDecision:
-        self.calls.append((contract.id, run_state.current_pool, list(run_state.completed_requirement_refs)))
+    async def decide_next_step(self, request: StepDecisionRequest) -> TddStepDecision:
+        self.calls.append((request.contract.id, request.run_state.current_pool, list(request.run_state.completed_requirement_refs)))
         return self.decisions.pop(0)
 
 
@@ -97,8 +97,8 @@ class StubReviewer:
         self.review_result = review_result
         self.calls = []
 
-    async def review(self, *, contract, run_state, cycle, candidate_revision, review_material):
-        self.calls.append((contract.id, cycle.step.step_id, candidate_revision, review_material))
+    async def review(self, request: SemanticReviewRequest):
+        self.calls.append((request.contract.id, request.cycle.step.step_id, request.candidate_revision, request.review_material))
         return self.review_result
 
 
