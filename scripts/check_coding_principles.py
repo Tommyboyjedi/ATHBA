@@ -15,6 +15,12 @@ TARGETS = [
     Path("core/development/tdd_progression.py"),
     Path("core/development/tdd_progression_validation.py"),
     Path("core/development/tdd_progression_values.py"),
+    Path("core/development/failure_policy.py"),
+    Path("core/development/failure_progression.py"),
+    Path("core/development/failure_records.py"),
+    Path("core/development/failure_state.py"),
+    Path("core/development/failure_transitions.py"),
+    Path("core/development/failure_values.py"),
 ]
 ALLOWED_BASES = {"Enum", "Protocol", "str"}
 

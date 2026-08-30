@@ -20,9 +20,13 @@ from core.development.failure_progression import (
     FailureObservation,
     FailureProgressState,
     FailureProgressionPolicy,
+    FailureRecordRequest,
     FailureRouteState,
     PacketKind,
+    PrerequisiteDeferralRequest,
     RepairPacket,
+    RetryBudget,
+    RetryRoute,
 )
 from core.development.tdd_coordinator import (
     RED_ALREADY_SATISFIED_FRAGMENT,
@@ -788,10 +792,12 @@ class FailedCandidateRouter:
         decision = self.dependencies.failure_policy.decide([observation])
         if decision.dominant is FailureClassification.ENVIRONMENT_FAILURE and await _environment_recovery_succeeded(self.dependencies, request.run_state, contract.project_id):
             progress = self.dependencies.failure_policy.record(
-                request.run_state.failure_progress,
-                decision,
-                route="environment_recovery",
-                next_state=FailureRouteState.ACTIVE,
+                FailureRecordRequest(
+                    state=request.run_state.failure_progress,
+                    decision=decision,
+                    route=RetryRoute.ENVIRONMENT_RECOVERY,
+                    next_state=FailureRouteState.ACTIVE,
+                )
             )
             return replace(
                 request.run_state,
@@ -808,10 +814,12 @@ class FailedCandidateRouter:
                 if planner_decision.disposition is DependencyDisposition.ADD_PREREQUISITE:
                     updated_contract = _add_synthesized_prerequisite(contract, planner_decision, request.run_state)
                 progress = self.dependencies.failure_policy.defer_for_prerequisites(
-                    request.run_state.failure_progress,
-                    decision,
-                    requirement_ref=planner_decision.parent_requirement_ref,
-                    prerequisite_refs=planner_decision.prerequisite_refs,
+                    PrerequisiteDeferralRequest(
+                        state=request.run_state.failure_progress,
+                        decision=decision,
+                        requirement_ref=planner_decision.parent_requirement_ref,
+                        prerequisite_refs=planner_decision.prerequisite_refs,
+                    )
                 )
                 progress = replace(progress, dependency_decisions=[*progress.dependency_decisions[:-1], planner_decision])
                 return replace(
@@ -823,7 +831,7 @@ class FailedCandidateRouter:
                     failure_progress=progress,
                 )
         role = "Tester" if request.phase is TddPhase.RED else "Developer"
-        route = "tester_repair" if request.phase is TddPhase.RED else "developer_repair"
+        route = RetryRoute.TESTER_REPAIR if request.phase is TddPhase.RED else RetryRoute.DEVELOPER_REPAIR
         budget = self.dependencies.max_tester_repairs if request.phase is TddPhase.RED else self.dependencies.max_developer_repairs
         trusted_revision = request.run_state.semantic_base_revision if request.phase is TddPhase.RED else (cycle.red_phase.accepted_revision if cycle.red_phase else request.run_state.semantic_base_revision)
         packet = RepairPacket(
@@ -838,13 +846,17 @@ class FailedCandidateRouter:
             evidence=[observation.message, *observation.evidence_refs],
         )
         repairable = decision.action.value in {"repair_tester", "repair_developer", "repair_regression"} or decision.dominant in {FailureClassification.SYNTAX_OR_PARSE_FAILURE, FailureClassification.BUILD_OR_LINK_FAILURE, FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE}
-        if repairable and self.dependencies.failure_policy.retry_allowed(request.run_state.failure_progress, route, budget=budget):
+        if repairable and self.dependencies.failure_policy.retry_allowed(
+            RetryBudget(state=request.run_state.failure_progress, route=route, budget=budget)
+        ):
             progress = self.dependencies.failure_policy.record(
-                request.run_state.failure_progress,
-                decision,
-                route=route,
-                packet=packet,
-                next_state=FailureRouteState.AWAITING_REPAIR,
+                FailureRecordRequest(
+                    state=request.run_state.failure_progress,
+                    decision=decision,
+                    route=route,
+                    packet=packet,
+                    next_state=FailureRouteState.AWAITING_REPAIR,
+                )
             )
             return replace(
                 request.run_state,
@@ -856,11 +868,13 @@ class FailedCandidateRouter:
             )
         next_state = _route_state_for_failure(decision.dominant)
         progress = self.dependencies.failure_policy.record(
-            request.run_state.failure_progress,
-            decision,
-            packet=packet,
-            next_state=next_state,
-            blocker=observation.message if next_state.name.startswith("BLOCKED") else None,
+            FailureRecordRequest(
+                state=request.run_state.failure_progress,
+                decision=decision,
+                packet=packet,
+                next_state=next_state,
+                blocker=observation.message if next_state.name.startswith("BLOCKED") else None,
+            )
         )
         return replace(
             request.run_state,
@@ -1223,7 +1237,9 @@ async def _environment_recovery_succeeded(
 ) -> bool:
     if dependencies.environment_recovery is None:
         return False
-    return dependencies.failure_policy.retry_allowed(run_state.failure_progress, "environment_recovery", budget=1) and await dependencies.environment_recovery.recover_and_verify(project_id)
+    return dependencies.failure_policy.retry_allowed(
+        RetryBudget(state=run_state.failure_progress, route=RetryRoute.ENVIRONMENT_RECOVERY, budget=1)
+    ) and await dependencies.environment_recovery.recover_and_verify(project_id)
 
 
 def _completed_run_state(run_state: BehaviorContractRunState) -> BehaviorContractRunState:

@@ -6,10 +6,14 @@ from core.development.failure_progression import (
     FailureObservation,
     FailureProgressState,
     FailureProgressionPolicy,
+    FailureRecordRequest,
     FailureRouteState,
     PacketKind,
+    PrerequisiteDeferralRequest,
     ProgressionAction,
     RepairPacket,
+    RetryBudget,
+    RetryRoute,
     UnclassifiedAnalysis,
     WorkPacketSplit,
 )
@@ -73,20 +77,29 @@ def test_retry_budgets_are_per_route_not_global() -> None:
     policy = FailureProgressionPolicy()
     state = FailureProgressState()
     decision = policy.decide([observation(FailureClassification.TESTER_CANDIDATE_DEFECT)])
-    state = policy.record(state, decision, route="tester_repair", next_state=FailureRouteState.AWAITING_REPAIR)
+    state = policy.record(
+        FailureRecordRequest(
+            state=state,
+            decision=decision,
+            route=RetryRoute.TESTER_REPAIR,
+            next_state=FailureRouteState.AWAITING_REPAIR,
+        )
+    )
 
-    assert not policy.retry_allowed(state, "tester_repair", budget=1)
-    assert policy.retry_allowed(state, "developer_repair", budget=1)
+    assert not policy.retry_allowed(RetryBudget(state=state, route=RetryRoute.TESTER_REPAIR, budget=1))
+    assert policy.retry_allowed(RetryBudget(state=state, route=RetryRoute.DEVELOPER_REPAIR, budget=1))
 
 
 def test_progress_state_round_trips_decision_retry_lineage_and_blocker() -> None:
     policy = FailureProgressionPolicy()
     decision = policy.decide([observation(FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE)])
     state = policy.record(
-        FailureProgressState(),
-        decision,
-        next_state=FailureRouteState.BLOCKED_EXECUTOR,
-        blocker="executor evidence is unavailable",
+        FailureRecordRequest(
+            state=FailureProgressState(),
+            decision=decision,
+            next_state=FailureRouteState.BLOCKED_EXECUTOR,
+            blocker="executor evidence is unavailable",
+        )
     )
 
     restored = FailureProgressState.from_dict(state.to_dict())
@@ -106,3 +119,42 @@ def test_dependency_split_and_unclassified_records_are_typed_and_durable() -> No
     state = FailureProgressState(dependency_decisions=[dependency], splits=[split], unclassified_analysis=analysis)
 
     assert FailureProgressState.from_dict(state.to_dict()) == state
+
+
+def test_prerequisite_deferral_preserves_state_and_records_declared_dependency() -> None:
+    policy = FailureProgressionPolicy()
+    decision = policy.decide([observation(FailureClassification.DEPENDENCY_OR_PREREQUISITE_FAILURE)])
+
+    state = policy.defer_for_prerequisites(
+        PrerequisiteDeferralRequest(
+            state=FailureProgressState(),
+            decision=decision,
+            requirement_ref="REQ-2",
+            prerequisite_refs=["REQ-1"],
+        )
+    )
+
+    assert state.state is FailureRouteState.DEFERRED_DEPENDENCY
+    assert state.deferred_requirement_refs == ["REQ-2"]
+    assert state.prerequisite_links == {"REQ-2": ["REQ-1"]}
+    assert state.dependency_decisions[-1].disposition is DependencyDisposition.ALREADY_PLANNED
+
+
+def test_failure_progress_state_loads_legacy_payload_defaults() -> None:
+    restored = FailureProgressState.from_dict(
+        {
+            "history": [],
+            "retry_counts": {"tester_repair": 1},
+            "deferred_requirement_refs": ["REQ-1"],
+            "prerequisite_links": {"REQ-2": ["REQ-1"]},
+            "split_children": {},
+            "repair_packets": [],
+            "dependency_decisions": [],
+            "splits": [],
+            "blocker": "blocked",
+        }
+    )
+
+    assert restored.state is FailureRouteState.ACTIVE
+    assert restored.retry_counts == {"tester_repair": 1}
+    assert restored.blocker == "blocked"
