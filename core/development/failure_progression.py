@@ -374,3 +374,33 @@ class FailureProgressionPolicy:
             unclassified_analysis=state.unclassified_analysis,
             blocker=blocker if blocker is not None else state.blocker,
         )
+
+    def defer_for_prerequisites(
+        self,
+        state: FailureProgressState,
+        decision: FailureDecision,
+        *,
+        requirement_ref: str,
+        prerequisite_refs: list[str],
+    ) -> FailureProgressState:
+        if not prerequisite_refs:
+            raise ValueError("dependency deferral requires at least one prerequisite")
+        recorded = self.record(state, decision, next_state=FailureRouteState.DEFERRED_DEPENDENCY)
+        links = {key: list(value) for key, value in recorded.prerequisite_links.items()}
+        links[requirement_ref] = list(prerequisite_refs)
+        return FailureProgressState(
+            state=FailureRouteState.DEFERRED_DEPENDENCY,
+            history=recorded.history,
+            retry_counts=recorded.retry_counts,
+            deferred_requirement_refs=[*dict.fromkeys([*recorded.deferred_requirement_refs, requirement_ref])],
+            prerequisite_links=links,
+            split_children=recorded.split_children,
+            repair_packets=recorded.repair_packets,
+            dependency_decisions=[
+                *recorded.dependency_decisions,
+                DependencyDecision(DependencyDisposition.ALREADY_PLANNED, requirement_ref, list(prerequisite_refs), "Declared Behavior Contract prerequisites are not semantically approved."),
+            ],
+            splits=recorded.splits,
+            unclassified_analysis=recorded.unclassified_analysis,
+            blocker=recorded.blocker,
+        )

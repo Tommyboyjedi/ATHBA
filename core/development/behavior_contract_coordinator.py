@@ -925,6 +925,30 @@ class BehaviorContractCoordinator:
         """Persist one dominant policy decision before any retry or stop."""
         observation = self._failure_observation(phase, outcome)
         decision = self.failure_policy.decide([observation])
+        if decision.dominant in {
+            FailureClassification.SYNTAX_OR_PARSE_FAILURE,
+            FailureClassification.BUILD_OR_LINK_FAILURE,
+            FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE,
+        }:
+            requirement = next(item for item in contract.observable_requirements if item.ref == cycle.step.requirement_refs[0])
+            missing_prerequisites = [
+                ref for ref in requirement.depends_on if ref not in run_state.completed_requirement_refs
+            ]
+            if missing_prerequisites:
+                progress = self.failure_policy.defer_for_prerequisites(
+                    run_state.failure_progress,
+                    decision,
+                    requirement_ref=requirement.ref,
+                    prerequisite_refs=missing_prerequisites,
+                )
+                return replace(
+                    run_state,
+                    current_pool="tdd_ready",
+                    contract=replace(contract, status="tdd_ready"),
+                    blocked_reason=f"{decision.dominant.value}: deferred until {', '.join(missing_prerequisites)} is approved",
+                    cycles=self._replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready", **({"red_phase": outcome.phase_state} if phase is TddPhase.RED else {"green_phase": outcome.phase_state}))),
+                    failure_progress=progress,
+                )
         role = "Tester" if phase is TddPhase.RED else "Developer"
         route = "tester_repair" if role == "Tester" else "developer_repair"
         budget = self.max_tester_repairs if role == "Tester" else self.max_developer_repairs
@@ -940,7 +964,12 @@ class BehaviorContractCoordinator:
             evidence=[observation.message, *observation.evidence_refs],
         )
 
-        if decision.action.value in {"repair_tester", "repair_developer", "repair_regression"} and self.failure_policy.retry_allowed(run_state.failure_progress, route, budget=budget):
+        repairable = decision.action.value in {"repair_tester", "repair_developer", "repair_regression"} or decision.dominant in {
+            FailureClassification.SYNTAX_OR_PARSE_FAILURE,
+            FailureClassification.BUILD_OR_LINK_FAILURE,
+            FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE,
+        }
+        if repairable and self.failure_policy.retry_allowed(run_state.failure_progress, route, budget=budget):
             progress = self.failure_policy.record(
                 run_state.failure_progress,
                 decision,
