@@ -620,6 +620,9 @@ class BehaviorContractCoordinator:
             snapshot = self._save_run_state(snapshot, run_state)
 
         while True:
+            # The persisted run state owns mutable contract evolution (for example,
+            # targeted gaps and synthesized prerequisites) across coordinator resumes.
+            contract = run_state.contract
             if run_state.current_pool == "completed":
                 return self._result_from_run_state(run_state)
             if run_state.current_pool == "replan_ready":
