@@ -43,31 +43,41 @@ Baseline HEAD before edits: `b9efd59344abbe4770e14b4ca69ec64c7afdd8f7`
   Target responsibility: classify current runtime ownership with direct evidence.
   Implementation evidence: audited `core/api.py`, `core/endpoints/chat.py`, `core/services/chat_service.py`, `core/agents/agent_generator.py`, `scripts/run_pr17_independent_reservation_book.py`, and `scripts/run_pr19_environment_proof.py`.
   Tests: documented by `tests/development/test_architecture_quarantine.py`.
-  Commit SHA: PENDING
+  Commit SHA: `b8ea7e4e50f275a936e0204667441adaab7eebe1`
 - [x] Classify the old local LLM/resource control plane.
   Target responsibility: quarantine physical model and resource management away from the modern ATHBA control plane.
   Implementation evidence: documented `llm_service`, `ModelRegistry`, `LlmServerManagement`, `RdAgent`, and `LlmExchange` as legacy or compatibility-only, and added source warnings to the legacy stack entrypoints.
   Tests: documented by `tests/development/test_architecture_quarantine.py`.
-  Commit SHA: PENDING
+  Commit SHA: `b8ea7e4e50f275a936e0204667441adaab7eebe1`
 - [x] Classify the old Developer/Tester execution stack.
   Target responsibility: distinguish the old `/tmp/athba_repos` Git/pytest lane from the modern Rack AI execution lane.
   Implementation evidence: documented `GitService`, `TestExecutionService`, and the old Developer/Tester behavior loop as legacy but reachable.
   Tests: documented by `tests/development/test_architecture_quarantine.py` and `tests/agents/test_legacy_agent_smoke.py`.
-  Commit SHA: PENDING
+  Commit SHA: `b8ea7e4e50f275a936e0204667441adaab7eebe1`
 - [x] Repair still-active legacy PM delegation behavior.
   Target responsibility: ensure reachable compatibility behaviors execute without undefined-name failures.
   Implementation evidence: fixed `core/agents/behaviors/pm/delegate_to_spec_builder_behavior.py` to use `BehaviorExecution` inputs instead of undefined names.
   Tests: `tests/agents/test_legacy_agent_smoke.py`.
-  Commit SHA: PENDING
+  Commit SHA: `b8ea7e4e50f275a936e0204667441adaab7eebe1`
 - [x] Add bounded active-path smoke coverage.
   Target responsibility: prove still-reachable PM/Spec/Architect/Developer/Tester behavior paths execute with fakes and no live LLM or Mongo requirement.
   Implementation evidence: added `tests/agents/test_legacy_agent_smoke.py` covering representative active intents across all five agent families.
   Tests: `tests/agents/test_legacy_agent_smoke.py`.
-  Commit SHA: PENDING
+  Commit SHA: `b8ea7e4e50f275a936e0204667441adaab7eebe1`
 - [x] Update top-level operator guidance.
   Target responsibility: prevent readers from treating the legacy local LLM stack as the modern authoritative architecture.
   Implementation evidence: updated `README.md` and `docs/SETUP.md` to point to the quarantine and ATHBA/Rack AI authority documents.
   Tests: N/A.
-  Commit SHA: PENDING
+  Commit SHA: `b8ea7e4e50f275a936e0204667441adaab7eebe1`
 
 INCOMPLETE_ITEMS = NONE
+
+
+## Validation
+
+- Focused smoke and quarantine suite: `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q tests/agents/test_legacy_agent_smoke.py tests/development/test_architecture_quarantine.py` -> `8 passed`.
+- Coding gate: `./.venv/bin/python scripts/check_coding_principles.py` -> `coding principles gate passed`.
+- Full suite: `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q` -> `239 passed`.
+- Compileall: `./.venv/bin/python -m compileall athba core llm_service tests scripts` -> passed.
+- Diff check: `git diff --check` -> passed.
+- Branch state after validation: `git status --short --branch` -> `## pr17-specification-gatekeeper...origin/pr17-specification-gatekeeper [ahead 1]`.
