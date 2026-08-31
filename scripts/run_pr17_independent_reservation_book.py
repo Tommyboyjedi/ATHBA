@@ -75,8 +75,6 @@ class PersistingExecutionGateway:
     """Persist each Rack AI accepted revision through ATHBA's project lifecycle."""
 
     delegate: RackAiCliExecutionGateway
-    environment: ProjectEnvironmentService
-    project_id: str
     accepted_revisions: list[str] = field(default_factory=list)
     rack_ai_events: list[dict[str, object]] = field(default_factory=list)
 
@@ -111,7 +109,6 @@ class PersistingExecutionGateway:
         if result.accepted:
             if result.accepted_revision is None:
                 raise RuntimeError("Rack AI accepted execution without a trusted revision")
-            self.environment.record_trusted_revision(self.project_id, result.accepted_revision)
             self.accepted_revisions.append(result.accepted_revision)
         return result
 
@@ -206,6 +203,19 @@ async def run_contract_with_optional_stop(
             return _result_from_saved_run(run_state), False
 
 
+def sync_project_to_semantic_revision(
+    environment: ProjectEnvironmentService,
+    project_id: str,
+    semantic_revision: str | None,
+):
+    project = environment.repo.load(project_id)
+    if project is None:
+        raise ValueError(f"missing persisted project for resume: {project_id}")
+    if semantic_revision is None or semantic_revision == project.trusted_base_sha:
+        return project
+    return environment.record_trusted_revision(project_id, semantic_revision)
+
+
 def load_saved_inputs(evidence: dict[str, object]) -> tuple[SpecificationChecklist, BehaviorContract]:
     gatekeeper_payload = dict(evidence["gatekeeper"])
     checklist = SpecificationChecklist.from_dict(dict(gatekeeper_payload["checklist"]))
@@ -288,8 +298,6 @@ async def main() -> None:
         runtime = PythonPytestRuntime(project.runtime.environment_path)
         execution_gateway = PersistingExecutionGateway(
             RackAiCliExecutionGateway(workload_id=project_id),
-            environment,
-            project.project_id,
             rack_ai_events=rack_ai_events,
         )
         coordinator = BehaviorContractCoordinator(
@@ -311,6 +319,11 @@ async def main() -> None:
             stop_after_approved_cycles=args.stop_after_approved_cycles,
         )
         state = TddStateRepo(run_root / "tdd-state").load(project_id)
+        project_after_development = sync_project_to_semantic_revision(
+            environment,
+            project.project_id,
+            result.semantic_revision,
+        )
         evidence["development_result"] = {
             "current_pool": result.current_pool,
             "semantic_revision": result.semantic_revision,
@@ -319,8 +332,8 @@ async def main() -> None:
             "stopped_early": stopped_early,
             "cycles": [cycle.to_dict() for cycle in result.cycles],
             "run_state": None if state is None else state.to_dict(),
-            "persisted_accepted_revisions": execution_gateway.accepted_revisions,
-            "project_after_development": environment.repo.load(project.project_id).to_dict(),
+            "mechanically_accepted_revisions": execution_gateway.accepted_revisions,
+            "project_after_development": project_after_development.to_dict(),
         }
 
         if stopped_early:
