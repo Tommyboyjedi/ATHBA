@@ -90,7 +90,7 @@ class PythonScenarioParser:
         if any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Yield, ast.YieldFrom, ast.Await)) for node in ast.walk(function) if node is not function):
             raise ValueError("unsupported dynamic test form")
         lines = source.splitlines()
-        first_body = function.body[0].lineno if function.body else function.end_lineno + 1
+        first_body = function.body[0].lineno if function.body else (function.end_lineno or function.lineno) + 1
         header_start = min([function.lineno, *(item.lineno for item in function.decorator_list)])
         header = "\n".join(lines[header_start - 1:first_body - 1])
         scaffolding, nodes = [], []
@@ -257,13 +257,15 @@ class PytestStructuredExecutor:
     @staticmethod
     def _diagnostic(facts: dict[str, object]) -> BoundaryDiagnostic:
         pairs = tuple(DiagnosticFact(str(name), str(value)) for name, value in facts.items() if value not in (None, "", [], False))
+        evidence_value = facts.get("evidence_refs", ())
+        evidence = tuple(str(item) for item in evidence_value) if isinstance(evidence_value, list) else ()
         outcome = str(facts.get("outcome", "error"))
         message = str(facts.get("failure_message") or outcome)
         if outcome == "passed":
-            return BoundaryDiagnostic("green", message, facts.get("evidence_refs", ()), pairs)
+            return BoundaryDiagnostic("green", message, evidence, pairs)
         if not facts.get("collection_succeeded", False):
-            return BoundaryDiagnostic("collection_failure", message, facts.get("evidence_refs", ()), pairs)
-        return BoundaryDiagnostic("pytest_failure", message, facts.get("evidence_refs", ()), pairs)
+            return BoundaryDiagnostic("collection_failure", message, evidence, pairs)
+        return BoundaryDiagnostic("pytest_failure", message, evidence, pairs)
 
 
 class PythonBoundaryClassifier:
@@ -316,7 +318,7 @@ class PythonPytestAdapter:
 
     def fragment_scenario(self, request: FragmentationRequest) -> tuple[ScenarioFragment, ...]:
         parsed = PythonScenarioParser().parse(request.model.complete_source)
-        result = []
+        result: list[ScenarioFragment] = []
         for index, node in enumerate(parsed.nodes):
             result.append(ScenarioFragment(f"python-{index + 1}-{node.kind.value}", request.model.scenario_id, node.kind.value, node.source, node.capability, tuple(item.fragment_id for item in result), node.source_span))
         return tuple(result)
