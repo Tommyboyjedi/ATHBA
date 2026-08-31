@@ -2029,23 +2029,62 @@ def _has_athba_internal_leakage(proposal: TddStepProposal) -> bool:
 
 
 def _empty_source_red_guidance(contract: BehaviorContract, repository_material: dict[str, object] | None) -> str:
-    if not repository_material or not repository_material.get("all_contract_files_empty"):
+    production_files = _production_files(repository_material)
+    if not production_files:
         return ""
-    production_files = repository_material.get("production_files", [])
-    if not isinstance(production_files, list):
+    module_name = _first_module_name(production_files)
+    if module_name is None:
         return ""
-    module_names = [
-        item.get("module_name")
-        for item in production_files
-        if isinstance(item, dict) and isinstance(item.get("module_name"), str)
-    ]
-    if not module_names:
+    if not _needs_collection_safe_component_access(contract, repository_material, production_files):
         return ""
-    module_name = module_names[0]
     return (
-        f"Visible contract files are empty. Use `import {module_name}` at module scope and resolve "
+        f"Visible production files do not define `{contract.component_name}` yet. Use `import {module_name}` at module scope and resolve "
         f"`getattr({module_name}, {contract.component_name!r})` only inside the proposed test body. "
         f"Do not use `from {module_name} import {contract.component_name}`, because a missing component must fail as a test failure rather than a collection error. "
+    )
+
+
+
+def _production_files(repository_material: dict[str, object] | None) -> list[dict[str, object]]:
+    if not repository_material:
+        return []
+    files = repository_material.get("production_files", [])
+    if not isinstance(files, list):
+        return []
+    return [item for item in files if isinstance(item, dict)]
+
+
+
+def _first_module_name(production_files: list[dict[str, object]]) -> str | None:
+    for item in production_files:
+        module_name = item.get("module_name")
+        if isinstance(module_name, str) and module_name.strip():
+            return module_name
+    return None
+
+
+
+def _needs_collection_safe_component_access(
+    contract: BehaviorContract,
+    repository_material: dict[str, object] | None,
+    production_files: list[dict[str, object]],
+) -> bool:
+    if repository_material and repository_material.get("all_contract_files_empty"):
+        return True
+    component_name = contract.component_name.strip()
+    return not any(_production_file_defines_component(item, component_name) for item in production_files)
+
+
+
+def _production_file_defines_component(item: dict[str, object], component_name: str) -> bool:
+    content = str(item.get("content", ""))
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == component_name
+        for node in tree.body
     )
 
 
@@ -2121,7 +2160,10 @@ def _tester_objective(
         f"Target behavior: {step.focused_behavior}. Expected observable result: {step.expected_result}. "
         f"Requirement refs: {', '.join(step.requirement_refs)}. "
         "Do not edit production code. Do not try to make the test pass. "
+        "Write valid pytest/Python syntax. Define exactly one top-level test function with the exact required name and no fixture parameters. "
+        "Do not wrap the test in try/except, do not swallow failures, and do not use pass to hide missing behavior. "
         "Make the test data actually satisfy the target behavior's precondition and invoke the operation that should produce the stated result; do not assert a failure using inputs that leave that condition untriggered. "
+        "Use `with pytest.raises(...)` only around the operation that is expected to fail. "
         "Do not add helper functions, fixtures, comments, or docstrings unless strictly required. "
         "This target is a standalone external repository, not ATHBA. Use only modules and files visible in the supplied repository material. "
         "Do not import ATHBA internals unless they are explicitly present in that material. "
