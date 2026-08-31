@@ -186,6 +186,9 @@ class RackAiCliTransport:
             )
             result = await self.watchdog.communicate(process, request)
             if not result.stdout_text.strip():
+                fallback = _response_from_expected_packet(self.packet_loader, self.config, request, result)
+                if fallback is not None:
+                    return fallback
                 raise RackAiCliTransportError(_build_error_message("Rack AI returned no command summary", result))
             summary = self.summary_parser.parse(result.stdout_text)
             packet = self.packet_loader.load(summary.packet_path)
@@ -200,6 +203,36 @@ class RackAiCliTransport:
         finally:
             if spec_path is not None:
                 spec_path.unlink(missing_ok=True)
+
+
+def _response_from_expected_packet(
+    packet_loader: RackAiPacketLoader,
+    config: RackAiCliConfig,
+    request: RackAiChangeRequest,
+    process: RackAiCliProcessResult,
+) -> RackAiCliResponse | None:
+    packet_path = Path(config.state_root) / "state" / "changes" / request.change_id / "review-packet.json"
+    if not packet_path.exists():
+        return None
+    packet = packet_loader.load(packet_path)
+    return RackAiCliResponse(
+        process=process,
+        summary=RackAiCliSummary(
+            packet_path=packet_path,
+            change_id=request.change_id,
+            branch=_optional_packet_string(packet, "branch"),
+            worktree=_optional_packet_string(packet, "worktree_path"),
+            status=_optional_packet_string(packet, "status"),
+            acceptance_verdict=_optional_packet_string(packet, "acceptance_verdict"),
+            base_sha=_optional_packet_string(packet, "base_sha"),
+        ),
+        packet_payload=packet,
+    )
+
+
+def _optional_packet_string(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _signal_process(process: asyncio.subprocess.Process, *, terminate: bool) -> None:

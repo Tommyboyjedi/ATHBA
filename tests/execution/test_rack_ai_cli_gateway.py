@@ -276,6 +276,31 @@ async def test_gateway_raises_on_empty_stdout(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_gateway_loads_expected_packet_when_summary_missing(monkeypatch, tmp_path):
+    async def fake_exec(*_args, **_kwargs):
+        packet_path = tmp_path / "state" / "state" / "changes" / "p1--wu-1" / "review-packet.json"
+        write_packet(
+            packet_path,
+            status="checks_failed",
+            verdict="rejected",
+            last_error="collector import failed",
+            worktree_path="/srv/rack-ai/state/workspaces/p1--wu-1/repo",
+        )
+        return FakeProcess("", stderr="worktree already exists", returncode=1)
+
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
+
+    gateway = RackAiCliExecutionGateway("p1", gateway_config(tmp_path / "state"))
+    result = await gateway.execute(sample_unit(), sample_binding())
+
+    assert result.accepted is False
+    assert result.status == "checks_failed"
+    assert result.error == "collector import failed"
+    assert result.change_id == "p1--wu-1"
+    assert result.worktree_path == "/srv/rack-ai/state/workspaces/p1--wu-1/repo"
+
+
+@pytest.mark.asyncio
 async def test_gateway_raises_on_malformed_packet_json(monkeypatch, tmp_path):
     async def fake_exec(*_args, **_kwargs):
         packet_path = tmp_path / "state" / "packet.json"
