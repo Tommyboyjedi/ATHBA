@@ -138,6 +138,27 @@ def build_live_reasoning_gateway(model: str) -> RecordingGateway:
     )
 
 
+ASSERT_TEST_FAILS_SCRIPT = """import subprocess
+import sys
+
+probe = subprocess.run([sys.executable, '-B', '-m', 'pytest', '--version'])
+if probe.returncode != 0:
+    raise SystemExit(probe.returncode or 2)
+
+expected_exception = sys.argv[2].strip() if len(sys.argv) > 2 else ''
+command = [sys.executable, '-B', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', sys.argv[1]]
+result = subprocess.run(command, capture_output=True, text=True)
+combined_output = '\\n'.join(item for item in [result.stdout, result.stderr] if item)
+if result.returncode == 1 and (not expected_exception or expected_exception in combined_output):
+    raise SystemExit(0)
+if result.stdout:
+    print(result.stdout, end='')
+if result.stderr:
+    print(result.stderr, end='', file=sys.stderr)
+raise SystemExit(result.returncode or 1)
+"""
+
+
 def prepare_target(environment: ProjectEnvironmentService, project: DevelopmentProject) -> tuple[DevelopmentProject, list[str]]:
     """Add only ATHBA-owned TDD seed material to a lifecycle-created repository."""
     target = Path(project.repository_root)
@@ -145,19 +166,7 @@ def prepare_target(environment: ProjectEnvironmentService, project: DevelopmentP
     (target / "scripts").mkdir(exist_ok=True)
     (target / "reservation_book.py").write_text('"""ReservationBook implementation is introduced through TDD."""\n', encoding="utf-8")
     (target / "scripts" / "assert_test_fails.py").write_text(
-        """import subprocess
-import sys
-
-probe = subprocess.run([sys.executable, '-B', '-m', 'pytest', '--version'])
-if probe.returncode != 0:
-    raise SystemExit(probe.returncode or 2)
-
-command = [sys.executable, '-B', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', sys.argv[1]]
-result = subprocess.run(command)
-if result.returncode == 1:
-    raise SystemExit(0)
-raise SystemExit(result.returncode or 1)
-""",
+        ASSERT_TEST_FAILS_SCRIPT,
         encoding="utf-8",
     )
     run(["git", "add", "."], cwd=target)
