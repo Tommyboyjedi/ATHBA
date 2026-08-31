@@ -13,6 +13,13 @@ from core.development.contract_run_domain import (
     TddStepDecision,
     TddStepProposal,
 )
+from core.development.semantic_progression_domain import (
+    ObligationResolutionRecord,
+    OpenSemanticObligation,
+    ProvisionalRequirementState,
+    SemanticObligationDraft,
+    SemanticProgressLedger,
+)
 from core.development.red_acceptance import RedCandidateAnalysis
 from core.development.specification_domain import (
     ChecklistEvidence,
@@ -67,6 +74,11 @@ __all__ = [
     "GatekeeperAssessmentRecord",
     "REVIEW_VERDICTS",
     "RedCandidateAnalysis",
+    "SemanticObligationDraft",
+    "SemanticProgressLedger",
+    "OpenSemanticObligation",
+    "ProvisionalRequirementState",
+    "ObligationResolutionRecord",
     "SemanticReviewResult",
     "SourceRequirementClause",
     "SpecificationChecklist",

@@ -19,8 +19,10 @@ class ContractRunStore:
     def save(self, snapshot: TddSnapshot, run_state: BehaviorContractRunState) -> TddSnapshot:
         updated = replace(
             snapshot,
-            repository_binding=run_state.repository_binding,
-            current_trusted_revision=run_state.semantic_base_revision,
+            repository_binding=run_state.repository_binding.with_base_sha(run_state.development_base_revision),
+            current_trusted_revision=run_state.development_base_revision,
+            development_base_revision=run_state.development_base_revision,
+            semantic_base_revision=run_state.semantic_base_revision,
             contract_runs={**snapshot.contract_runs, run_state.contract.id: run_state},
         )
         self.repository.save(updated)
@@ -31,4 +33,6 @@ class ContractRunStore:
             project_id=project_id,
             repository_binding=binding,
             current_trusted_revision=binding.base_sha,
+            development_base_revision=binding.base_sha,
+            semantic_base_revision=binding.base_sha,
         )

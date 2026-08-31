@@ -58,6 +58,7 @@ from core.development.tdd_progression import (
     TddSnapshot,
     TddStepProposal,
 )
+from core.development.semantic_progression_domain import SemanticProgressLedger
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_contract import RepositoryBinding, find_forbidden_resource_selection_keys, to_rack_ai_request
 from core.execution.reasoning_gateway import ReasoningRequest, ReasoningResult
@@ -258,7 +259,7 @@ async def test_tdd_planner_rejects_a_requirement_before_its_prerequisite_is_appr
         "completed_requirement_refs": [],
     }])
 
-    with pytest.raises(ValueError, match="prerequisites"):
+    with pytest.raises(ValueError, match="currently actionable"):
         await DynamicTddPlanner(gateway).decide_next_step(dependency_contract, run_state())
 
 
@@ -391,21 +392,30 @@ def run_state(
     completed_requirement_refs=None,
     cycles=None,
     semantic_base_revision="a" * 40,
+    development_base_revision=None,
     contract_state=None,
     registered_root=None,
     failure_progress=None,
     blocked_reason=None,
+    semantic_progress=None,
+    targeted_requirement_ref=None,
+    targeted_checklist_ref=None,
 ):
     active_contract = contract_state or contract()
+    development_base_revision = development_base_revision or semantic_base_revision
     return BehaviorContractRunState(
         contract=active_contract,
-        repository_binding=binding(semantic_base_revision, registered_root=registered_root),
+        repository_binding=binding(development_base_revision, registered_root=registered_root),
         semantic_base_revision=semantic_base_revision,
+        development_base_revision=development_base_revision,
         current_pool=current_pool,
         completed_requirement_refs=completed_requirement_refs or [],
         cycles=cycles or [],
         failure_progress=failure_progress or FailureProgressState(),
         blocked_reason=blocked_reason,
+        semantic_progress=semantic_progress or SemanticProgressLedger(),
+        targeted_requirement_ref=targeted_requirement_ref,
+        targeted_checklist_ref=targeted_checklist_ref,
     )
 
 
@@ -2148,28 +2158,25 @@ async def test_rejected_red_is_persisted_and_cannot_become_green_base():
 
 
 @pytest.mark.asyncio
-async def test_targeted_requirement_limits_planner_and_persists_across_resume():
-    target_state = replace(
-        run_state(),
+async def test_targeted_requirement_prioritizes_planner_and_persists_across_resume():
+    target_state = run_state(
         targeted_requirement_ref="RB-2",
         targeted_checklist_ref="SPEC-2",
     )
-    invalid = proposal("RB-1").to_dict()
-    repaired = proposal("RB-2").to_dict()
     gateway = FakeReasoningGateway([
-        {"status": "propose", "rationale": "wrong target", "proposal": invalid, "completed_requirement_refs": []},
-        {"status": "propose", "rationale": "targeted repair", "proposal": repaired, "completed_requirement_refs": []},
+        {"status": "propose", "rationale": "choose another actionable item", "proposal": proposal("RB-1").to_dict(), "completed_requirement_refs": []},
     ])
 
     decision = await DynamicTddPlanner(gateway).decide_next_step(contract(), target_state)
     restored = BehaviorContractRunState.from_dict(target_state.to_dict())
+    allowed = json.loads(gateway.requests[0].prompt)["allowed_requirement_refs"]
 
-    assert decision.proposal == proposal("RB-2")
-    assert json.loads(gateway.requests[0].prompt)["allowed_requirement_refs"] == ["RB-2"]
-    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
+    assert decision.proposal == proposal("RB-1")
+    assert allowed[0] == "RB-2"
+    assert set(allowed) == {"RB-1", "RB-2"}
     assert restored.targeted_requirement_ref == "RB-2"
     assert restored.targeted_checklist_ref == "SPEC-2"
-    assert restored.active_requirement_refs() == ["RB-2"]
+    assert restored.active_requirement_refs() == ["RB-2", "RB-1"]
 
 
 def test_targeted_gap_selection_skips_untraceable_checklist_item():

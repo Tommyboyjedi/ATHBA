@@ -13,6 +13,14 @@ from typing import Protocol, cast
 
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.contract_run_store import ContractRunStore
+from core.development.provisional_semantic_progression import (
+    ActionableRequirementSelectionRequest,
+    ActionableRequirementSelector,
+    ProvisionalReviewRecorder,
+    ProvisionalReviewRequest,
+    SemanticClosureRequest,
+    SemanticClosureService,
+)
 from core.development.failure_progression import (
     DependencyDecision,
     DependencyDisposition,
@@ -255,7 +263,12 @@ class GitTesterRepositoryMaterialProvider:
         self.repository_root = Path(repository_root)
 
     def render(self, request: RepositoryMaterialRequest) -> dict[str, object]:
-        selected_revision = request.revision or request.run_state.semantic_base_revision or request.run_state.repository_binding.base_sha
+        selected_revision = (
+            request.revision
+            or request.run_state.development_base_revision
+            or request.run_state.semantic_base_revision
+            or request.run_state.repository_binding.base_sha
+        )
         if selected_revision is None:
             raise ValueError("repository context requires a trusted revision")
         self._verify_revision(selected_revision)
@@ -468,18 +481,21 @@ class DynamicTddPlanner:
         run_state = request.run_state
         decision = request.decision
         requirement_refs = run_state.active_requirement_refs()
-        requirement_ref_set = set(requirement_refs)
+        contract_requirement_refs = contract.requirement_refs()
+        requirement_ref_set = set(contract_requirement_refs)
         approved_ref_set = set(run_state.completed_requirement_refs)
         claimed_ref_set = set(decision.completed_requirement_refs)
         unknown_claimed_refs = claimed_ref_set - requirement_ref_set
         if unknown_claimed_refs:
             raise ValueError("completion decisions cannot reference requirements outside the contract")
         if decision.status == "complete":
+            if run_state.semantic_progress.provisional_requirements or run_state.semantic_progress.open_obligations:
+                raise ValueError("completion requires all provisional requirements and open semantic obligations to be resolved")
             if approved_ref_set != requirement_ref_set:
                 raise ValueError("completion requires every contract requirement to be semantically approved")
             return replace(
                 decision,
-                completed_requirement_refs=[ref for ref in requirement_refs if ref in approved_ref_set],
+                completed_requirement_refs=[ref for ref in contract_requirement_refs if ref in approved_ref_set],
             )
 
         assert decision.proposal is not None
@@ -491,9 +507,11 @@ class DynamicTddPlanner:
             raise ValueError("step proposal referenced a requirement outside the contract")
         if proposal_ref in approved_ref_set:
             raise ValueError("step proposal repeated a requirement that is already semantically covered")
-        ready_refs = set(contract.ready_requirement_refs(run_state.completed_requirement_refs))
-        if proposal_ref not in ready_refs:
-            raise ValueError("step proposal selected a requirement whose prerequisites are not semantically approved")
+        actionable_refs = set(
+            ActionableRequirementSelector().select(ActionableRequirementSelectionRequest(contract, run_state))
+        )
+        if proposal_ref not in actionable_refs:
+            raise ValueError("step proposal selected a requirement that is not currently actionable")
         if proposal.test_path not in contract.test_paths:
             raise ValueError("step proposal test path is outside the contract")
         if proposal.production_path not in contract.production_paths:
@@ -628,13 +646,14 @@ def _semantic_review_repair_prompt(
             "invalid_review_draft": invalid_review_text,
             "validation_error": validation_error,
             "required_json_schema": {
-                "verdict": "approved|repair_required|replan_required",
+                "verdict": "approved|behavior_correct_with_open_obligations|repair_required|replan_required",
                 "rationale": "string",
                 "findings": ["string"],
                 "candidate_revision": request.candidate_revision,
                 "step_id": request.cycle.step.step_id,
                 "evidence_refs": ["string"],
                 "repair_instructions": ["string"],
+                "open_obligations": [{"owning_requirement_ref": "string", "blocking_requirement_refs": ["string"], "rationale": "string", "evidence_refs": ["string"]}],
             },
             "rules": [
                 "return raw JSON only",
@@ -647,6 +666,8 @@ def _semantic_review_repair_prompt(
                 "if you cite contract source refs in evidence_refs, they must come only from review_scope.allowed_source_refs",
                 "repair_instructions must be empty unless verdict is repair_required",
                 "repair_instructions must be non-empty when verdict is repair_required",
+                "open_obligations must be empty unless verdict is behavior_correct_with_open_obligations",
+                "behavior_correct_with_open_obligations requires one or more open_obligations for the active requirement ref",
             ],
         },
         sort_keys=True,
@@ -945,7 +966,12 @@ async def _mechanical_dependency_transition(
     cycle: ContractCycleRecord,
 ) -> failure_routing.FailureTransition:
     planner_decision = await dependencies.dependency_planner.decide(
-        DependencyDecisionRequest(request.run_state.contract, cycle.step, observation, request.run_state.semantic_base_revision)
+        DependencyDecisionRequest(
+            request.run_state.contract,
+            cycle.step,
+            observation,
+            request.run_state.development_base_revision or request.run_state.semantic_base_revision,
+        )
     )
     if planner_decision.disposition is DependencyDisposition.REJECT_DEPENDENCY:
         return _candidate_repair_transition(dependencies, request, observation, decision, cycle)
@@ -963,11 +989,35 @@ def _advance_nonapproved_review(
     review: SemanticReviewResult,
     max_semantic_repairs: int,
 ) -> RunAdvance:
+    if review.verdict == "behavior_correct_with_open_obligations":
+        return _advance_provisional_review(run_state, contract, cycle, review)
     if review.verdict == "repair_required":
         return _review_repair_advance(run_state, contract, cycle, max_semantic_repairs)
     if review.verdict == "replan_required":
         return _review_replan_advance(run_state, contract, cycle, review.rationale)
     raise ValueError(f"unsupported review verdict: {review.verdict}")
+
+
+def _advance_provisional_review(
+    run_state: BehaviorContractRunState,
+    contract: BehaviorContract,
+    cycle: ContractCycleRecord,
+    review: SemanticReviewResult,
+) -> RunAdvance:
+    provisional = ProvisionalReviewRecorder().record(ProvisionalReviewRequest(run_state, cycle, review))
+    return RunAdvance(
+        replace(
+            run_state,
+            current_pool="tdd_ready",
+            contract=replace(contract, status="tdd_ready"),
+            development_base_revision=provisional.development_base_revision,
+            repository_binding=run_state.repository_binding.with_base_sha(provisional.development_base_revision),
+            blocked_reason=None,
+            semantic_progress=provisional.ledger,
+            cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="approved")),
+            failure_progress=split_aware_success_state(run_state.failure_progress),
+        )
+    )
 
 
 def _review_repair_advance(
@@ -1067,8 +1117,10 @@ def _trusted_revision_for_phase(
     phase: TddPhase,
 ) -> str | None:
     if phase is TddPhase.RED:
-        return run_state.semantic_base_revision
-    return cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision
+        return run_state.development_base_revision or run_state.semantic_base_revision
+    return cycle.red_phase.accepted_revision if cycle.red_phase else (
+        run_state.development_base_revision or run_state.semantic_base_revision
+    )
 
 
 @dataclass(frozen=True)
@@ -1126,6 +1178,7 @@ class ReadyPoolProgressor:
     dependencies: ReadyPoolDependencies
 
     async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
+        run_state = _close_semantic_progress(run_state)
         contract = run_state.contract
         split_child = next_ready_split_child(run_state)
         if split_child is not None:
@@ -1135,6 +1188,7 @@ class ReadyPoolProgressor:
                     run_state.failure_progress,
                     split_child.step_id,
                 )
+                or run_state.development_base_revision
                 or run_state.semantic_base_revision,
             )
             return RunAdvance(
@@ -1181,7 +1235,7 @@ class ReadyPoolProgressor:
         decision = await self.dependencies.step_planner.decide_next_step(StepDecisionRequest(contract, run_state))
         if decision.status != "complete":
             assert decision.proposal is not None
-            cycle = ContractCycleRecord.from_step(decision.proposal, base_revision=run_state.semantic_base_revision)
+            cycle = ContractCycleRecord.from_step(decision.proposal, base_revision=run_state.development_base_revision)
             return RunAdvance(
                 replace(
                     run_state,
@@ -1248,7 +1302,7 @@ async def _advance_cycle_active(
                 TddPhase.RED,
                 work_unit,
                 run_state.repository_binding.with_base_sha(
-                    cycle.base_revision or run_state.semantic_base_revision
+                    cycle.base_revision or run_state.development_base_revision or run_state.semantic_base_revision
                 ),
             )
         )
@@ -1415,7 +1469,7 @@ async def _advance_green_phase(
 ) -> RunAdvance:
     if cycle.green_phase is None or cycle.green_phase.accepted_revision is not None:
         raise ValueError("cycle_active run state has no remaining executable phase")
-    base_revision = cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision
+    base_revision = cycle.red_phase.accepted_revision if cycle.red_phase else (run_state.development_base_revision or run_state.semantic_base_revision)
     material = _repository_material(contract, run_state, dependencies.repository_material_provider, base_revision)
     work_unit = _retry_scoped_work_unit(
         run_state.failure_progress,
@@ -1433,6 +1487,8 @@ async def _advance_green_phase(
             run_state,
             current_pool="review_ready",
             contract=replace(contract, status="review_ready"),
+            development_base_revision=outcome.phase_state.accepted_revision,
+            repository_binding=run_state.repository_binding.with_base_sha(outcome.phase_state.accepted_revision),
             cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
             failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
@@ -1488,9 +1544,9 @@ async def _advance_review_ready(
         SemanticReviewRequest(contract, run_state, cycle, cycle.candidate_revision, review_material)
     )
     cycle = replace(cycle, review_result=review, review_history=[*cycle.review_history, review])
-    if review.verdict != "approved":
-        return _advance_nonapproved_review(run_state, contract, cycle, review, dependencies.max_semantic_repairs)
-    return await _advance_approved_review(run_state, dependencies, contract, cycle)
+    if review.verdict == "approved":
+        return await _advance_approved_review(run_state, dependencies, contract, cycle)
+    return _advance_nonapproved_review(run_state, contract, cycle, review, dependencies.max_semantic_repairs)
 
 
 async def _advance_approved_review(
@@ -1516,11 +1572,18 @@ async def _advance_approved_review(
         current_pool=current_pool,
         contract=replace(contract, status=contract_status),
         semantic_base_revision=cycle.candidate_revision,
+        development_base_revision=cycle.candidate_revision,
         repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
         completed_requirement_refs=completed_refs,
         blocked_reason=blocked_reason,
         cycles=_replace_current_cycle(run_state.cycles, replace(cycle, semantic_revision=cycle.candidate_revision, pool="approved")),
         failure_progress=failure_progress,
+    )
+    closure = SemanticClosureService().close(SemanticClosureRequest(approved_run_state))
+    approved_run_state = replace(
+        approved_run_state,
+        completed_requirement_refs=_ordered_completed_requirement_refs(contract, closure.completed_requirement_refs),
+        semantic_progress=closure.ledger,
     )
     if split_resolution is not None and current_pool == "tdd_ready":
         return RunAdvance(approved_run_state)
@@ -1602,6 +1665,8 @@ async def _advance_repair_ready(
             run_state,
             current_pool="review_ready",
             contract=replace(contract, status="review_ready"),
+            development_base_revision=outcome.phase_state.accepted_revision,
+            repository_binding=run_state.repository_binding.with_base_sha(outcome.phase_state.accepted_revision),
             cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
             failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
@@ -1663,7 +1728,12 @@ class BehaviorContractCoordinator:
         snapshot = self.run_store.load(contract.project_id) or self.run_store.initial(contract.project_id, self.repository_binding)
         run_state = snapshot.contract_runs.get(contract.id)
         if run_state is None:
-            run_state = BehaviorContractRunState(contract=contract, repository_binding=self.repository_binding, semantic_base_revision=self.repository_binding.base_sha)
+            run_state = BehaviorContractRunState(
+                contract=contract,
+                repository_binding=self.repository_binding,
+                semantic_base_revision=self.repository_binding.base_sha,
+                development_base_revision=self.repository_binding.base_sha,
+            )
             snapshot = self.run_store.save(snapshot, run_state)
         while True:
             contract = run_state.contract
@@ -1699,10 +1769,19 @@ def _replace_current_cycle(cycles: list[ContractCycleRecord], replacement: Contr
     return [*cycles[:-1], replacement]
 
 
+def _close_semantic_progress(run_state: BehaviorContractRunState) -> BehaviorContractRunState:
+    closure = SemanticClosureService().close(SemanticClosureRequest(run_state))
+    return replace(
+        run_state,
+        completed_requirement_refs=_ordered_completed_requirement_refs(run_state.contract, closure.completed_requirement_refs),
+        semantic_progress=closure.ledger,
+    )
+
+
 def _result_from_run_state(run_state: BehaviorContractRunState) -> BehaviorContractCoordinationResult:
     return BehaviorContractCoordinationResult(
         contract_id=run_state.contract.id,
-        current_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
+        current_binding=run_state.repository_binding.with_base_sha(run_state.development_base_revision),
         semantic_revision=run_state.semantic_base_revision,
         current_pool=run_state.current_pool,
         cycles=list(run_state.cycles),
@@ -1769,13 +1848,15 @@ async def _environment_recovery_succeeded(
 
 
 def _completed_run_state(run_state: BehaviorContractRunState) -> BehaviorContractRunState:
+    if run_state.semantic_progress.provisional_requirements or run_state.semantic_progress.open_obligations:
+        raise ValueError("completion requires all provisional requirements and open semantic obligations to be resolved")
     contract = run_state.contract
     return replace(
         run_state,
         current_pool="completed",
         completed_requirement_refs=_ordered_completed_requirement_refs(contract, run_state.completed_requirement_refs),
         contract=replace(contract, status="completed"),
-        repository_binding=run_state.repository_binding.with_base_sha(run_state.semantic_base_revision),
+        repository_binding=run_state.repository_binding.with_base_sha(run_state.development_base_revision),
     )
 
 
@@ -2044,11 +2125,9 @@ def _step_prompt(
         {
             "instruction": "Act as ATHBA's Tester planner. Return one JSON object only.",
             "contract": contract.to_dict(),
-            "allowed_requirement_refs": [
-                ref
-                for ref in run_state.active_requirement_refs()
-                if ref in contract.ready_requirement_refs(run_state.completed_requirement_refs)
-            ],
+            "allowed_requirement_refs": ActionableRequirementSelector().select(
+                ActionableRequirementSelectionRequest(contract, run_state)
+            ),
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
             "prior_steps": prior_steps,
@@ -2131,7 +2210,9 @@ def _step_repair_prompt(
         {
             "instruction": "Repair the invalid ATHBA Tester step decision. Return raw JSON only.",
             "contract": contract.to_dict(),
-            "allowed_requirement_refs": run_state.active_requirement_refs(),
+            "allowed_requirement_refs": ActionableRequirementSelector().select(
+                ActionableRequirementSelectionRequest(contract, run_state)
+            ),
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
             "prior_steps": [cycle.step.to_dict() for cycle in run_state.cycles],
@@ -2257,21 +2338,22 @@ def _review_prompt(
             ),
             "review_material": review_material,
             "required_output": {
-                "verdict": "approved|repair_required|replan_required",
+                "verdict": "approved|behavior_correct_with_open_obligations|repair_required|replan_required",
                 "rationale": "string",
                 "findings": ["concrete findings"],
                 "candidate_revision": candidate_revision,
                 "step_id": cycle.step.step_id,
                 "evidence_refs": ["optional evidence refs"],
                 "repair_instructions": ["bounded production-only repair instructions when repair_required"],
+                "open_obligations": [{"owning_requirement_ref": "string", "blocking_requirement_refs": ["string"], "rationale": "string", "evidence_refs": ["string"]}],
             },
             "criteria": [
                 "faithful contract behavior not test gaming",
                 "simple direct readable code",
                 "preserves prior approved behavior",
-                "no dead imports or dead code",
-                "no misleading or noisy comments",
-                "no speculative abstractions or future behavior",
+                "preserve prior accepted executable behavior",
+                "do not use style-only or speculative design concerns as the sole reason to block semantic progress",
+                "semantic approval may be provisional when behavior is correct but later semantic obligations remain open",
                 "review only the active step requirement refs plus already semantically approved requirement refs",
                 "do not fail this candidate solely because other future contract requirements remain unimplemented",
                 "if you cite contract source refs in evidence_refs, they must come only from review_scope.allowed_source_refs",
@@ -2343,6 +2425,7 @@ def _normalize_allowed_paths(paths: list[str] | None, *, label: str) -> list[str
 def _semantic_review_scope(request: SemanticReviewRequest) -> dict[str, object]:
     scoped_requirement_refs = [
         *request.run_state.completed_requirement_refs,
+        *request.run_state.semantic_progress.provisional_requirement_refs(),
         *request.cycle.step.requirement_refs,
     ]
     return {
@@ -2378,7 +2461,11 @@ def _out_of_scope_review_source_refs(
     allowed_source_refs = set(
         _source_refs_for_requirements(
             request.contract,
-            [*request.run_state.completed_requirement_refs, *request.cycle.step.requirement_refs],
+            [
+                *request.run_state.completed_requirement_refs,
+                *request.run_state.semantic_progress.provisional_requirement_refs(),
+                *request.cycle.step.requirement_refs,
+            ],
         )
     )
     out_of_scope = [

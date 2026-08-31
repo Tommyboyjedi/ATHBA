@@ -6,6 +6,7 @@ from typing import Any
 from core.development.behavior_contract_domain import BehaviorContract
 from core.development.failure_state import FailureProgressState, validate_failure_progress_state
 from core.development.red_acceptance import RedCandidateAnalysis
+from core.development.semantic_progression_domain import SemanticObligationDraft, SemanticProgressLedger
 from core.development.progression import ExecutionAttemptRecord
 from core.development.specification_domain import SpecificationGatekeeperRunState
 from core.development.tdd_domain import TddPhaseState, green_work_unit_id, red_work_unit_id
@@ -131,6 +132,7 @@ class SemanticReviewResult:
     step_id: str
     evidence_refs: list[str] = field(default_factory=list)
     repair_instructions: list[str] = field(default_factory=list)
+    open_obligations: list[SemanticObligationDraft] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "verdict", enum_value(self.verdict, ReviewVerdict, "semantic review verdict"))
@@ -142,8 +144,15 @@ class SemanticReviewResult:
         validate_list_of_strings(self.repair_instructions, "repair instructions")
         if self.verdict == ReviewVerdict.REPAIR_REQUIRED.value and not self.repair_instructions:
             raise ValueError("repair_required review results must include repair instructions")
-        if self.verdict == ReviewVerdict.APPROVED.value and self.repair_instructions:
-            raise ValueError("approved review results must not include repair instructions")
+        if self.verdict in {
+            ReviewVerdict.APPROVED.value,
+            ReviewVerdict.BEHAVIOR_CORRECT_WITH_OPEN_OBLIGATIONS.value,
+        } and self.repair_instructions:
+            raise ValueError("non-repair review results must not include repair instructions")
+        if self.verdict == ReviewVerdict.BEHAVIOR_CORRECT_WITH_OPEN_OBLIGATIONS.value and not self.open_obligations:
+            raise ValueError("provisional review results must include open obligations")
+        if self.verdict != ReviewVerdict.BEHAVIOR_CORRECT_WITH_OPEN_OBLIGATIONS.value and self.open_obligations:
+            raise ValueError("only provisional review results may include open obligations")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -154,6 +163,7 @@ class SemanticReviewResult:
             "step_id": self.step_id,
             "evidence_refs": list(self.evidence_refs),
             "repair_instructions": list(self.repair_instructions),
+            "open_obligations": [item.to_dict() for item in self.open_obligations],
         }
 
     @classmethod
@@ -166,6 +176,7 @@ class SemanticReviewResult:
             step_id=str(payload["step_id"]),
             evidence_refs=list_of_strings(payload.get("evidence_refs", []), "review evidence refs"),
             repair_instructions=list_of_strings(payload.get("repair_instructions", []), "repair instructions"),
+            open_obligations=[SemanticObligationDraft.from_dict(dict(item)) for item in payload.get("open_obligations", [])],
         )
 
 
@@ -239,6 +250,7 @@ class BehaviorContractRunState:
     contract: BehaviorContract
     repository_binding: RepositoryBinding
     semantic_base_revision: str | None
+    development_base_revision: str | None = None
     current_pool: str = ContractPoolStatus.TDD_READY.value
     completed_requirement_refs: list[str] = field(default_factory=list)
     cycles: list[ContractCycleRecord] = field(default_factory=list)
@@ -247,9 +259,12 @@ class BehaviorContractRunState:
     targeted_requirement_ref: str | None = None
     targeted_checklist_ref: str | None = None
     failure_progress: FailureProgressState = field(default_factory=FailureProgressState)
+    semantic_progress: SemanticProgressLedger = field(default_factory=SemanticProgressLedger)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "current_pool", enum_value(self.current_pool, ContractPoolStatus, "contract run pool"))
+        if self.development_base_revision is None:
+            object.__setattr__(self, "development_base_revision", self.semantic_base_revision)
         validate_list_of_strings(self.completed_requirement_refs, "completed requirement refs")
         unknown = set(self.completed_requirement_refs) - set(self.contract.requirement_refs())
         if unknown:
@@ -267,9 +282,10 @@ class BehaviorContractRunState:
         validate_failure_progress_state(self.current_pool, self.failure_progress, self.blocked_reason)
 
     def active_requirement_refs(self) -> list[str]:
-        if self.targeted_requirement_ref is not None:
-            return [self.targeted_requirement_ref]
-        return self.contract.requirement_refs()
+        refs = self.contract.requirement_refs()
+        if self.targeted_requirement_ref is None or self.targeted_requirement_ref not in refs:
+            return refs
+        return [self.targeted_requirement_ref, *[ref for ref in refs if ref != self.targeted_requirement_ref]]
 
     def current_cycle(self) -> ContractCycleRecord | None:
         return self.cycles[-1] if self.cycles else None
@@ -279,6 +295,7 @@ class BehaviorContractRunState:
             "contract": self.contract.to_dict(),
             "repository_binding": self.repository_binding.to_dict(),
             "semantic_base_revision": self.semantic_base_revision,
+            "development_base_revision": self.development_base_revision,
             "current_pool": self.current_pool,
             "completed_requirement_refs": list(self.completed_requirement_refs),
             "cycles": [cycle.to_dict() for cycle in self.cycles],
@@ -287,14 +304,17 @@ class BehaviorContractRunState:
             "targeted_requirement_ref": self.targeted_requirement_ref,
             "targeted_checklist_ref": self.targeted_checklist_ref,
             "failure_progress": self.failure_progress.to_dict(),
+            "semantic_progress": self.semantic_progress.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "BehaviorContractRunState":
+        semantic_base_revision = payload.get("semantic_base_revision")
         return cls(
             contract=BehaviorContract.from_dict(dict(payload["contract"])),
             repository_binding=RepositoryBinding.from_dict(dict(payload["repository_binding"])),
-            semantic_base_revision=payload.get("semantic_base_revision"),
+            semantic_base_revision=semantic_base_revision,
+            development_base_revision=payload.get("development_base_revision", semantic_base_revision),
             current_pool=str(payload.get("current_pool", ContractPoolStatus.TDD_READY.value)),
             completed_requirement_refs=list_of_strings(payload.get("completed_requirement_refs", []), "completed requirement refs"),
             cycles=[ContractCycleRecord.from_dict(dict(item)) for item in payload.get("cycles", [])],
@@ -303,6 +323,7 @@ class BehaviorContractRunState:
             targeted_requirement_ref=payload.get("targeted_requirement_ref"),
             targeted_checklist_ref=payload.get("targeted_checklist_ref"),
             failure_progress=FailureProgressState.from_dict(dict(payload.get("failure_progress", {}))),
+            semantic_progress=SemanticProgressLedger.from_dict(dict(payload.get("semantic_progress", {}))),
         )
 
 
@@ -311,6 +332,8 @@ class TddSnapshot:
     project_id: str
     repository_binding: RepositoryBinding
     current_trusted_revision: str | None
+    development_base_revision: str | None = None
+    semantic_base_revision: str | None = None
     completed_behavior_ids: list[str] = field(default_factory=list)
     attempts: list[ExecutionAttemptRecord] = field(default_factory=list)
     behaviors: dict[str, Any] = field(default_factory=dict)
@@ -321,6 +344,8 @@ class TddSnapshot:
 
     def __post_init__(self) -> None:
         require_text(self.project_id, "snapshot project id")
+        if self.development_base_revision is None:
+            object.__setattr__(self, "development_base_revision", self.current_trusted_revision)
         validate_list_of_strings(self.completed_behavior_ids, "completed behavior ids")
         if self.blocked_behavior_id is not None:
             require_text(self.blocked_behavior_id, "blocked behavior id")
@@ -334,6 +359,8 @@ class TddSnapshot:
             "project_id": self.project_id,
             "repository_binding": self.repository_binding.to_dict(),
             "current_trusted_revision": self.current_trusted_revision,
+            "development_base_revision": self.development_base_revision,
+            "semantic_base_revision": self.semantic_base_revision,
             "completed_behavior_ids": list(self.completed_behavior_ids),
             "attempts": [attempt.to_dict() for attempt in self.attempts],
             "behaviors": {key: value.to_dict() for key, value in sorted(self.behaviors.items())},
@@ -347,10 +374,13 @@ class TddSnapshot:
     def from_dict(cls, payload: dict[str, Any]) -> "TddSnapshot":
         from core.development.tdd_domain import TddBehaviorProgress
 
+        current_trusted_revision = payload.get("current_trusted_revision")
         return cls(
             project_id=str(payload["project_id"]),
             repository_binding=RepositoryBinding.from_dict(dict(payload["repository_binding"])),
-            current_trusted_revision=payload.get("current_trusted_revision"),
+            current_trusted_revision=current_trusted_revision,
+            development_base_revision=payload.get("development_base_revision", current_trusted_revision),
+            semantic_base_revision=payload.get("semantic_base_revision"),
             completed_behavior_ids=[str(item) for item in payload.get("completed_behavior_ids", [])],
             attempts=[ExecutionAttemptRecord.from_dict(item) for item in payload.get("attempts", [])],
             behaviors={str(key): TddBehaviorProgress.from_dict(value) for key, value in payload.get("behaviors", {}).items()},

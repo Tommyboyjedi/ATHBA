@@ -27,6 +27,7 @@ class ContractPoolStatus(str, Enum):
 
 class ReviewVerdict(str, Enum):
     APPROVED = "approved"
+    BEHAVIOR_CORRECT_WITH_OPEN_OBLIGATIONS = "behavior_correct_with_open_obligations"
     REPAIR_REQUIRED = "repair_required"
     REPLAN_REQUIRED = "replan_required"
 
