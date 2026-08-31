@@ -13,6 +13,10 @@ from core.development.contract_run_domain import (
     TddStepDecision,
     TddStepProposal,
 )
+from core.development.green_regression_domain import (
+    RegressionDisposition,
+    RegressionGateResult,
+)
 from core.development.semantic_progression_domain import (
     ObligationResolutionRecord,
     OpenSemanticObligation,
@@ -74,6 +78,8 @@ __all__ = [
     "GatekeeperAssessmentRecord",
     "REVIEW_VERDICTS",
     "RedCandidateAnalysis",
+    "RegressionDisposition",
+    "RegressionGateResult",
     "SemanticObligationDraft",
     "SemanticProgressLedger",
     "OpenSemanticObligation",

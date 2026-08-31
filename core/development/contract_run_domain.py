@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.development.behavior_contract_domain import BehaviorContract
+from core.development.green_regression_domain import RegressionGateResult
 from core.development.failure_state import FailureProgressState, validate_failure_progress_state
 from core.development.red_acceptance import RedCandidateAnalysis
 from core.development.semantic_progression_domain import SemanticObligationDraft, SemanticProgressLedger
@@ -191,13 +192,17 @@ class ContractCycleRecord:
     semantic_revision: str | None = None
     review_result: SemanticReviewResult | None = None
     review_history: list[SemanticReviewResult] = field(default_factory=list)
+    regression_result: RegressionGateResult | None = None
     red_analysis: RedCandidateAnalysis | None = None
     repair_attempts: int = 0
+    regression_repair_attempts: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "pool", enum_value(self.pool, ContractPoolStatus, "cycle pool"))
         if self.repair_attempts < 0:
             raise ValueError("repair attempts must not be negative")
+        if self.regression_repair_attempts < 0:
+            raise ValueError("regression repair attempts must not be negative")
 
     @classmethod
     def from_step(cls, step: TddStepProposal, base_revision: str | None) -> "ContractCycleRecord":
@@ -220,8 +225,10 @@ class ContractCycleRecord:
             "semantic_revision": self.semantic_revision,
             "review_result": None if self.review_result is None else self.review_result.to_dict(),
             "review_history": [item.to_dict() for item in self.review_history],
+            "regression_result": None if self.regression_result is None else self.regression_result.to_dict(),
             "red_analysis": None if self.red_analysis is None else self.red_analysis.to_dict(),
             "repair_attempts": self.repair_attempts,
+            "regression_repair_attempts": self.regression_repair_attempts,
         }
 
     @classmethod
@@ -229,6 +236,7 @@ class ContractCycleRecord:
         red_phase = payload.get("red_phase")
         green_phase = payload.get("green_phase")
         review_result = payload.get("review_result")
+        regression_result = payload.get("regression_result")
         red_analysis = payload.get("red_analysis")
         return cls(
             step=TddStepProposal.from_dict(dict(payload["step"])),
@@ -240,8 +248,10 @@ class ContractCycleRecord:
             semantic_revision=payload.get("semantic_revision"),
             review_result=None if review_result is None else SemanticReviewResult.from_dict(dict(review_result)),
             review_history=[SemanticReviewResult.from_dict(dict(item)) for item in payload.get("review_history", [])],
+            regression_result=None if regression_result is None else RegressionGateResult.from_dict(dict(regression_result)),
             red_analysis=None if red_analysis is None else RedCandidateAnalysis.from_dict(dict(red_analysis)),
             repair_attempts=int(payload.get("repair_attempts", 0)),
+            regression_repair_attempts=int(payload.get("regression_repair_attempts", 0)),
         )
 
 
@@ -253,6 +263,7 @@ class BehaviorContractRunState:
     development_base_revision: str | None = None
     current_pool: str = ContractPoolStatus.TDD_READY.value
     completed_requirement_refs: list[str] = field(default_factory=list)
+    accepted_green_test_names: list[str] = field(default_factory=list)
     cycles: list[ContractCycleRecord] = field(default_factory=list)
     blocked_reason: str | None = None
     gatekeeper_state: SpecificationGatekeeperRunState | None = None
@@ -266,6 +277,7 @@ class BehaviorContractRunState:
         if self.development_base_revision is None:
             object.__setattr__(self, "development_base_revision", self.semantic_base_revision)
         validate_list_of_strings(self.completed_requirement_refs, "completed requirement refs")
+        validate_list_of_strings(self.accepted_green_test_names, "accepted green test names")
         unknown = set(self.completed_requirement_refs) - set(self.contract.requirement_refs())
         if unknown:
             raise ValueError(f"completed requirement refs not in contract: {sorted(unknown)}")
@@ -298,6 +310,7 @@ class BehaviorContractRunState:
             "development_base_revision": self.development_base_revision,
             "current_pool": self.current_pool,
             "completed_requirement_refs": list(self.completed_requirement_refs),
+            "accepted_green_test_names": list(self.accepted_green_test_names),
             "cycles": [cycle.to_dict() for cycle in self.cycles],
             "blocked_reason": self.blocked_reason,
             "gatekeeper_state": None if self.gatekeeper_state is None else self.gatekeeper_state.to_dict(),
@@ -317,6 +330,7 @@ class BehaviorContractRunState:
             development_base_revision=payload.get("development_base_revision", semantic_base_revision),
             current_pool=str(payload.get("current_pool", ContractPoolStatus.TDD_READY.value)),
             completed_requirement_refs=list_of_strings(payload.get("completed_requirement_refs", []), "completed requirement refs"),
+            accepted_green_test_names=list_of_strings(payload.get("accepted_green_test_names", []), "accepted green test names"),
             cycles=[ContractCycleRecord.from_dict(dict(item)) for item in payload.get("cycles", [])],
             blocked_reason=payload.get("blocked_reason"),
             gatekeeper_state=None if payload.get("gatekeeper_state") is None else SpecificationGatekeeperRunState.from_dict(dict(payload["gatekeeper_state"])),

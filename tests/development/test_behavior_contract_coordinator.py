@@ -87,8 +87,12 @@ class FakeExecutionGateway:
         self.calls = []
 
     async def execute(self, work_unit, repository_binding):
-        self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective, work_unit.change_key))
-        result = self.results[work_unit.id]
+        self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective, work_unit.change_key, work_unit.acceptance.commands))
+        result = self.results.get(work_unit.id)
+        if result is None and work_unit.id.endswith("--regression"):
+            return accepted(work_unit.id, repository_binding.base_sha or "d" * 40)
+        if result is None:
+            raise KeyError(work_unit.id)
         if isinstance(result, list):
             if not result:
                 raise AssertionError(f"no more results configured for {work_unit.id}")
@@ -350,7 +354,7 @@ def _write_red_probe_packet(path: str, *, outcome: str = "failed", collection_su
     return path
 
 
-def accepted(work_unit_id: str, revision: str):
+def accepted(work_unit_id: str, revision: str, *, stdout: str | None = None, stderr: str | None = None):
     evidence_location = _write_red_probe_packet(f"/tmp/{work_unit_id}.json")
     return WorkUnitExecutionResult(
         work_unit_id=work_unit_id,
@@ -359,6 +363,8 @@ def accepted(work_unit_id: str, revision: str):
         accepted_revision=revision,
         change_id=f"change-{work_unit_id}",
         evidence_location=evidence_location,
+        stdout=stdout,
+        stderr=stderr,
     )
 
 
@@ -369,6 +375,8 @@ def rejected(
     status="checks_failed",
     allowed_paths: list[str] | None = None,
     changed_paths: list[str] | None = None,
+    stdout: str | None = None,
+    stderr: str | None = None,
 ):
     policy_evidence = None
     if allowed_paths is not None or changed_paths is not None:
@@ -383,6 +391,8 @@ def rejected(
         change_id=f"change-{work_unit_id}",
         evidence_location=f"/tmp/{work_unit_id}.json",
         error=error,
+        stdout=stdout,
+        stderr=stderr,
         policy_evidence=policy_evidence,
     )
 
@@ -390,6 +400,7 @@ def rejected(
 def run_state(
     current_pool="tdd_ready",
     completed_requirement_refs=None,
+    accepted_green_test_names=None,
     cycles=None,
     semantic_base_revision="a" * 40,
     development_base_revision=None,
@@ -410,6 +421,7 @@ def run_state(
         development_base_revision=development_base_revision,
         current_pool=current_pool,
         completed_requirement_refs=completed_requirement_refs or [],
+        accepted_green_test_names=accepted_green_test_names or [],
         cycles=cycles or [],
         failure_progress=failure_progress or FailureProgressState(),
         blocked_reason=blocked_reason,
@@ -1300,7 +1312,7 @@ async def test_next_tdd_cycle_cannot_start_before_semantic_approval():
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
     ).run_contract(contract_state)
 
-    assert gateway.calls == []
+    assert [call[0] for call in gateway.calls] == [step.step_id + "--regression"]
     assert reasoner.requests[0].purpose == "athba_senior_review"
 
 
@@ -1641,7 +1653,7 @@ async def test_resume_can_continue_from_review_ready_without_rerunning_green():
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
     ).run_contract(contract_state)
 
-    assert gateway.calls == []
+    assert [call[0] for call in gateway.calls] == [step.step_id + "--regression"]
 
 
 @pytest.mark.asyncio
@@ -1788,8 +1800,8 @@ def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     assert repair.allowed_paths == ["reservation_book.py"]
     assert red.acceptance.commands == [["python3", "-B", "scripts/assert_test_fails.py", step.test_name]]
     expected_pytest = ["python3", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
-    assert green.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
-    assert repair.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
+    assert green.acceptance.commands == [expected_pytest + [step.test_name]]
+    assert repair.acceptance.commands == [expected_pytest + [step.test_name]]
     assert "Act in ATHBA's Tester role during RED" in red.objective
     assert "Do not edit tests" in green.objective
     assert "Reviewer instructions" in repair.objective
@@ -2432,8 +2444,10 @@ async def test_resource_limit_failure_splits_into_persisted_children_and_updates
         ("parent-step--green", "b" * 40),
         ("child-a--red", "b" * 40),
         ("child-a--green", "c" * 40),
+        ("child-a--regression", "d" * 40),
         ("child-b--red", "d" * 40),
         ("child-b--green", "e" * 40),
+        ("child-b--regression", "f" * 40),
     ]
     assert [request.purpose for request in gateway.requests].count("athba_resource_limit_split") == 1
     assert split_states[-1].failure_progress.splits[-1] == WorkPacketSplit(
@@ -2511,8 +2525,10 @@ async def test_resume_split_uses_persisted_children_without_replanning():
     assert [call[:2] for call in execution.calls] == [
         ("child-a--red", "b" * 40),
         ("child-a--green", "c" * 40),
+        ("child-a--regression", "d" * 40),
         ("child-b--red", "d" * 40),
         ("child-b--green", "e" * 40),
+        ("child-b--regression", "f" * 40),
     ]
     assert [request.purpose for request in gateway.requests].count("athba_resource_limit_split") == 0
 
@@ -3107,8 +3123,10 @@ async def test_syntax_failure_already_planned_dependency_defers_and_parent_resum
     assert [call[0] for call in second_gateway.calls] == [
         prereq.step_id + "--red",
         prereq.step_id + "--green",
+        prereq.step_id + "--regression",
         parent.step_id + "--red",
         parent.step_id + "--green",
+        parent.step_id + "--regression",
     ]
 
 
@@ -3170,8 +3188,10 @@ async def test_syntax_failure_add_prerequisite_synthesizes_requirement_and_paren
     assert [call[0] for call in second_gateway.calls] == [
         prerequisite.step_id + "--red",
         prerequisite.step_id + "--green",
+        prerequisite.step_id + "--regression",
         parent.step_id + "--red",
         parent.step_id + "--green",
+        parent.step_id + "--regression",
     ]
 
 

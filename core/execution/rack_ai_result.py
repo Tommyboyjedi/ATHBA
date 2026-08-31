@@ -47,6 +47,7 @@ class RackAiGatewayResult:
     expected: RackAiExpectedIdentity
     summary: object
     packet_payload: Mapping[str, Any]
+    process: object | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,9 @@ class RackAiExecutionResultMapper:
         from core.execution.work_unit_gateway import ExecutionPolicyEvidence, WorkUnitExecutionResult
 
         attempt = self.parser.parse(self.verifier.verify(result))
+        process = result.process
+        stdout = None if process is None else getattr(process, "stdout_text", None)
+        stderr = None if process is None else getattr(process, "stderr_text", None)
         return WorkUnitExecutionResult(
             work_unit_id=attempt.work_unit_id,
             accepted=attempt.accepted,
@@ -138,6 +142,8 @@ class RackAiExecutionResultMapper:
             evidence_location=attempt.packet_path,
             worktree_path=attempt.worktree_path,
             error=attempt.error,
+            stdout=stdout,
+            stderr=stderr,
             policy_evidence=_policy_evidence(result.packet_payload, ExecutionPolicyEvidence),
         )
 

@@ -61,7 +61,12 @@ class FakeExecutionGateway:
 
     async def execute(self, work_unit, repository_binding):
         self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective))
-        return self.results[work_unit.id]
+        result = self.results.get(work_unit.id)
+        if result is None and work_unit.id.endswith("--regression"):
+            return accepted(work_unit.id, repository_binding.base_sha or "d" * 40)
+        if result is None:
+            raise KeyError(work_unit.id)
+        return result
 
 
 class MemoryStateRepo:

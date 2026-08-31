@@ -33,6 +33,7 @@ class RackAiCliExecutionGateway:
                     ),
                     summary=response.summary,
                     packet_payload=response.packet_payload,
+                    process=response.process,
                 )
             )
         except ValueError as error:

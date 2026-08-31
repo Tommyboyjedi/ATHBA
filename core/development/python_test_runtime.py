@@ -19,6 +19,9 @@ class PythonPytestRuntime:
         return [self.python_executable, "-B", "scripts/assert_test_fails.py", test_name]
 
     def pytest_command(self, target: str) -> list[str]:
+        return self.pytest_targets_command([target])
+
+    def pytest_targets_command(self, targets: list[str]) -> list[str]:
         return [
             self.python_executable,
             "-B",
@@ -27,5 +30,5 @@ class PythonPytestRuntime:
             "-q",
             "-p",
             "no:cacheprovider",
-            target,
+            *targets,
         ]

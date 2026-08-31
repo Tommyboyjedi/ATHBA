@@ -35,6 +35,16 @@ from core.development.failure_progression import (
     RetryRoute,
 )
 from core.development.failure_state import TERMINAL_CONTRACT_POOLS
+from core.development.green_regression_domain import (
+    RegressionDisposition,
+    RegressionGateResult,
+)
+from core.development.green_regression_progression import (
+    RegressionGateRequest,
+    RegressionGateService,
+    RegressionRepairWorkUnitFactory,
+    RegressionRepairWorkUnitBuildRequest,
+)
 from core.development import failure_routing
 from core.development.resource_split import (
     MAX_SPLIT_DEPTH,
@@ -803,7 +813,7 @@ class ContractDeveloperWorkUnitFactory:
             objective=_developer_objective(request.contract, request.step, request.repository_material),
             allowed_paths=[request.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.pytest_command(request.step.test_name), self.runtime.pytest_command(request.step.test_path)],
+                commands=[self.runtime.pytest_command(request.step.test_name)],
                 required_artifacts=[request.step.production_path],
             ),
             status=WorkUnitStatus.READY,
@@ -823,7 +833,7 @@ class ContractRepairWorkUnitFactory:
             objective=_repair_objective(request.contract, request.cycle.step, request.review),
             allowed_paths=[request.cycle.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.pytest_command(request.cycle.step.test_name), self.runtime.pytest_command(request.cycle.step.test_path)],
+                commands=[self.runtime.pytest_command(request.cycle.step.test_name)],
                 required_artifacts=[request.cycle.step.production_path],
             ),
             status=WorkUnitStatus.READY,
@@ -846,6 +856,7 @@ class CoordinatorDependencies:
     repository_material_provider: TesterRepositoryMaterialProvider | None = None
     split_planner: ResourceLimitSplitPlanner | None = None
     max_semantic_repairs: int = 2
+    max_regression_repairs: int = 2
     gatekeeper: SpecificationGatekeeper | None = None
     gap_adapter: SpecificationGapTddAdapter | None = None
     failure_policy: FailureProgressionPolicy | None = None
@@ -855,6 +866,8 @@ class CoordinatorDependencies:
     dependency_planner: DependencyPrerequisitePlanner | None = None
     policy_scope_resolver: PolicyScopeViolationResolver | None = None
     red_acceptance_service: RedAcceptanceService | None = None
+    regression_gate_service: RegressionGateService | None = None
+    regression_repair_factory: RegressionRepairWorkUnitFactory | None = None
 
 
 @dataclass(frozen=True)
@@ -1147,12 +1160,15 @@ class ReviewProgressionDependencies:
     review_material_provider: ReviewMaterialProvider | None
     gatekeeper: SpecificationGatekeeper | None
     max_semantic_repairs: int
+    regression_gate_service: RegressionGateService
 
 
 @dataclass(frozen=True)
 class RepairProgressionDependencies:
     repair_factory: ContractRepairWorkUnitFactory
+    regression_repair_factory: RegressionRepairWorkUnitFactory
     phase_executor: 'PhaseExecutor'
+    max_regression_repairs: int
 
 
 @dataclass(frozen=True)
@@ -1481,14 +1497,19 @@ async def _advance_green_phase(
     )
     if not outcome.accepted:
         return await dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.GREEN, work_unit, outcome))
-    updated_cycle = replace(cycle, green_phase=outcome.phase_state, candidate_revision=outcome.phase_state.accepted_revision, pool="review_ready")
+    updated_cycle = replace(
+        cycle,
+        green_phase=outcome.phase_state,
+        candidate_revision=outcome.phase_state.accepted_revision,
+        regression_result=None,
+        review_result=None,
+        pool="review_ready",
+    )
     return RunAdvance(
         replace(
             run_state,
             current_pool="review_ready",
             contract=replace(contract, status="review_ready"),
-            development_base_revision=outcome.phase_state.accepted_revision,
-            repository_binding=run_state.repository_binding.with_base_sha(outcome.phase_state.accepted_revision),
             cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
             failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
@@ -1539,6 +1560,44 @@ async def _advance_review_ready(
     cycle = run_state.current_cycle()
     if cycle is None or cycle.candidate_revision is None:
         raise ValueError("review_ready run state requires a candidate revision")
+    if not _has_current_regression_clearance(cycle):
+        regression = await dependencies.regression_gate_service.evaluate(
+            RegressionGateRequest(contract, run_state, cycle)
+        )
+        updated_cycle = replace(cycle, regression_result=regression)
+        if regression.disposition == RegressionDisposition.REGRESSION_CLEAR.value:
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="review_ready",
+                    contract=replace(contract, status="review_ready"),
+                    development_base_revision=cycle.candidate_revision,
+                    repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
+                    accepted_green_test_names=_append_unique(run_state.accepted_green_test_names, cycle.step.test_name),
+                    cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
+                    blocked_reason=None,
+                )
+            )
+        if regression.disposition == RegressionDisposition.ACCUMULATED_REGRESSION.value:
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="repair_ready",
+                    contract=replace(contract, status="repair_ready"),
+                    blocked_reason="accumulated regression detected",
+                    cycles=_replace_current_cycle(run_state.cycles, replace(updated_cycle, pool="repair_ready")),
+                )
+            )
+        return RunAdvance(
+            replace(
+                run_state,
+                current_pool="replan_ready",
+                contract=replace(contract, status="replan_ready"),
+                blocked_reason="regression gate infrastructure failure",
+                cycles=_replace_current_cycle(run_state.cycles, replace(updated_cycle, pool="replan_ready")),
+            ),
+            return_now=True,
+        )
     review_material = _review_material(contract, run_state, cycle, dependencies.review_material_provider)
     review = await dependencies.reviewer.review(
         SemanticReviewRequest(contract, run_state, cycle, cycle.candidate_revision, review_material)
@@ -1636,8 +1695,59 @@ async def _advance_repair_ready(
 ) -> RunAdvance:
     contract = run_state.contract
     cycle = run_state.current_cycle()
-    if cycle is None or cycle.review_result is None or cycle.candidate_revision is None:
-        raise ValueError("repair_ready run state requires a review result and candidate revision")
+    if cycle is None or cycle.candidate_revision is None:
+        raise ValueError("repair_ready run state requires a candidate revision")
+    regression = cycle.regression_result
+    if regression is not None and regression.candidate_revision == cycle.candidate_revision and regression.disposition == RegressionDisposition.ACCUMULATED_REGRESSION.value:
+        work_unit = dependencies.regression_repair_factory.build(
+            RegressionRepairWorkUnitBuildRequest(contract, cycle, regression)
+        )
+        outcome = await dependencies.phase_executor.execute(
+            PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(cycle.candidate_revision))
+        )
+        if not outcome.accepted:
+            attempts = cycle.regression_repair_attempts + 1
+            if attempts >= dependencies.max_regression_repairs:
+                return RunAdvance(
+                    replace(
+                        run_state,
+                        current_pool="replan_ready",
+                        contract=replace(contract, status="replan_ready"),
+                        blocked_reason=outcome.blocked_reason or "regression repair budget exhausted",
+                        cycles=_replace_current_cycle(run_state.cycles, replace(cycle, regression_repair_attempts=attempts, pool="replan_ready")),
+                    ),
+                    return_now=True,
+                )
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="repair_ready",
+                    contract=replace(contract, status="repair_ready"),
+                    blocked_reason=outcome.blocked_reason,
+                    cycles=_replace_current_cycle(run_state.cycles, replace(cycle, regression_repair_attempts=attempts, pool="repair_ready")),
+                )
+            )
+        updated_cycle = replace(
+            cycle,
+            green_phase=outcome.phase_state,
+            candidate_revision=outcome.phase_state.accepted_revision,
+            regression_result=None,
+            review_result=None,
+            regression_repair_attempts=cycle.regression_repair_attempts + 1,
+            pool="review_ready",
+        )
+        return RunAdvance(
+            replace(
+                run_state,
+                current_pool="review_ready",
+                contract=replace(contract, status="review_ready"),
+                cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
+                failure_progress=split_aware_success_state(run_state.failure_progress),
+                blocked_reason=None,
+            )
+        )
+    if cycle.review_result is None:
+        raise ValueError("repair_ready run state requires either regression evidence or a review result")
     work_unit = dependencies.repair_factory.build(RepairWorkUnitBuildRequest(contract, cycle, cycle.review_result))
     outcome = await dependencies.phase_executor.execute(
         PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(cycle.candidate_revision))
@@ -1658,6 +1768,8 @@ async def _advance_repair_ready(
         repair_attempts=cycle.repair_attempts + 1,
         green_phase=outcome.phase_state,
         candidate_revision=outcome.phase_state.accepted_revision,
+        regression_result=None,
+        review_result=None,
         pool="review_ready",
     )
     return RunAdvance(
@@ -1665,8 +1777,6 @@ async def _advance_repair_ready(
             run_state,
             current_pool="review_ready",
             contract=replace(contract, status="review_ready"),
-            development_base_revision=outcome.phase_state.accepted_revision,
-            repository_binding=run_state.repository_binding.with_base_sha(outcome.phase_state.accepted_revision),
             cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
             failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
@@ -1719,10 +1829,12 @@ class BehaviorContractCoordinator:
         policy_scope_resolver = deps.policy_scope_resolver or PolicyScopeViolationResolver()
         failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, split_planner, repository_material_provider, deps.max_tester_repairs, deps.max_developer_repairs, policy_scope_resolver))
         red_acceptance_service = deps.red_acceptance_service or RedAcceptanceService(RedAcceptanceDependencies(verifier=RedBehaviorVerifier(deps.reasoning_gateway)))
+        regression_gate_service = deps.regression_gate_service or RegressionGateService(deps.execution_gateway)
+        regression_repair_factory = deps.regression_repair_factory or RegressionRepairWorkUnitFactory()
         self.ready_progressor = ReadyPoolProgressor(ReadyPoolDependencies(step_planner, deps.gatekeeper, deps.gap_adapter, deps.repository_binding))
         self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router, red_acceptance_service))
-        self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs))
-        self.repair_progressor = RepairReadyProgressor(RepairProgressionDependencies(repair_factory, phase_executor))
+        self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs, regression_gate_service))
+        self.repair_progressor = RepairReadyProgressor(RepairProgressionDependencies(repair_factory, regression_repair_factory, phase_executor, deps.max_regression_repairs))
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:
         snapshot = self.run_store.load(contract.project_id) or self.run_store.initial(contract.project_id, self.repository_binding)
@@ -1767,6 +1879,19 @@ def _replace_current_cycle(cycles: list[ContractCycleRecord], replacement: Contr
     if not cycles:
         raise ValueError("expected at least one cycle to replace")
     return [*cycles[:-1], replacement]
+
+
+def _append_unique(items: list[str], value: str) -> list[str]:
+    return items if value in items else [*items, value]
+
+
+def _has_current_regression_clearance(cycle: ContractCycleRecord) -> bool:
+    regression = cycle.regression_result
+    return (
+        regression is not None
+        and regression.candidate_revision == cycle.candidate_revision
+        and regression.disposition == RegressionDisposition.REGRESSION_CLEAR.value
+    )
 
 
 def _close_semantic_progress(run_state: BehaviorContractRunState) -> BehaviorContractRunState:
@@ -2393,10 +2518,11 @@ def _developer_objective(
 ) -> str:
     return (
         "Act in ATHBA's Developer role during GREEN. "
-        f"Work only within {step.production_path}. Do not edit tests. The focused failing test is {step.test_name}. "
-        f"Implement only enough code for this behavior: {step.focused_behavior}. Expected observable result: {step.expected_result}. "
-        f"Requirement refs: {', '.join(step.requirement_refs)}. Preserve prior accepted behavior and keep the design small, direct, and readable. "
-        "Do not introduce speculative abstractions, dead code, dead imports, noisy comments, or unrelated features. "
+        f"Work only within {step.production_path}. Do not edit tests. The one accepted RED target is {step.test_name}. "
+        f"Make this specified test pass using the smallest coherent production change necessary for this behavior: {step.focused_behavior}. "
+        f"Expected observable result: {step.expected_result}. Requirement refs: {', '.join(step.requirement_refs)}. "
+        "Do not add unrelated behavior, extra tests, unrelated files, dependencies, abstractions, or speculative future requirements. "
+        "Do not attempt to make the entire suite pass from this Developer work unit. "
         "This target is a standalone external repository, not ATHBA. Use only modules and files visible in the supplied repository material. "
         f"Contract component: {contract.component_name}. GREEN objective: {step.green_objective}. "
         f"Repository material: {json.dumps(repository_material, sort_keys=True)}"
@@ -2408,7 +2534,7 @@ def _repair_objective(contract: BehaviorContract, step: TddStepProposal, review:
         "Act in ATHBA's Developer role during GREEN repair. "
         f"Work only within {step.production_path}. Do not edit tests. Repair the candidate for step {step.step_id}. "
         f"Requirement refs: {', '.join(step.requirement_refs)}. Keep prior accepted behavior intact. "
-        "Make only the bounded production changes required by the reviewer findings. "
+        "Make only the bounded production changes required by the reviewer findings, without broadening the task into whole-suite repair. "
         f"Reviewer instructions: {' | '.join(review.repair_instructions)}. "
         f"Component: {contract.component_name}."
     )
