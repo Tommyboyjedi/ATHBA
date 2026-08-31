@@ -10,8 +10,10 @@ MICROCYCLE_SCHEMA_VERSION = 1
 
 class IntentStatus(str, Enum):
     PENDING = "pending"
-    VALID = "valid"
-    REJECTED = "rejected"
+    APPROVED = "approved"
+    REPAIR_REQUIRED = "repair_required"
+    WRONG_BEHAVIOR = "wrong_behavior"
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
 
 
 class BoundaryOutcome(str, Enum):
@@ -54,16 +56,28 @@ class TestScenarioDraft:
     source: str
     canonical_test_identity: str
     test_path: str
+    scenario_rationale: str = "not yet supplied"
+    source_requirement_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        _texts((self.scenario_id, self.behavior_ref, self.language_id, self.source, self.canonical_test_identity, self.test_path), "draft fields")
+        _texts((self.scenario_id, self.behavior_ref, self.language_id, self.source, self.canonical_test_identity, self.test_path, self.scenario_rationale), "draft fields")
+        _texts(self.source_requirement_refs, "draft source requirement refs")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "TestScenarioDraft":
-        return cls(**{key: str(item) for key, item in value.items()})
+        return cls(
+            scenario_id=str(value["scenario_id"]),
+            behavior_ref=str(value["behavior_ref"]),
+            language_id=str(value["language_id"]),
+            source=str(value["source"]),
+            canonical_test_identity=str(value["canonical_test_identity"]),
+            test_path=str(value["test_path"]),
+            scenario_rationale=str(value.get("scenario_rationale", "not yet supplied")),
+            source_requirement_refs=tuple(str(item) for item in value.get("source_requirement_refs", ())),
+        )
 
 
 @dataclass(frozen=True)

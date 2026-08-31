@@ -37,7 +37,7 @@ def state(items=None, frontier=None):
     items = fragments() if items is None else items
     frontier = ScenarioFrontier("scenario-1", 1, "loop", ("construct", "loop")) if frontier is None else frontier
     return MicrocycleState(
-        draft(), ScenarioIntentResult("scenario-1", "valid", "intent evidence", ("intent",)),
+        draft(), ScenarioIntentResult("scenario-1", "approved", "intent evidence", ("intent",)),
         ScenarioModel("scenario-1", "python", "1", "tests::test_example", "complete test", "tests/test_example"),
         items, frontier, "base-1", "red-1", RetryCounts(2, 1, 3),
         (BoundaryAssessment("valid_missing_capability_red", "loop", BoundaryDiagnostic("missing_symbol", "Book", ("diagnostic",))),),

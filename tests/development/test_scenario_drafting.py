@@ -1,0 +1,333 @@
+import json
+
+import pytest
+
+from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
+from core.development.microcycle_domain import LanguageAdapterCatalog
+from core.development.python_pytest_adapter import PythonPytestAdapter
+from core.development.scenario_drafting import (
+    ScenarioDraftingDependencies,
+    ScenarioDraftingService,
+    ScenarioIntentReviewer,
+)
+from core.development.scenario_drafting_domain import (
+    MAX_TESTER_SCENARIO_ATTEMPTS,
+    ScenarioDraftRequest,
+    ScenarioDraftStatus,
+    ScenarioRepositoryFacts,
+)
+from core.development.tdd_progression import TddStepProposal
+from core.execution.rack_ai_contract import RepositoryBinding
+from core.execution.reasoning_gateway import ReasoningResult
+from core.execution.work_unit_gateway import WorkUnitExecutionResult
+
+
+class FakeGateway:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    async def execute(self, unit, binding):
+        self.calls.append((unit, binding))
+        return self.results.pop(0)
+
+
+class FakeReasoningGateway:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.requests = []
+
+    async def reason(self, request):
+        self.requests.append(request)
+        return ReasoningResult(self.responses.pop(0), "fake", "fake")
+
+
+class MemoryStateStore:
+    def __init__(self):
+        self.states = {}
+
+    def load(self, scenario_id):
+        return self.states.get(scenario_id)
+
+    def save(self, state):
+        self.states[state.scenario_id] = state
+
+
+class CandidateSourceReader:
+    def __init__(self, sources):
+        self.sources = dict(sources)
+        self.calls = []
+
+    def read(self, revision, test_path):
+        self.calls.append((revision, test_path))
+        return self.sources[revision]
+
+
+def ticket(kind):
+    if kind == "catalog":
+        return TddStepProposal(
+            "catalog-ticket",
+            ["SRC-CATALOG"],
+            "Adding an item makes it visible by its identifier.",
+            "tests/test_catalog.py::test_catalog_records_item",
+            "item_id('a') returns 'a' after adding the item.",
+            "tests/test_catalog.py",
+            "catalog.py",
+            "obsolete immediate red objective",
+            "obsolete developer objective",
+            "Catalog insertion is independently observable.",
+        )
+    return TddStepProposal(
+        "profile-ticket",
+        ["SRC-PROFILE"],
+        "A profile exposes its display name.",
+        "tests/test_profile.py::test_profile_exposes_display_name",
+        "display_name returns the supplied name.",
+        "tests/test_profile.py",
+        "profile.py",
+        "obsolete immediate red objective",
+        "obsolete developer objective",
+        "The profile behavior is unrelated to catalog storage.",
+    )
+
+
+def candidate(kind, *, rationale="The complete example demonstrates the requested observable behavior."):
+    value = ticket(kind)
+    if kind == "catalog":
+        body = "    catalog = Catalog()\n    catalog.add('a')\n    assert catalog.item_id('a') == 'a'\n"
+        imported = "from catalog import Catalog"
+    else:
+        body = "    profile = Profile('Ada')\n    assert profile.display_name() == 'Ada'\n"
+        imported = "from profile import Profile"
+    return (
+        f"# ATHBA-SCENARIO-RATIONALE: {rationale}\n"
+        f"# ATHBA-SOURCE-REFS: {', '.join(value.requirement_refs)}\n"
+        "import pytest\n"
+        f"{imported}\n\n"
+        f"def {value.test_name.rsplit('::', 1)[1]}():\n{body}"
+    )
+
+
+def request(kind, base="a" * 40):
+    value = ticket(kind)
+    return ScenarioDraftRequest(
+        scenario_id=f"scenario-{kind}",
+        ticket=value,
+        source_requirement_refs=tuple(value.requirement_refs),
+        language_id="python",
+        test_framework="pytest",
+        allowed_test_path=value.test_path,
+        repository_facts=ScenarioRepositoryFacts(base, (value.production_path, value.test_path), "bounded production", "bounded tests"),
+        development_base_revision=base,
+    )
+
+
+def binding(base="a" * 40):
+    return RepositoryBinding("scenario-fixture", "main", base)
+
+
+def accepted(work_unit_id, revision, change_id):
+    return WorkUnitExecutionResult(
+        work_unit_id=work_unit_id,
+        accepted=True,
+        status="checks_passed",
+        change_id=change_id,
+        accepted_revision=revision,
+        evidence_location=f"evidence/{change_id}.json",
+    )
+
+
+def components(results, responses, sources, store=None):
+    gateway = FakeGateway(results)
+    reasoning = FakeReasoningGateway(responses)
+    reader = CandidateSourceReader(sources)
+    dependencies = ScenarioDraftingDependencies(
+        gateway,
+        ScenarioIntentReviewer(reasoning),
+        LanguageAdapterCatalog((PythonPytestAdapter(),)),
+        reader,
+        store or MemoryStateStore(),
+    )
+    return ScenarioDraftingService(dependencies), gateway, reasoning, reader
+
+
+def approval(ref):
+    return json.dumps({
+        "disposition": "approved",
+        "feedback": "The scenario covers the requested observable behavior.",
+        "evidence_refs": [ref],
+    })
+
+
+@pytest.mark.asyncio
+async def test_approved_catalog_scenario_is_frozen_from_isolated_candidate_without_base_promotion():
+    value, gateway, reasoning, reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "b" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"b" * 40: candidate("catalog")},
+    )
+
+    outcome = await value.draft(request("catalog"), binding())
+
+    assert outcome.approved
+    state = outcome.state
+    frozen = state.approved_microcycle
+    assert frozen is not None
+    assert frozen.development_base_revision == "a" * 40
+    assert frozen.scenario_draft.source == candidate("catalog")
+    assert frozen.scenario_draft.canonical_test_identity == ticket("catalog").test_name
+    assert frozen.scenario_draft.source_requirement_refs == ("SRC-CATALOG",)
+    assert frozen.intent.status == "approved"
+    assert frozen.model.adapter_version == "1.0.0"
+    assert frozen.frontier.index == 0
+    assert [item.kind for item in frozen.fragments] == ["production_import", "constructor", "call", "assertion"]
+    assert state.attempts[0].candidate_revision == "b" * 40
+    assert gateway.calls[0][1].base_sha == "a" * 40
+    unit = gateway.calls[0][0]
+    assert "frontier" in unit.objective
+    assert len(reader.calls) == 1
+    prompt = reasoning.requests[0].prompt
+    assert "production_path" not in prompt
+    assert "obsolete developer objective" not in prompt
+    assert "replacement test code" in prompt
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_wrong_profile_behavior_is_rejected_with_descriptive_feedback_and_no_freeze():
+    value, gateway, _reasoning, _reader = components(
+        [accepted("profile-ticket--scenario-draft-1", "c" * 40, "draft-1")],
+        [json.dumps({
+            "disposition": "wrong_behavior",
+            "feedback": "This checks profile construction but does not demonstrate display-name exposure.",
+            "evidence_refs": ["SRC-PROFILE"],
+        })],
+        {"c" * 40: candidate("profile")},
+    )
+
+    outcome = await value.draft(request("profile"), binding())
+
+    assert not outcome.approved
+    assert outcome.state.attempts[0].intent.status == "wrong_behavior"
+    assert "does not demonstrate" in outcome.state.attempts[0].feedback
+    assert outcome.state.approved_microcycle is None
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_descriptive_repair_uses_a_new_attempt_scoped_change_id():
+    value, gateway, _reasoning, _reader = components(
+        [
+            accepted("catalog-ticket--scenario-draft-1", "d" * 40, "draft-1"),
+            accepted("catalog-ticket--scenario-draft-2", "e" * 40, "draft-2"),
+        ],
+        [
+            json.dumps({
+                "disposition": "repair_required",
+                "feedback": "Show the observable lookup after the add operation.",
+                "evidence_refs": ["SRC-CATALOG"],
+            }),
+            approval("SRC-CATALOG"),
+        ],
+        {"d" * 40: candidate("catalog"), "e" * 40: candidate("catalog")},
+    )
+
+    first = await value.draft(request("catalog"), binding())
+    second = await value.draft(request("catalog"), binding())
+
+    assert not first.approved and second.approved
+    assert [call[0].change_key for call in gateway.calls] == [
+        "catalog-ticket--scenario-draft-1--attempt-1",
+        "catalog-ticket--scenario-draft-2--attempt-2",
+    ]
+    assert "Show the observable lookup" in gateway.calls[1][0].objective
+
+
+@pytest.mark.asyncio
+async def test_tester_scenario_attempts_stop_at_four():
+    results = [
+        accepted(f"catalog-ticket--scenario-draft-{number}", chr(100 + number) * 40, f"draft-{number}")
+        for number in range(1, MAX_TESTER_SCENARIO_ATTEMPTS + 1)
+    ]
+    sources = {result.accepted_revision: candidate("catalog") for result in results}
+    responses = [
+        json.dumps({
+            "disposition": "insufficient_evidence",
+            "feedback": "State the observable lookup explicitly.",
+            "evidence_refs": ["SRC-CATALOG"],
+        })
+        for _ in results
+    ]
+    value, gateway, _reasoning, _reader = components(results, responses, sources)
+
+    outcome = None
+    for _ in range(MAX_TESTER_SCENARIO_ATTEMPTS):
+        outcome = await value.draft(request("catalog"), binding())
+    final = await value.draft(request("catalog"), binding())
+
+    assert outcome is not None and outcome.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+    assert final.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+    assert len(final.state.attempts) == MAX_TESTER_SCENARIO_ATTEMPTS
+    assert len(gateway.calls) == MAX_TESTER_SCENARIO_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_malformed_intent_response_gets_one_constrained_json_repair():
+    value, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "f" * 40, "draft-1")],
+        ["not json", approval("SRC-CATALOG")],
+        {"f" * 40: candidate("catalog")},
+    )
+
+    outcome = await value.draft(request("catalog"), binding())
+
+    assert outcome.approved
+    assert len(gateway.calls) == 1
+    assert [item.purpose for item in reasoning.requests] == [
+        "athba_scenario_intent_review",
+        "athba_scenario_intent_json_repair",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resume_after_approval_reuses_durable_frozen_state_without_submission(tmp_path):
+    store = ScenarioDraftStateRepo(tmp_path)
+    first_service, first_gateway, _reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "g" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"g" * 40: candidate("catalog")},
+        store,
+    )
+
+    first = await first_service.draft(request("catalog"), binding())
+    resumed_service, resumed_gateway, _resumed_reasoning, _resumed_reader = components(
+        [],
+        [],
+        {},
+        store,
+    )
+    second = await resumed_service.draft(request("catalog"), binding())
+
+    assert first.approved and second.approved
+    assert second.submitted_attempt is False
+    assert second.state.approved_microcycle == first.state.approved_microcycle
+    assert len(first_gateway.calls) == 1
+    assert resumed_gateway.calls == []
+    assert second.state.approved_microcycle.current_accepted_red_revision is None
+    assert second.state.approved_microcycle.developer_attempts == ()
+
+
+@pytest.mark.asyncio
+async def test_stale_draft_state_is_not_reused_when_the_development_base_changes():
+    store = MemoryStateStore()
+    value, gateway, _reasoning, _reader = components([], [], {}, store)
+    original = request("catalog", "a" * 40)
+    store.save(
+        value.state_store.load(original.scenario_id)
+        or __import__("core.development.scenario_drafting", fromlist=["_initial_state"])._initial_state(original)
+    )
+
+    with pytest.raises(ValueError, match="stale scenario draft state"):
+        await value.draft(request("catalog", "b" * 40), binding("b" * 40))
+
+    assert gateway.calls == []
