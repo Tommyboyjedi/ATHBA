@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from core.development.microcycle_domain import MicrocycleState
 from core.development.tdd_progression import BehaviorContractRunState, SpecificationChecklist
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 
@@ -134,6 +135,36 @@ class AcceptedTestEvidenceCollector:
                     requirement_refs=list(cycle.step.requirement_refs),
                     red_revision=cycle.red_phase.accepted_revision,
                     semantic_revision=cycle.semantic_revision,
+                )
+            )
+        return accepted
+
+
+class CompletedMicrocycleEvidenceCollector:
+    """Expose only fully behavior-approved strict scenarios to the Gatekeeper."""
+
+    def collect(self, states: list[MicrocycleState] | tuple[MicrocycleState, ...]) -> list[AcceptedTestEvidence]:
+        accepted: list[AcceptedTestEvidence] = []
+        for state in states:
+            if (
+                state.completion.status != "behavior_complete"
+                or state.behavior_review.verdict != "approved"
+                or state.completion.completed_revision is None
+            ):
+                continue
+            red_revision = (
+                state.developer_attempts[-1].base_revision
+                if state.developer_attempts
+                else state.completion.completed_revision
+            )
+            accepted.append(
+                AcceptedTestEvidence(
+                    test_name=state.model.canonical_test_identity,
+                    test_path=state.model.test_path,
+                    step_id=state.scenario_draft.behavior_ref,
+                    requirement_refs=list(state.scenario_draft.source_requirement_refs),
+                    red_revision=red_revision,
+                    semantic_revision=state.completion.completed_revision,
                 )
             )
         return accepted

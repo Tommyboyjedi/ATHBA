@@ -537,6 +537,15 @@ def _validate_state(state: MicrocycleState) -> None:
     scenario_id = state.scenario_draft.scenario_id
     if state.intent.scenario_id != scenario_id or state.model.scenario_id != scenario_id or state.frontier.scenario_id != scenario_id:
         raise ValueError("microcycle records must identify one scenario")
+    if (
+        state.model.language_id != state.scenario_draft.language_id
+        or state.model.canonical_test_identity != state.scenario_draft.canonical_test_identity
+        or state.model.test_path != state.scenario_draft.test_path
+        or state.model.complete_source != state.scenario_draft.source
+    ):
+        raise ValueError("microcycle model must preserve the approved scenario identity")
+    if state.completion.status == "behavior_complete" and state.behavior_review.verdict != "approved":
+        raise ValueError("behavior completion requires approved behavior review")
     ids = tuple(fragment.fragment_id for fragment in state.fragments)
     if not ids or len(ids) != len(set(ids)):
         raise ValueError("fragment ids must be unique")

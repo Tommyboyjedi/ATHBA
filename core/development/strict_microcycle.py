@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from core.development.behavior_completion import BehaviorCompletionService
+from core.development.behavior_completion import BehaviorCompletionCommand, BehaviorCompletionService
 from core.development.deterministic_regression import (
     DeterministicRegressionRequest,
     DeterministicRegressionService,
@@ -30,6 +30,7 @@ from core.development.microcycle_domain import (
     LanguageTestAdapter,
     MaterialisedTestArtifact,
     MicrocycleState,
+    RegressionState,
     ScenarioCompletion,
     ScenarioFrontier,
 )
@@ -278,10 +279,22 @@ class StrictMicrocycleService:
         self.behavior_completion = dependencies.behavior_completion
 
     async def run(self, request: StrictMicrocycleRequest) -> StrictMicrocycleOutcome:
-        state = self._load(request)
+        state = _load_state(self.state_store, self.adapters, request)
         adapter = self.adapters.for_language(state.model.language_id)
         submitted = 0
+        if state.completion.status == "scenario_complete":
+            return await _complete_behavior(self.behavior_completion, self.state_store, state, submitted)
+        if state.completion.status == "behavior_complete":
+            return StrictMicrocycleOutcome(state, "behavior_complete", submitted)
         while state.completion.status == "pending":
+            if state.regression.status == REGRESSION_CLEAR:
+                if state.frontier.index == len(state.fragments) - 1:
+                    state = replace(state, completion=ScenarioCompletion("scenario_complete", state.development_base_revision))
+                    self.state_store.save(state)
+                    return await _complete_behavior(self.behavior_completion, self.state_store, state, submitted)
+                state = _advance(state, state.development_base_revision)
+                self.state_store.save(state)
+                continue
             if state.regression.status == ACCUMULATED_REGRESSION:
                 state, repair = await self.repair_service.repair(RegressionRepairContext(request, state, adapter))
                 submitted += repair.developer_submissions
@@ -300,29 +313,7 @@ class StrictMicrocycleService:
                 continue
             if outcome.status != "green":
                 return StrictMicrocycleOutcome(state, outcome.status, submitted)
-            if state.frontier.index == len(state.fragments) - 1:
-                state = replace(state, completion=ScenarioCompletion("scenario_complete", state.development_base_revision))
-                if self.behavior_completion is None:
-                    self.state_store.save(state)
-                    return StrictMicrocycleOutcome(state, "scenario_complete", submitted)
-                state = await self.behavior_completion.complete(state)
-                self.state_store.save(state)
-                status = "behavior_complete" if state.completion.status == "behavior_complete" else state.behavior_review.verdict
-                return StrictMicrocycleOutcome(state, status, submitted)
-            state = _advance(state, state.development_base_revision)
-            self.state_store.save(state)
         return StrictMicrocycleOutcome(state, "complete", submitted)
-
-    def _load(self, request: StrictMicrocycleRequest) -> MicrocycleState:
-        stored = self.state_store.load(request.initial_state.scenario_draft.scenario_id)
-        state = stored or request.initial_state
-        if state.scenario_draft != request.initial_state.scenario_draft:
-            raise ValueError("stored microcycle does not match the approved scenario")
-        if stored is None and request.repository_binding.base_sha != state.development_base_revision:
-            raise ValueError("repository binding must start at the approved development base")
-        if stored is None:
-            self.state_store.save(state)
-        return state
 
     def _execute_frontier(self, context: FrontierExecutionContext) -> StrictMicrocycleOutcome:
         request, state, adapter = context.request, context.state, context.adapter
@@ -379,16 +370,52 @@ class StrictMicrocycleService:
             request.project_id, request.production_path, artifact, assessment, red,
             state.candidate_chain_revision or state.development_base_revision, counts.developer_attempts + 1,
         )
-        result = await self.gateway.execute(self.developer_factory.build(packet), request.repository_binding.with_base_sha(red))
+        work_unit = self.developer_factory.build(packet)
+        result = await self.gateway.execute(work_unit, request.repository_binding.with_base_sha(red))
+        if result.work_unit_id != work_unit.id:
+            raise ValueError("stale Rack AI packet does not match the active Developer frontier")
         state = _record_developer(state, red, result)
-        self.state_store.save(state)
         if not result.accepted or result.accepted_revision is None:
+            self.state_store.save(state)
             return state, StrictMicrocycleOutcome(state, "developer_candidate_rejected", 1)
         state = replace(state, candidate_chain_revision=result.accepted_revision, current_accepted_red_revision=None)
         self.state_store.save(state)
         return state, StrictMicrocycleOutcome(state, "advanced", 1)
 
 
+
+
+async def _complete_behavior(
+    behavior_completion: BehaviorCompletionService | None,
+    state_store: MicrocycleStateStore,
+    state: MicrocycleState,
+    submitted: int,
+) -> StrictMicrocycleOutcome:
+    if behavior_completion is None:
+        return StrictMicrocycleOutcome(state, "scenario_complete", submitted)
+    state = await behavior_completion.complete(BehaviorCompletionCommand(state, persist=state_store.save))
+    state_store.save(state)
+    status = "behavior_complete" if state.completion.status == "behavior_complete" else state.behavior_review.verdict
+    return StrictMicrocycleOutcome(state, status, submitted)
+
+
+def _load_state(
+    state_store: MicrocycleStateStore,
+    adapters: LanguageAdapterCatalog,
+    request: StrictMicrocycleRequest,
+) -> MicrocycleState:
+    stored = state_store.load(request.initial_state.scenario_draft.scenario_id)
+    state = stored or request.initial_state
+    if state.scenario_draft != request.initial_state.scenario_draft:
+        raise ValueError("stored microcycle does not match the approved scenario")
+    adapter = adapters.for_language(state.model.language_id)
+    if adapter.descriptor.adapter_version != state.model.adapter_version:
+        raise ValueError("stored microcycle adapter version does not match the registered adapter")
+    if stored is None and request.repository_binding.base_sha != state.development_base_revision:
+        raise ValueError("repository binding must start at the approved development base")
+    if stored is None:
+        state_store.save(state)
+    return state
 
 
 _VALID_RED_OUTCOMES = {
@@ -461,5 +488,6 @@ def _advance(state: MicrocycleState, base: str) -> MicrocycleState:
         frontier=ScenarioFrontier(state.scenario_draft.scenario_id, index, ids[-1], ids),
         current_accepted_red_revision=None,
         retry_counts=replace(state.retry_counts, developer=0, frontier_execution=0),
+        regression=RegressionState("pending", state.regression.command),
         candidate_chain_revision=base,
     )

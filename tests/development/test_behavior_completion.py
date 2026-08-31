@@ -5,6 +5,7 @@ import pytest
 from core.development.behavior_completion import (
     APPROVED,
     REPAIR_REQUIRED,
+    BehaviorCompletionCommand,
     BehaviorCompletionDependencies,
     BehaviorCompletionService,
     BehaviorReviewResult,
@@ -39,10 +40,10 @@ async def test_senior_review_runs_only_after_complete_scenario_then_starts_next_
     pending = initial_state()
 
     with pytest.raises(ValueError, match="complete scenario"):
-        await service.complete(pending)
+        await service.complete(BehaviorCompletionCommand(pending))
     complete = replace(pending, completion=ScenarioCompletion("scenario_complete", "green"))
 
-    result = await service.complete(complete, "production diff")
+    result = await service.complete(BehaviorCompletionCommand(complete, "production diff"))
 
     assert result.completion.status == "behavior_complete"
     assert result.behavior_review.verdict == APPROVED
@@ -57,7 +58,7 @@ async def test_review_repair_does_not_complete_or_start_next_behavior():
     service = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer, starter))
     complete = replace(initial_state(), completion=ScenarioCompletion("scenario_complete", "green"))
 
-    result = await service.complete(complete)
+    result = await service.complete(BehaviorCompletionCommand(complete))
 
     assert result.behavior_review.verdict == REPAIR_REQUIRED
     assert result.completion.status == "scenario_complete"
