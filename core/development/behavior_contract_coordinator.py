@@ -1235,10 +1235,13 @@ async def _advance_cycle_active(
         raise ValueError("cycle_active run state requires an active cycle")
     if cycle.red_phase is not None and cycle.red_phase.accepted_revision is None:
         material = _repository_material(contract, run_state, dependencies.repository_material_provider)
-        work_unit = _retry_scoped_work_unit(
-            run_state.failure_progress,
-            TddPhase.RED,
-            dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material)),
+        work_unit = _replanned_red_work_unit(
+            run_state,
+            _retry_scoped_work_unit(
+                run_state.failure_progress,
+                TddPhase.RED,
+                dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material)),
+            ),
         )
         outcome = await dependencies.phase_executor.execute(
             PhaseExecutionRequest(
@@ -1454,6 +1457,22 @@ def _retry_scoped_work_unit(
     if retry_count <= 0:
         return work_unit
     return replace(work_unit, change_key=f"{work_unit.id}--retry-{retry_count}")
+
+
+def _replanned_red_work_unit(
+    run_state: BehaviorContractRunState,
+    work_unit: DevelopmentWorkUnit,
+) -> DevelopmentWorkUnit:
+    if work_unit.change_key is not None:
+        return work_unit
+    prior_attempts = sum(
+        1
+        for cycle in run_state.cycles[:-1]
+        if cycle.step.step_id == work_unit.id.removesuffix("--red") and cycle.red_phase is not None
+    )
+    if prior_attempts <= 0:
+        return work_unit
+    return replace(work_unit, change_key=f"{work_unit.id}--replan-{prior_attempts}")
 
 
 async def _advance_review_ready(

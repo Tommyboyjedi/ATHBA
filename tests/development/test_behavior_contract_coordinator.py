@@ -3238,6 +3238,55 @@ async def test_candidate_repair_uses_attempt_scoped_change_key_for_live_retries(
 
 
 @pytest.mark.asyncio
+async def test_resume_replanned_red_uses_attempt_scoped_change_key_to_avoid_workspace_collision():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    prior_cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        pool="replan_ready",
+        red_phase=TddPhaseState(
+            phase=TddPhase.RED.value,
+            work_unit_id=step.step_id + "--red",
+            status="checks_passed",
+            accepted_revision="b" * 40,
+            change_id="first-red",
+        ),
+    )
+    resumed_cycle = ContractCycleRecord.from_step(step, base_revision="a" * 40)
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="cycle_active",
+                cycles=[prior_cycle, resumed_cycle],
+                contract_state=contract_state,
+                semantic_base_revision="a" * 40,
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "c" * 40),
+        step.step_id + "--green": accepted(step.step_id + "--green", "d" * 40),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            review_approved(step.step_id, "d" * 40),
+            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": ["RB-1"]},
+        ]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "completed"
+    assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
+    assert gateway.calls[0][3] == step.step_id + "--red--replan-1"
+
+
+@pytest.mark.asyncio
 async def test_build_link_failure_reject_dependency_routes_to_developer_repair_from_red_base():
     step = proposal()
     repo = MemoryStateRepo()
