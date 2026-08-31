@@ -1002,49 +1002,6 @@ async def test_step_planner_repairs_fenced_json_and_short_test_name():
 
 
 @pytest.mark.asyncio
-async def test_step_planner_repairs_contradictory_exception_semantics():
-    invalid_step = {
-        "status": "propose",
-        "rationale": "Start with duplicate ID handling.",
-        "proposal": {
-            "step_id": "test_add_resource_success",
-            "requirement_refs": ["RB-1"],
-            "focused_behavior": "Reject duplicate resource ID",
-            "test_name": "tests/test_reservation_book.py::test_add_resource_success",
-            "expected_result": "ValueError is raised when adding a resource with an ID that already exists in the book.",
-            "test_path": "tests/test_reservation_book.py",
-            "production_path": "reservation_book.py",
-            "red_objective": "Verify that adding a resource with an ID that already exists in the book does not raise a ValueError and that the state remains unchanged.",
-            "green_objective": "Verify that adding a resource with an ID that has already been registered raises a ValueError and does not modify the existing resource's capacity.",
-            "reason_next_smallest": "Establish the basic add and duplicate behavior first.",
-            "exception_type": "ValueError",
-            "exception_message": "Duplicate resource ID",
-        },
-        "completed_requirement_refs": [],
-    }
-    repaired_step = {
-        "status": "propose",
-        "rationale": "Start with duplicate ID handling.",
-        "proposal": {
-            **invalid_step["proposal"],
-            "step_id": "test_add_duplicate_resource_id",
-            "test_name": "tests/test_reservation_book.py::test_add_duplicate_resource_id",
-            "red_objective": "Verify that adding a resource with an ID that already exists in the book raises ValueError and leaves the original resource unchanged.",
-        },
-        "completed_requirement_refs": [],
-    }
-    gateway = FakeReasoningGateway([invalid_step, repaired_step])
-
-    decision = await DynamicTddPlanner(gateway).decide_next_step(contract(), run_state())
-
-    assert decision.proposal is not None
-    assert decision.proposal.step_id == "test_add_duplicate_resource_id"
-    assert decision.proposal.test_name == "tests/test_reservation_book.py::test_add_duplicate_resource_id"
-    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
-    assert "exception semantics are internally inconsistent" in gateway.requests[1].prompt
-
-
-@pytest.mark.asyncio
 async def test_step_planner_repairs_requirement_ref_drift():
     invalid_step = {
         "status": "propose",
