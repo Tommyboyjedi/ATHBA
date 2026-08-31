@@ -864,6 +864,8 @@ def test_tester_work_unit_receives_external_repository_context_without_athba_ass
     assert "Do not import ATHBA internals" in work_unit.objective
     assert '"module_name": "reservation_book"' in work_unit.objective
     assert "collection-safe" in work_unit.objective
+    assert "no fixture parameters" in work_unit.objective
+    assert "Do not wrap the test in try/except" in work_unit.objective
 
 
 def test_repository_material_allows_the_first_test_file_to_be_absent(tmp_path: Path):
@@ -906,6 +908,19 @@ def test_empty_external_source_uses_collection_safe_module_access_in_red_objecti
     assert "import reservation_book" in work_unit.objective
     assert "getattr(reservation_book, 'ReservationBook')" in work_unit.objective
     assert "Do not use `from reservation_book import ReservationBook`" in work_unit.objective
+
+
+def test_docstring_only_source_uses_collection_safe_module_access_in_red_objective():
+    material = {
+        "all_contract_files_empty": False,
+        "production_files": [{"module_name": "reservation_book", "content": '"""ReservationBook implementation is introduced through TDD."""\n'}],
+    }
+
+    work_unit = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), proposal(), material))
+
+    assert "Visible production files do not define `ReservationBook` yet" in work_unit.objective
+    assert "import reservation_book" in work_unit.objective
+    assert "getattr(reservation_book, 'ReservationBook')" in work_unit.objective
 
 
 @pytest.mark.asyncio
