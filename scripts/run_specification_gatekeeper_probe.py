@@ -17,6 +17,7 @@ from core.development.specification_gatekeeper import (
 )
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
+from core.llm.contracts.provider import ProviderRetryPolicy
 from core.llm.providers.openai_provider import OpenAIProvider
 
 
@@ -66,6 +67,14 @@ def default_output_path() -> Path:
     return Path("state") / f"specification-gatekeeper-probe-{timestamp}.json"
 
 
+def build_live_reasoning_gateway(model: str) -> RecordingGateway:
+    policy = ProviderRetryPolicy(timeout=300.0, max_retries=1, backoff_factor=2.0)
+    provider = OpenAIProvider(policy=policy)
+    return RecordingGateway(
+        ProviderReasoningGateway(provider=provider, model=model, max_tokens=4096)
+    )
+
+
 def structural_summary(items: list[dict[str, object]]) -> dict[str, object]:
     refs = [str(item["ref"]) for item in items]
     valid_kinds = {"behavior", "validation", "invariant", "constraint", "quality"}
@@ -92,12 +101,7 @@ def raw_items(raw_output: str | None) -> list[dict[str, object]]:
 
 async def run_probe() -> dict[str, object]:
     model = os.environ.get("ATHBA_REASONING_MODEL", "local-primary")
-    live_gateway = ProviderReasoningGateway(
-        provider=OpenAIProvider(timeout=300, max_retries=1),
-        model=model,
-        max_tokens=4096,
-    )
-    recording_gateway = RecordingGateway(live_gateway)
+    recording_gateway = build_live_reasoning_gateway(model)
     planner = SpecificationChecklistPlanner(recording_gateway)
     prompt = _checklist_prompt(project_id=PROJECT_ID, requirement_text=REQUIREMENT)
     print("=== EXACT GATEKEEPER PROMPT ===")

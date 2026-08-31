@@ -379,6 +379,7 @@ class BehaviorContractPlanner:
             return _contract_from_response(
                 result.text,
                 label="behavior contract",
+                requirement_text=request.requirement_text,
                 allowed_production_paths=normalized_production_paths,
                 allowed_test_paths=normalized_test_paths,
             )
@@ -403,6 +404,7 @@ class BehaviorContractPlanner:
             return _contract_from_response(
                 repair_result.text,
                 label="behavior contract repair",
+                requirement_text=request.requirement_text,
                 allowed_production_paths=normalized_production_paths,
                 allowed_test_paths=normalized_test_paths,
             )
@@ -1577,6 +1579,7 @@ def _contract_prompt(
                 "status must be exactly tdd_ready",
                 "public_api must be an array of strings",
                 "error_semantics must be an array of strings",
+                "requirement_source must exactly equal the supplied requirement_text",
                 "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
             ],
         },
@@ -1590,21 +1593,25 @@ def _contract_from_response(
     text: str,
     *,
     label: str,
+    requirement_text: str,
     allowed_production_paths: list[str],
     allowed_test_paths: list[str],
 ) -> BehaviorContract:
-    return BehaviorContract.from_dict(
+    contract = BehaviorContract.from_dict(
         _json_object(text, label=label),
         BehaviorContractLoadOptions(
             allowed_production_paths=allowed_production_paths,
             allowed_test_paths=allowed_test_paths,
         ),
     )
+    if contract.requirement_source != requirement_text:
+        raise ValueError("requirement_source must preserve the original requirement text exactly")
+    return contract
 
 
 def _is_recoverable_contract_error(error: ValueError) -> bool:
     message = str(error)
-    return message.startswith("source clauses must be covered by observable requirements:")
+    return message.startswith("source clauses must be covered by observable requirements:") or message == "requirement_source must preserve the original requirement text exactly"
 
 
 def _contract_repair_prompt(
@@ -1671,6 +1678,7 @@ def _contract_repair_prompt(
             "repair_rules": [
                 "keep the contract within the supplied repository-relative production and test paths",
                 "preserve valid existing fields where possible",
+                "requirement_source must exactly equal the supplied requirement_text",
                 "every source clause ref must appear in at least one observable_requirements[].source_refs entry",
                 "do not drop source clauses to hide coverage problems",
                 "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",

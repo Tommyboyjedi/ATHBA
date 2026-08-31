@@ -549,6 +549,27 @@ async def test_contract_planner_repairs_uncovered_source_clauses_once():
     assert "source clauses must be covered by observable requirements" in gateway.requests[2].prompt
 
 
+@pytest.mark.asyncio
+async def test_contract_planner_repairs_requirement_source_back_to_exact_original_text():
+    truncated_payload = contract_payload()
+    truncated_payload["requirement_source"] = "Build a small in-memory ReservationBook for reservable resources."
+    gateway = FakeReasoningGateway([source_clause_payload(), truncated_payload, contract_payload()])
+    planner = BehaviorContractPlanner(gateway)
+
+    restored = await planner.create_contract(
+        project_id="reservation-book",
+        requirement_text=requirement_text(),
+        production_paths=["reservation_book.py"],
+        test_paths=["tests/test_reservation_book.py"],
+    )
+
+    assert restored.requirement_source == requirement_text()
+    assert len(gateway.requests) == 3
+    assert gateway.requests[1].purpose == "athba_behavior_contract"
+    assert gateway.requests[2].purpose == "athba_behavior_contract_repair"
+    assert "requirement_source must exactly equal the supplied requirement_text" in gateway.requests[1].prompt
+    assert "requirement_source must preserve the original requirement text exactly" in gateway.requests[2].prompt
+    assert "requirement_source must exactly equal the supplied requirement_text" in gateway.requests[2].prompt
 
 
 @pytest.mark.asyncio
