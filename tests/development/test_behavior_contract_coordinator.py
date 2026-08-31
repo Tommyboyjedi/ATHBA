@@ -21,6 +21,7 @@ from core.development.behavior_contract_coordinator import (
     RepositoryMaterialRequest,
     RequirementClausePlanner,
     ReviewMaterialRequest,
+    SemanticReviewRequest,
     SeniorReviewer,
     WorkUnitBuildRequest,
     _first_executable_gap,
@@ -1306,6 +1307,37 @@ async def test_approved_review_promotes_candidate_revision_to_semantic_base():
     ).run_contract(contract_state)
 
     assert result.semantic_revision == "c" * 40
+
+
+@pytest.mark.asyncio
+async def test_senior_reviewer_repairs_fenced_json_response():
+    step = proposal()
+    reviewer = SeniorReviewer(
+        FakeReasoningGateway([
+            '```json\n' + json.dumps(review_repair(step.step_id, "c" * 40), indent=2) + '\n```',
+            review_repair(step.step_id, "c" * 40),
+        ])
+    )
+    review = await reviewer.review(
+        SemanticReviewRequest(
+            contract=single_requirement_contract(),
+            run_state=run_state(current_pool="review_ready", semantic_base_revision="b" * 40, contract_state=single_requirement_contract()),
+            cycle=replace(
+                ContractCycleRecord.from_step(step, base_revision="b" * 40),
+                red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+                green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_passed", accepted_revision="c" * 40),
+                candidate_revision="c" * 40,
+                pool="review_ready",
+            ),
+            candidate_revision="c" * 40,
+            review_material="candidate source",
+        )
+    )
+
+    assert review.verdict == "repair_required"
+    assert review.candidate_revision == "c" * 40
+    assert review.step_id == step.step_id
+    assert reviewer.gateway.requests[1].purpose == "athba_senior_review_repair"
 
 
 @pytest.mark.asyncio

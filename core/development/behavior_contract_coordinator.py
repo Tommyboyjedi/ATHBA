@@ -557,6 +557,20 @@ class DependencyPrerequisitePlanner:
         )
 
 
+def _semantic_review_from_response(
+    request: SemanticReviewRequest,
+    text: str,
+    *,
+    label: str,
+) -> SemanticReviewResult:
+    review = SemanticReviewResult.from_dict(_json_object(text, label=label))
+    if review.candidate_revision != request.candidate_revision:
+        raise ValueError("semantic review candidate revision mismatch")
+    if review.step_id != request.cycle.step.step_id:
+        raise ValueError("semantic review step id mismatch")
+    return review
+
+
 def _dependency_decision_from_response(
     request: DependencyDecisionRequest,
     text: str,
@@ -577,6 +591,48 @@ def _dependency_decision_from_response(
 
 def _is_recoverable_dependency_error(error: ValueError) -> bool:
     return str(error) == "dependency decision response was not valid JSON"
+
+
+def _is_recoverable_semantic_review_error(error: ValueError) -> bool:
+    return str(error) == "semantic review response was not valid JSON"
+
+
+
+def _semantic_review_repair_prompt(
+    *,
+    request: SemanticReviewRequest,
+    invalid_review_text: str,
+    validation_error: str,
+) -> str:
+    return json.dumps(
+        {
+            "instruction": "Repair the invalid ATHBA semantic review result. Return raw JSON only.",
+            "project_id": request.contract.project_id,
+            "candidate_revision": request.candidate_revision,
+            "step": request.cycle.step.to_dict(),
+            "invalid_review_draft": invalid_review_text,
+            "validation_error": validation_error,
+            "required_json_schema": {
+                "verdict": "approved|repair_required|replan_required",
+                "rationale": "string",
+                "findings": ["string"],
+                "candidate_revision": request.candidate_revision,
+                "step_id": request.cycle.step.step_id,
+                "evidence_refs": ["string"],
+                "repair_instructions": ["string"],
+            },
+            "rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not add commentary before or after the JSON",
+                "preserve the exact candidate_revision",
+                "preserve the exact step_id",
+                "repair_instructions must be empty unless verdict is repair_required",
+                "repair_instructions must be non-empty when verdict is repair_required",
+            ],
+        },
+        sort_keys=True,
+    )
 
 
 def _dependency_decision_repair_prompt(
@@ -647,12 +703,34 @@ class SeniorReviewer:
             requires_large_context=True,
         )
         result = await self.gateway.reason(reasoning_request)
-        review = SemanticReviewResult.from_dict(_json_object(result.text, label="semantic review"))
-        if review.candidate_revision != request.candidate_revision:
-            raise ValueError("semantic review candidate revision mismatch")
-        if review.step_id != request.cycle.step.step_id:
-            raise ValueError("semantic review step id mismatch")
-        return review
+        validation_error: str | None = None
+        try:
+            return _semantic_review_from_response(
+                request,
+                result.text,
+                label="semantic review",
+            )
+        except ValueError as error:
+            if not _is_recoverable_semantic_review_error(error):
+                raise
+            validation_error = str(error)
+        repaired = await self.gateway.reason(
+            ReasoningRequest(
+                purpose="athba_senior_review_repair",
+                prompt=_semantic_review_repair_prompt(
+                    request=request,
+                    invalid_review_text=result.text,
+                    validation_error=validation_error or "semantic review response was not valid JSON",
+                ),
+                project_id=request.contract.project_id,
+                requires_large_context=True,
+            )
+        )
+        return _semantic_review_from_response(
+            request,
+            repaired.text,
+            label="semantic review repair",
+        )
 
 
 class ContractTesterWorkUnitFactory:
