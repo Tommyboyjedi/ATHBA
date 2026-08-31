@@ -2386,6 +2386,36 @@ async def test_cannot_split_resource_limit_failure_replans_without_child_work():
 
 
 @pytest.mark.asyncio
+async def test_cannot_split_resource_limit_failure_accepts_fenced_json_response():
+    contract_state = single_requirement_contract()
+    parent = proposal(step_id="parent-step")
+    execution = FakeExecutionGateway({
+        "parent-step--red": accepted("parent-step--red", "b" * 40),
+        "parent-step--green": rejected("parent-step--green", error="jcode wall-clock timeout exceeded for worker local-coder after 900 seconds"),
+    })
+    fenced_decision = "```json\n" + json.dumps(
+        cannot_split_decision("The packet is already the smallest coherent semantic slice."),
+        indent=2,
+    ) + "\n```"
+    gateway = FakeReasoningGateway([
+        {"status": "propose", "rationale": "Start with RB-1.", "proposal": parent.to_dict(), "completed_requirement_refs": []},
+        fenced_decision,
+    ])
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=execution,
+        reasoning_gateway=gateway,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "replan_ready"
+    assert "smallest coherent semantic slice" in (result.blocked_reason or "")
+    assert [request.purpose for request in gateway.requests].count("athba_resource_limit_split") == 1
+
+
+@pytest.mark.asyncio
 async def test_split_depth_exhaustion_replans_without_calling_split_planner():
     contract_state = single_requirement_contract()
     grandchild = split_child("grandchild-a")

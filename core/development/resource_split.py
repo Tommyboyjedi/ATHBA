@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, replace
 from enum import Enum
 
@@ -247,7 +248,7 @@ def _parent_split(progress: FailureProgressState, step_id: str) -> WorkPacketSpl
 
 
 def _resource_split_decision(payload_text: str) -> ResourceSplitDecision:
-    payload = json.loads(payload_text)
+    payload = json.loads(_normalized_split_payload(payload_text))
     if not isinstance(payload, dict):
         raise ValueError("resource split decision must be a JSON object")
     return ResourceSplitDecision(
@@ -255,6 +256,14 @@ def _resource_split_decision(payload_text: str) -> ResourceSplitDecision:
         rationale=str(payload["rationale"]),
         child_steps=[SplitChildStep.from_dict(dict(item)) for item in payload.get("child_steps", [])],
     )
+
+
+def _normalized_split_payload(payload_text: str) -> str:
+    cleaned = payload_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, count=1)
+        cleaned = re.sub(r"\s*```$", "", cleaned, count=1)
+    return cleaned
 
 
 def _validated_split_decision(request: ResourceSplitPlannerRequest, decision: ResourceSplitDecision) -> ResourceSplitDecision:
