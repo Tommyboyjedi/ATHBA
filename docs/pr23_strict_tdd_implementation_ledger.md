@@ -144,3 +144,23 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Phase 10 Scenario completion and review: PARTIAL; the post-scenario behavior-review boundary and next-scenario start seam are complete, while a concrete behavior-review repair executor still requires its own subsequent session.
 - Phase 11 Feature completion: INCOMPLETE.
 - Phase 13 Proof order including fresh ReservationBook proof: INCOMPLETE; no ReservationBook run was performed.
+
+## Session 7: persistence/resume and generic orchestration proof
+
+- Implementation commit: 0150b927f11a517a6f934f58fb3c53ff9945b27e (development: prove strict microcycle persistence resume).
+- Persisted regression clearance is now a restart boundary: a resumed process advances before materialising any already-cleared frontier. Advancing resets the regression checkpoint and preserves the new development base.
+- Accepted Developer results become one durable transition: the active RED is cleared and candidate-chain revision stored together. A mismatched work-unit id fails closed as a stale Rack AI packet.
+- Scenario model validation preserves approved source, canonical test identity, test path, language, and adapter version. Adapter-version drift fails closed.
+- scenario_complete is saved before behavior review. The behavior-review verdict is saved before starting the next behavior, so a restart after approval neither repeats the review nor loses the next-scenario boundary.
+- Added completed-microcycle Gatekeeper evidence collection. Only behavior-approved, completed scenarios are exposed; pending, incomplete, repair, and abandoned drafts are excluded.
+- Deterministic generic proof covers missing type, construction, missing operation, first success, final assertion, narrow GREEN, deterministic regression, completion, behavior review, and requirement completion through existing Session 5-6 strict-microcycle coverage plus the Session 7 restart suite. No ReservationBook or live worker/model was invoked.
+- Cross-language conformance is protocol-only: Python complete indentation blocks, C# complete braced blocks plus compiler-diagnostic shape, and VBA If/End If, For/Next, and procedure terminators are structurally proven. No C# or VBA runtime execution support is claimed.
+- Retry proof: unchanged frontier executions and Developer attempts stop at four; retry counters are persisted; a regression-cleared advance creates a new frontier rather than a fifth retry; stale/double-digit replan packets have no accepted route.
+- Validation: focused PR23 Session 1-7 suite 57 passed; Session 7 suite 7 passed; final compileall, coding-principles, focused mypy, git diff --check, and full pytest all passed.
+- Remaining live-proof work: live tiny feature proof and the fresh ReservationBook proof remain intentionally unrun. INCOMPLETE_ITEMS = PRESENT.
+
+## Remaining implementation phases
+
+- Phase 10 Scenario completion and review: COMPLETE for the generic persistence/restart orchestration proof; live proof remains.
+- Phase 12 Persistence and resume proof: COMPLETE for all required persisted orchestration boundaries.
+- Phase 13 Proof order including fresh ReservationBook proof: INCOMPLETE; deliberately deferred live proof.
