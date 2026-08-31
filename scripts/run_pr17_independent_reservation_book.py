@@ -145,18 +145,100 @@ def prepare_target(environment: ProjectEnvironmentService, project: DevelopmentP
     (target / "scripts").mkdir(exist_ok=True)
     (target / "reservation_book.py").write_text('"""ReservationBook implementation is introduced through TDD."""\n', encoding="utf-8")
     (target / "scripts" / "assert_test_fails.py").write_text(
-        """import subprocess
+        """import json
+import subprocess
 import sys
+from dataclasses import asdict, dataclass
 
-probe = subprocess.run([sys.executable, '-B', '-m', 'pytest', '--version'])
-if probe.returncode != 0:
-    raise SystemExit(probe.returncode or 2)
+PROBE_MARKER = "athba_red_probe_v1"
 
-command = [sys.executable, '-B', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', sys.argv[1]]
-result = subprocess.run(command)
-if result.returncode == 1:
-    raise SystemExit(0)
-raise SystemExit(result.returncode or 1)
+
+@dataclass
+class ProbeState:
+    pytest_runtime_available: bool
+    collection_succeeded: bool
+    requested_node_found: bool
+    requested_node_executed: bool
+    outcome: str
+    failure_phase: str | None = None
+    exception_type: str | None = None
+    failure_message: str | None = None
+    traceback_location: str | None = None
+    stdout: str = ""
+    stderr: str = ""
+    evidence_refs: list[str] | None = None
+
+
+def _main() -> int:
+    test_node = sys.argv[1]
+    probe = subprocess.run([sys.executable, '-B', '-m', 'pytest', '--version'], text=True, capture_output=True)
+    if probe.returncode != 0:
+        return probe.returncode or 2
+    command = [sys.executable, '-B', '-m', 'pytest', '-q', '-p', 'no:cacheprovider', test_node]
+    result = subprocess.run(command, text=True, capture_output=True)
+    state = _probe_state(test_node, result)
+    print(f"{PROBE_MARKER} {json.dumps(asdict(state), sort_keys=True)}")
+    return 0
+
+
+def _probe_state(test_node: str, result: subprocess.CompletedProcess[str]) -> ProbeState:
+    combined = "
+".join(part for part in [result.stdout, result.stderr] if part)
+    requested_node_found = test_node in combined or "1 selected" in combined or result.returncode in {0, 1}
+    collection_succeeded = "ERROR collecting" not in combined and "ImportError while loading conftest" not in combined
+    requested_node_executed = collection_succeeded and result.returncode in {0, 1}
+    outcome = _outcome(result.returncode, combined)
+    return ProbeState(
+        pytest_runtime_available=True,
+        collection_succeeded=collection_succeeded,
+        requested_node_found=requested_node_found,
+        requested_node_executed=requested_node_executed,
+        outcome=outcome,
+        failure_phase=None if outcome == 'passed' else ('setup' if not collection_succeeded else 'call'),
+        exception_type=_exception_type(combined),
+        failure_message=_failure_message(combined),
+        traceback_location=_traceback_location(combined),
+        stdout=result.stdout,
+        stderr=result.stderr,
+        evidence_refs=[test_node],
+    )
+
+
+def _outcome(returncode: int, text: str) -> str:
+    lowered = text.lower()
+    if ' skipped' in lowered or lowered.startswith('s'):
+        return 'skipped'
+    if 'xfailed' in lowered:
+        return 'xfailed'
+    if 'xpassed' in lowered:
+        return 'xpassed'
+    if returncode == 0:
+        return 'passed'
+    if returncode == 1:
+        return 'failed'
+    return 'error'
+
+
+def _exception_type(text: str) -> str | None:
+    for marker in ('AssertionError', 'ImportError', 'ModuleNotFoundError', 'ValueError', 'TypeError', 'NameError', 'AttributeError'):
+        if marker in text:
+            return marker
+    return None
+
+
+def _failure_message(text: str) -> str | None:
+    stripped = text.strip()
+    return stripped.splitlines()[-1] if stripped else None
+
+
+def _traceback_location(text: str) -> str | None:
+    for line in text.splitlines():
+        if '.py:' in line:
+            return line.strip()
+    return None
+
+
+raise SystemExit(_main())
 """,
         encoding="utf-8",
     )
