@@ -76,3 +76,15 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Compatibility: legacy PR17 full-test state remains untouched; missing microcycle schema versions fail with an explicit migration error.
 - Focused tests: 9 passed. Standard validation: 315 passed, mypy, compileall, coding-principles, and diff checks passed.
 - Conformance fixtures preserve Python loop, C# brace, and VBA If/End If blocks as whole fragments.
+
+
+## Session 3: Python + pytest adapter and frontier diagnostics
+
+- Adapter version: `python-pytest` `1.0.0`.
+- Adapter commit: `062679bc0dd565e786d721ea945c01274d2e1ada`.
+- Supported forms: pytest imports/decorators, module- and test-scope production imports, declarations, constructor calls, normal calls, assertions, complete `pytest.raises`, complete `if`, loops, ordinary `with`, and `try` blocks. Compound statements are atomic fragments.
+- Deliberately unsupported: dynamic test generation including `pytest.mark.parametrize`, nested declarations/classes, generators, async/await, and ambiguous module layouts. These fail closed during parsing.
+- Materialisation: every frontier emits a complete module/test function with required `pass` scaffolding only; original and materialised fragment spans are persisted; later fragments are omitted.
+- Diagnostics: the isolated pytest hook records collection, exact-node discovery, setup/call/teardown, exception, traceback/source line, xfail/xpass, and captured output as structured diagnostic facts. Console text is not used as classifier authority.
+- Focused tests: `17 passed` for `test_python_pytest_adapter.py` plus `test_microcycle_domain.py`.
+- Validation pending: full repository suite, mypy, compileall, coding-principles, diff check, push.
