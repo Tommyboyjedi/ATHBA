@@ -20,6 +20,7 @@ from core.development.failure_progression import (
     FailureDecision,
     FailureObservation,
     FailureProgressState,
+    FailureRouteState,
     FailureProgressionPolicy,
     ProgressionAction,
     RetryBudget,
@@ -1136,7 +1137,11 @@ async def _advance_cycle_active(
         raise ValueError("cycle_active run state requires an active cycle")
     if cycle.red_phase is not None and cycle.red_phase.accepted_revision is None:
         material = _repository_material(contract, run_state, dependencies.repository_material_provider)
-        work_unit = dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
+        work_unit = _retry_scoped_work_unit(
+            run_state.failure_progress,
+            TddPhase.RED,
+            dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material)),
+        )
         outcome = await dependencies.phase_executor.execute(
             PhaseExecutionRequest(
                 TddPhase.RED,
@@ -1190,7 +1195,11 @@ async def _advance_green_phase(
         raise ValueError("cycle_active run state has no remaining executable phase")
     base_revision = cycle.red_phase.accepted_revision if cycle.red_phase else run_state.semantic_base_revision
     material = _repository_material(contract, run_state, dependencies.repository_material_provider, base_revision)
-    work_unit = dependencies.developer_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
+    work_unit = _retry_scoped_work_unit(
+        run_state.failure_progress,
+        TddPhase.GREEN,
+        dependencies.developer_factory.build(WorkUnitBuildRequest(contract, cycle.step, material)),
+    )
     outcome = await dependencies.phase_executor.execute(
         PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(base_revision))
     )
@@ -1207,6 +1216,25 @@ async def _advance_green_phase(
             blocked_reason=None,
         )
     )
+
+
+def _retry_scoped_work_unit(
+    failure_progress: FailureProgressState,
+    phase: TddPhase,
+    work_unit: DevelopmentWorkUnit,
+) -> DevelopmentWorkUnit:
+    if failure_progress.state is not FailureRouteState.AWAITING_REPAIR:
+        return work_unit
+    if not failure_progress.repair_packets:
+        return work_unit
+    packet = failure_progress.repair_packets[-1]
+    if packet.work_unit_id != work_unit.id:
+        return work_unit
+    retry_route = RetryRoute.TESTER_REPAIR if phase is TddPhase.RED else RetryRoute.DEVELOPER_REPAIR
+    retry_count = failure_progress.retry_counts.get(retry_route.value, 0)
+    if retry_count <= 0:
+        return work_unit
+    return replace(work_unit, change_key=f"{work_unit.id}--retry-{retry_count}")
 
 
 async def _advance_review_ready(

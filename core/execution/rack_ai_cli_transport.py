@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,7 @@ from core.filesystem_policy import resolve_confined_absolute_path
 RackAiCliTransportError = RuntimeError
 DEFAULT_CLI_CLEANUP_ALLOWANCE_SECONDS = 30
 DEFAULT_CLI_TERMINATION_GRACE_SECONDS = 5
+EXPECTED_PACKET_CLOCK_SKEW_SECONDS = 1
 
 
 @dataclass(frozen=True)
@@ -178,6 +180,7 @@ class RackAiCliTransport:
                 json.dump(request.to_dict(), handle)
                 handle.flush()
                 spec_path = Path(handle.name)
+            started_at = time.time()
             process = await asyncio.create_subprocess_exec(
                 *self.commands.build(spec_path),
                 cwd=self.config.rack_ai_root,
@@ -186,7 +189,13 @@ class RackAiCliTransport:
             )
             result = await self.watchdog.communicate(process, request)
             if not result.stdout_text.strip():
-                fallback = _response_from_expected_packet(self.packet_loader, self.config, request, result)
+                fallback = _response_from_expected_packet(
+                    self.packet_loader,
+                    self.config,
+                    request,
+                    result,
+                    started_at,
+                )
                 if fallback is not None:
                     return fallback
                 raise RackAiCliTransportError(_build_error_message("Rack AI returned no command summary", result))
@@ -210,9 +219,10 @@ def _response_from_expected_packet(
     config: RackAiCliConfig,
     request: RackAiChangeRequest,
     process: RackAiCliProcessResult,
+    started_at: float,
 ) -> RackAiCliResponse | None:
     packet_path = Path(config.state_root) / "state" / "changes" / request.change_id / "review-packet.json"
-    if not packet_path.exists():
+    if not packet_path.exists() or _packet_predates_request(packet_path, started_at):
         return None
     packet = packet_loader.load(packet_path)
     return RackAiCliResponse(
@@ -233,6 +243,10 @@ def _response_from_expected_packet(
 def _optional_packet_string(payload: dict[str, Any], key: str) -> str | None:
     value = payload.get(key)
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _packet_predates_request(packet_path: Path, started_at: float) -> bool:
+    return packet_path.stat().st_mtime + EXPECTED_PACKET_CLOCK_SKEW_SECONDS < started_at
 
 
 def _signal_process(process: asyncio.subprocess.Process, *, terminate: bool) -> None:

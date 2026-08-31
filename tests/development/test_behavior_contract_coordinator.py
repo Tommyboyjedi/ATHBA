@@ -82,7 +82,7 @@ class FakeExecutionGateway:
         self.calls = []
 
     async def execute(self, work_unit, repository_binding):
-        self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective))
+        self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective, work_unit.change_key))
         result = self.results[work_unit.id]
         if isinstance(result, list):
             if not result:
@@ -2977,7 +2977,36 @@ async def test_syntax_failure_reject_dependency_routes_to_tester_repair_from_sem
     assert packet.trusted_revision == "a" * 40
     assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
     assert gateway.calls[1][:2] == (step.step_id + "--red", "a" * 40)
+    assert gateway.calls[1][3] == step.step_id + "--red--retry-1"
     assert repo.snapshot.contract_runs[single_requirement_contract().id].failure_progress.retry_counts == {RetryRoute.TESTER_REPAIR.value: 1}
+
+
+@pytest.mark.asyncio
+async def test_candidate_repair_uses_attempt_scoped_change_key_for_live_retries():
+    step = proposal()
+    repo = MemoryStateRepo()
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": [
+            rejected(step.step_id + "--red", error="acceptance failed"),
+            accepted(step.step_id + "--red", "b" * 40),
+        ],
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+            review_approved(step.step_id, "c" * 40),
+            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": ["RB-1"]},
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(single_requirement_contract())
+
+    assert result.current_pool == "completed"
+    assert gateway.calls[0][3] is None
+    assert gateway.calls[1][3] == step.step_id + "--red--retry-1"
 
 
 @pytest.mark.asyncio
@@ -3017,6 +3046,7 @@ async def test_build_link_failure_reject_dependency_routes_to_developer_repair_f
     assert packet.trusted_revision == "b" * 40
     assert gateway.calls[1][:2] == (step.step_id + "--green", "b" * 40)
     assert gateway.calls[2][:2] == (step.step_id + "--green", "b" * 40)
+    assert gateway.calls[2][3] == step.step_id + "--green--retry-1"
     assert repo.snapshot.contract_runs[single_requirement_contract().id].failure_progress.retry_counts == {RetryRoute.DEVELOPER_REPAIR.value: 1}
 
 

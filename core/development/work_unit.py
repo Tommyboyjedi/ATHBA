@@ -54,6 +54,7 @@ class DevelopmentWorkUnit:
     max_implementation_attempts: int = 2
     timeout_seconds: int = 900
     network: str = "disabled"
+    change_key: str | None = None
     status: WorkUnitStatus = WorkUnitStatus.PLANNED
 
     def __post_init__(self) -> None:
@@ -81,6 +82,8 @@ class DevelopmentWorkUnit:
             raise ValueError("max implementation attempts must be positive")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout seconds must be positive")
+        if self.change_key is not None:
+            _require_text(self.change_key, "work unit change key")
 
     def dependencies_satisfied(self, accepted_dependencies: set[str]) -> bool:
         """Return true when every declared dependency has been accepted."""

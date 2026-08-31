@@ -133,7 +133,7 @@ class RackAiRequestFactory:
         if not request.unit.is_ready_for_execution():
             raise ValueError("work unit must be marked ready for execution before Rack AI submission")
         return RackAiChangeRequest(
-            change_id=f"{request.workload_id}--{request.unit.id}",
+            change_id=f"{request.workload_id}--{request.unit.change_key or request.unit.id}",
             repository=RackAiRepositoryTarget(
                 repository_id=request.binding.repository_id,
                 base_ref=request.binding.base_ref,

@@ -6,7 +6,7 @@ import pytest
 
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_cli_gateway import RackAiCliConfig, RackAiCliExecutionGateway, RackAiCliTransportError
-from core.execution.rack_ai_cli_transport import RackAiCliWatchdog
+from core.execution.rack_ai_cli_transport import EXPECTED_PACKET_CLOCK_SKEW_SECONDS, RackAiCliWatchdog
 from core.execution.rack_ai_contract import RepositoryBinding
 
 
@@ -56,7 +56,7 @@ class HangingProcess(FakeProcess):
         self.returncode = -9
 
 
-def sample_unit(*, status: WorkUnitStatus = WorkUnitStatus.READY, timeout_seconds: int = 900) -> DevelopmentWorkUnit:
+def sample_unit(*, status: WorkUnitStatus = WorkUnitStatus.READY, timeout_seconds: int = 900, change_key: str | None = None) -> DevelopmentWorkUnit:
     return DevelopmentWorkUnit(
         id="wu-1",
         project_id="p1",
@@ -65,6 +65,7 @@ def sample_unit(*, status: WorkUnitStatus = WorkUnitStatus.READY, timeout_second
         allowed_paths=["src/app.py"],
         acceptance=AcceptanceContract(commands=[["python3", "-m", "pytest", "tests/test_app.py::test_one"]]),
         timeout_seconds=timeout_seconds,
+        change_key=change_key,
         status=status,
     )
 
@@ -202,6 +203,26 @@ async def test_gateway_returns_structured_success_and_uses_argument_array(monkey
 
 
 @pytest.mark.asyncio
+async def test_gateway_uses_attempt_scoped_change_key(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+
+    async def fake_exec(*args, **_kwargs):
+        spec_path = Path(args[7])
+        captured["payload"] = json.loads(spec_path.read_text(encoding="utf-8"))
+        packet_path = tmp_path / "state" / "packet.json"
+        write_packet(packet_path, status="checks_passed", verdict="approved", head_sha="b" * 40, change_id="p1--wu-1--retry-1")
+        return FakeProcess(summary_lines(packet_path, change_id="p1--wu-1--retry-1", base_sha="a" * 40, status="checks_passed", acceptance_verdict="approved"))
+
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
+
+    gateway = RackAiCliExecutionGateway("p1", gateway_config(tmp_path / "state"))
+    result = await gateway.execute(sample_unit(change_key="wu-1--retry-1"), sample_binding())
+
+    assert captured["payload"]["change_id"] == "p1--wu-1--retry-1"
+    assert result.change_id == "p1--wu-1--retry-1"
+
+
+@pytest.mark.asyncio
 async def test_gateway_passes_updated_binding_base_sha(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
@@ -298,6 +319,27 @@ async def test_gateway_loads_expected_packet_when_summary_missing(monkeypatch, t
     assert result.error == "collector import failed"
     assert result.change_id == "p1--wu-1"
     assert result.worktree_path == "/srv/rack-ai/state/workspaces/p1--wu-1/repo"
+
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_stale_expected_packet_when_summary_missing(monkeypatch, tmp_path):
+    packet_path = tmp_path / "state" / "state" / "changes" / "p1--wu-1" / "review-packet.json"
+    write_packet(packet_path, status="checks_failed", verdict="rejected")
+    packet_path.touch()
+    monkeypatch.setattr(
+        "core.execution.rack_ai_cli_transport.time.time",
+        lambda: packet_path.stat().st_mtime + EXPECTED_PACKET_CLOCK_SKEW_SECONDS + 5,
+    )
+
+    async def fake_exec(*_args, **_kwargs):
+        return FakeProcess("", stderr="worktree already exists", returncode=1)
+
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
+
+    gateway = RackAiCliExecutionGateway("p1", gateway_config(tmp_path / "state"))
+    with pytest.raises(RackAiCliTransportError, match="Rack AI returned no command summary"):
+        await gateway.execute(sample_unit(), sample_binding())
 
 
 @pytest.mark.asyncio
