@@ -14,6 +14,7 @@ from core.development.failure_progression import (
     RepairPacket,
     RetryBudget,
     RetryRoute,
+    SplitChildStep,
     UnclassifiedAnalysis,
     WorkPacketSplit,
 )
@@ -138,6 +139,51 @@ def test_prerequisite_deferral_preserves_state_and_records_declared_dependency()
     assert state.deferred_requirement_refs == ["REQ-2"]
     assert state.prerequisite_links == {"REQ-2": ["REQ-1"]}
     assert state.dependency_decisions[-1].disposition is DependencyDisposition.ALREADY_PLANNED
+
+
+def test_split_record_round_trips_child_steps_and_completed_lineage() -> None:
+    child_a = SplitChildStep(
+        step_id="RB-1a",
+        requirement_refs=["RB-1"],
+        focused_behavior="Adding the resource stores the identifier.",
+        test_name="tests/test_reservation_book.py::test_add_resource_stores_identifier",
+        expected_result="The resource id appears in the in-memory store.",
+        test_path="tests/test_reservation_book.py",
+        production_path="reservation_book.py",
+        red_objective="Add a failing test for storing the resource identifier.",
+        green_objective="Implement only enough code to store the resource identifier.",
+        reason_next_smallest="This isolates identifier persistence before capacity accounting.",
+    )
+    child_b = SplitChildStep(
+        step_id="RB-1b",
+        requirement_refs=["RB-1"],
+        focused_behavior="Availability reports the stored capacity.",
+        test_name="tests/test_reservation_book.py::test_add_resource_reports_capacity",
+        expected_result="available('room-a') returns the stored capacity.",
+        test_path="tests/test_reservation_book.py",
+        production_path="reservation_book.py",
+        red_objective="Add a failing test for capacity reporting.",
+        green_objective="Implement only enough code to report the stored capacity.",
+        reason_next_smallest="This proves the observable capacity behavior after storage exists.",
+        depends_on=["RB-1a"],
+    )
+    split = WorkPacketSplit(
+        parent_work_unit_id="RB-1--green",
+        parent_step_id="RB-1",
+        parent_requirement_ref="RB-1",
+        child_work_unit_ids=["RB-1a", "RB-1b"],
+        preserved_objective="Implement add_resource.",
+        rationale="The packet exceeded the resource budget and was decomposed.",
+        trusted_revision="b" * 40,
+        split_depth=2,
+        child_steps=[child_a, child_b],
+        completed_child_ids=["RB-1a"],
+    )
+
+    restored = WorkPacketSplit.from_dict(split.to_dict())
+
+    assert restored == split
+    assert restored.to_dict()["child_step_ids"] == ["RB-1a", "RB-1b"]
 
 
 def test_failure_progress_state_loads_legacy_payload_defaults() -> None:

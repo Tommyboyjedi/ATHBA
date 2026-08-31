@@ -6,11 +6,12 @@ from core.development.failure_records import (
     FailureDecision,
     FailureObservation,
     RepairPacket,
+    SplitChildStep,
     UnclassifiedAnalysis,
     WorkPacketSplit,
 )
 from core.development.failure_state import FailureProgressState
-from core.development.failure_transitions import FailureRecordRequest, PrerequisiteDeferralRequest, RetryBudget
+from core.development.failure_transitions import FailureRecordRequest, PrerequisiteDeferralRequest, RetryBudget, SplitRecordRequest
 from core.development.failure_values import (
     FAILURE_ACTIONS,
     FAILURE_PRIORITY,
@@ -41,6 +42,8 @@ __all__ = [
     "RepairPacket",
     "RetryBudget",
     "RetryRoute",
+    "SplitChildStep",
+    "SplitRecordRequest",
     "UnclassifiedAnalysis",
     "WorkPacketSplit",
 ]

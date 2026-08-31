@@ -38,6 +38,8 @@ from core.development.failure_progression import (
     ProgressionAction,
     RepairPacket,
     RetryRoute,
+    SplitChildStep,
+    WorkPacketSplit,
 )
 from core.development.tdd_progression import (
     BehaviorContract,
@@ -276,6 +278,34 @@ def proposal(requirement_ref="RB-1", *, step_id="step-1"):
         green_objective="Implement only enough ReservationBook code to store a resource and report availability.",
         reason_next_smallest="This establishes the base state every later reservation behavior depends on.",
     )
+
+
+def split_child(step_id: str, *, depends_on: list[str] | None = None) -> SplitChildStep:
+    return SplitChildStep(
+        step_id=step_id,
+        requirement_refs=["RB-1"],
+        focused_behavior=f"{step_id} isolates one smaller observable slice of add_resource.",
+        test_name=f"tests/test_reservation_book.py::test_{step_id.replace('-', '_')}",
+        expected_result=f"{step_id} proves one accepted observable slice of add_resource.",
+        test_path="tests/test_reservation_book.py",
+        production_path="reservation_book.py",
+        red_objective=f"Add a failing test for {step_id}.",
+        green_objective=f"Implement only enough code for {step_id}.",
+        reason_next_smallest=f"{step_id} is the next smallest bounded semantic slice.",
+        depends_on=list(depends_on or []),
+    )
+
+
+def split_decision(*children: SplitChildStep) -> dict[str, object]:
+    return {
+        "status": "split",
+        "rationale": "The packet exceeded the resource budget and must be decomposed into smaller semantic work.",
+        "child_steps": [child.to_dict() for child in children],
+    }
+
+
+def cannot_split_decision(rationale: str) -> dict[str, object]:
+    return {"status": "cannot_split", "rationale": rationale, "child_steps": []}
 
 
 def accepted(work_unit_id: str, revision: str):
@@ -2061,6 +2091,215 @@ def review_replan(step_id: str, revision: str) -> dict[str, object]:
 
 def saved_runs(repo: MemoryStateRepo, contract_id: str) -> list[BehaviorContractRunState]:
     return [snapshot.contract_runs[contract_id] for snapshot in repo.saved if contract_id in snapshot.contract_runs]
+
+
+@pytest.mark.asyncio
+async def test_resource_limit_failure_splits_into_persisted_children_and_updates_trusted_revision():
+    contract_state = single_requirement_contract()
+    parent = proposal(step_id="parent-step")
+    child_a = split_child("child-a")
+    child_b = split_child("child-b", depends_on=["child-a"])
+    repo = MemoryStateRepo()
+    gateway = FakeReasoningGateway([
+        {"status": "propose", "rationale": "Start with RB-1.", "proposal": parent.to_dict(), "completed_requirement_refs": []},
+        split_decision(child_a, child_b),
+        review_approved("child-a", "d" * 40),
+        review_approved("child-b", "f" * 40),
+        {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []},
+    ])
+    execution = FakeExecutionGateway({
+        "parent-step--red": accepted("parent-step--red", "b" * 40),
+        "parent-step--green": rejected("parent-step--green", error="resource exhausted while implementing the packet"),
+        "child-a--red": accepted("child-a--red", "c" * 40),
+        "child-a--green": accepted("child-a--green", "d" * 40),
+        "child-b--red": accepted("child-b--red", "e" * 40),
+        "child-b--green": accepted("child-b--green", "f" * 40),
+    })
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=execution,
+        reasoning_gateway=gateway,
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    split_states = [item for item in saved_runs(repo, contract_state.id) if item.failure_progress.splits]
+    assert result.current_pool == "completed"
+    assert [call[:2] for call in execution.calls] == [
+        ("parent-step--red", "a" * 40),
+        ("parent-step--green", "b" * 40),
+        ("child-a--red", "b" * 40),
+        ("child-a--green", "c" * 40),
+        ("child-b--red", "d" * 40),
+        ("child-b--green", "e" * 40),
+    ]
+    assert [request.purpose for request in gateway.requests].count("athba_resource_limit_split") == 1
+    assert split_states[-1].failure_progress.splits[-1] == WorkPacketSplit(
+        parent_work_unit_id="parent-step--green",
+        parent_step_id="parent-step",
+        parent_requirement_ref="RB-1",
+        child_work_unit_ids=["child-a", "child-b"],
+        preserved_objective=parent.green_objective,
+        rationale="The packet exceeded the resource budget and must be decomposed into smaller semantic work.",
+        trusted_revision="b" * 40,
+        split_depth=1,
+        child_steps=[child_a, child_b],
+        completed_child_ids=["child-a", "child-b"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_resume_split_uses_persisted_children_without_replanning():
+    contract_state = single_requirement_contract()
+    parent = proposal(step_id="parent-step")
+    child_a = split_child("child-a")
+    child_b = split_child("child-b", depends_on=["child-a"])
+    split = WorkPacketSplit(
+        parent_work_unit_id="parent-step--green",
+        parent_step_id="parent-step",
+        parent_requirement_ref="RB-1",
+        child_work_unit_ids=["child-a", "child-b"],
+        preserved_objective=parent.green_objective,
+        rationale="The packet exceeded the resource budget and must be decomposed into smaller semantic work.",
+        trusted_revision="b" * 40,
+        split_depth=1,
+        child_steps=[child_a, child_b],
+    )
+    parent_cycle = replace(
+        ContractCycleRecord.from_step(parent, base_revision="a" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id="parent-step--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id="parent-step--green", status="checks_failed", error="resource exhausted while implementing the packet"),
+        pool="tdd_ready",
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="tdd_ready",
+                cycles=[parent_cycle],
+                contract_state=contract_state,
+                failure_progress=FailureProgressState(splits=[split]),
+                blocked_reason="resource_limit_failure: split into child-a, child-b",
+            )
+        },
+    )
+    execution = FakeExecutionGateway({
+        "child-a--red": accepted("child-a--red", "c" * 40),
+        "child-a--green": accepted("child-a--green", "d" * 40),
+        "child-b--red": accepted("child-b--red", "e" * 40),
+        "child-b--green": accepted("child-b--green", "f" * 40),
+    })
+    gateway = FakeReasoningGateway([
+        review_approved("child-a", "d" * 40),
+        review_approved("child-b", "f" * 40),
+        {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []},
+    ])
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=execution,
+        reasoning_gateway=gateway,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "completed"
+    assert [call[:2] for call in execution.calls] == [
+        ("child-a--red", "b" * 40),
+        ("child-a--green", "c" * 40),
+        ("child-b--red", "d" * 40),
+        ("child-b--green", "e" * 40),
+    ]
+    assert [request.purpose for request in gateway.requests].count("athba_resource_limit_split") == 0
+
+
+@pytest.mark.asyncio
+async def test_cannot_split_resource_limit_failure_replans_without_child_work():
+    contract_state = single_requirement_contract()
+    parent = proposal(step_id="parent-step")
+    execution = FakeExecutionGateway({
+        "parent-step--red": accepted("parent-step--red", "b" * 40),
+        "parent-step--green": rejected("parent-step--green", error="resource exhausted while implementing the packet"),
+    })
+    gateway = FakeReasoningGateway([
+        {"status": "propose", "rationale": "Start with RB-1.", "proposal": parent.to_dict(), "completed_requirement_refs": []},
+        cannot_split_decision("The packet is already the smallest coherent semantic slice."),
+    ])
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=execution,
+        reasoning_gateway=gateway,
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "replan_ready"
+    assert "smallest coherent semantic slice" in (result.blocked_reason or "")
+    assert [call[0] for call in execution.calls] == ["parent-step--red", "parent-step--green"]
+
+
+@pytest.mark.asyncio
+async def test_split_depth_exhaustion_replans_without_calling_split_planner():
+    contract_state = single_requirement_contract()
+    grandchild = split_child("grandchild-a")
+    nested_split = WorkPacketSplit(
+        parent_work_unit_id="child-a--green",
+        parent_step_id="child-a",
+        parent_requirement_ref="RB-1",
+        child_work_unit_ids=["grandchild-a", "grandchild-b"],
+        preserved_objective="Implement only enough code for child-a.",
+        rationale="The first split child also exceeded the resource budget.",
+        trusted_revision="d" * 40,
+        split_depth=2,
+        child_steps=[grandchild, split_child("grandchild-b", depends_on=["grandchild-a"])],
+    )
+    cycle = replace(
+        ContractCycleRecord.from_step(proposal(step_id="grandchild-a"), base_revision="d" * 40),
+        step=TddStepProposal(
+            step_id=grandchild.step_id,
+            requirement_refs=list(grandchild.requirement_refs),
+            focused_behavior=grandchild.focused_behavior,
+            test_name=grandchild.test_name,
+            expected_result=grandchild.expected_result,
+            test_path=grandchild.test_path,
+            production_path=grandchild.production_path,
+            red_objective=grandchild.red_objective,
+            green_objective=grandchild.green_objective,
+            reason_next_smallest=grandchild.reason_next_smallest,
+        ),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id="grandchild-a--red", status="checks_passed", accepted_revision="e" * 40),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("d" * 40),
+        current_trusted_revision="d" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="cycle_active",
+                cycles=[cycle],
+                contract_state=contract_state,
+                semantic_base_revision="d" * 40,
+                failure_progress=FailureProgressState(splits=[nested_split]),
+            )
+        },
+    )
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            "grandchild-a--green": rejected("grandchild-a--green", error="resource exhausted again"),
+        }),
+        reasoning_gateway=FakeReasoningGateway([]),
+        repository_binding=binding("d" * 40),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert result.current_pool == "replan_ready"
+    assert "split depth exhausted" in (result.blocked_reason or "")
 
 
 @pytest.mark.asyncio

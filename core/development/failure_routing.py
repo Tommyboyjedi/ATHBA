@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from core.development.failure_policy import FailureProgressionPolicy
-from core.development.failure_records import DependencyDecision, FailureDecision, FailureObservation, RepairPacket
-from core.development.failure_progression import FailureRecordRequest, PrerequisiteDeferralRequest
+from core.development.failure_records import DependencyDecision, FailureDecision, FailureObservation, RepairPacket, WorkPacketSplit
+from core.development.failure_progression import FailureRecordRequest, PrerequisiteDeferralRequest, SplitRecordRequest
 from core.development.failure_state import TERMINAL_CONTRACT_POOLS
 from core.development.failure_values import FailureClassification, FailureRouteState, PacketKind, ProgressionAction, RetryRoute
 from core.development.tdd_phase_execution import PhaseOutcome
@@ -26,6 +26,7 @@ class FailureTransition:
     packet: RepairPacket | None = None
     updated_contract: BehaviorContract | None = None
     dependency_decision: DependencyDecision | None = None
+    split: WorkPacketSplit | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "next_pool", enum_value(self.next_pool, ContractPoolStatus, "failure next pool"))
@@ -185,6 +186,29 @@ def transition_for_executor_block(decision: FailureDecision, blocker: str) -> Fa
     return _terminal_transition(decision, FailureRouteState.BLOCKED_EXECUTOR, ContractPoolStatus.BLOCKED_EXECUTOR, blocker)
 
 
+def transition_for_split_children(decision: FailureDecision, blocker: str, split: WorkPacketSplit) -> FailureTransition:
+    return FailureTransition(
+        decision=decision,
+        route_state=FailureRouteState.SPLIT_REQUIRED,
+        next_pool=ContractPoolStatus.TDD_READY.value,
+        cycle_pool=ContractPoolStatus.SPLIT_REQUIRED.value,
+        return_now=False,
+        blocker=blocker,
+        split=split,
+    )
+
+
+def transition_for_split_replan(decision: FailureDecision, blocker: str) -> FailureTransition:
+    return FailureTransition(
+        decision=decision,
+        route_state=FailureRouteState.SPLIT_REQUIRED,
+        next_pool=ContractPoolStatus.REPLAN_READY.value,
+        cycle_pool=ContractPoolStatus.REPLAN_READY.value,
+        return_now=True,
+        blocker=blocker,
+    )
+
+
 def transition_for_split_required(decision: FailureDecision, blocker: str) -> FailureTransition:
     return _terminal_transition(decision, FailureRouteState.SPLIT_REQUIRED, ContractPoolStatus.SPLIT_REQUIRED, blocker)
 
@@ -227,8 +251,7 @@ def apply_candidate_failure_transition(
     if cycle is None:
         raise ValueError("failed candidate routing requires an active cycle")
     progress = _record_progress(request.run_state, transition, failure_policy)
-    phase_state = request.phase_state
-    cycle = _cycle_with_phase_state(cycle, request.phase, phase_state, transition.cycle_pool)
+    cycle = _cycle_with_phase_state(cycle, request.phase, request.phase_state, transition.cycle_pool)
     contract = transition.updated_contract or request.run_state.contract
     return replace(
         request.run_state,
@@ -263,6 +286,15 @@ def _record_progress(
     transition: FailureTransition,
     failure_policy: FailureProgressionPolicy,
 ):
+    if transition.split is not None:
+        return failure_policy.record_split(
+            SplitRecordRequest(
+                state=run_state.failure_progress,
+                decision=transition.decision,
+                split=transition.split,
+                blocker=transition.blocker or run_state.failure_progress.blocker or transition.decision.dominant.value,
+            )
+        )
     if transition.route_state is FailureRouteState.DEFERRED_DEPENDENCY and transition.dependency_decision is not None:
         progress = failure_policy.defer_for_prerequisites(
             PrerequisiteDeferralRequest(

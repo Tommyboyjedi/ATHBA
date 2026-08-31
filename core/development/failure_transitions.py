@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.development.failure_records import DependencyDecision, FailureDecision, RepairPacket
+from core.development.failure_records import DependencyDecision, FailureDecision, RepairPacket, WorkPacketSplit
 from core.development.failure_state import FailureProgressState
 from core.development.failure_values import DependencyDisposition, FailureRouteState, RetryRoute
 
@@ -30,6 +30,14 @@ class PrerequisiteDeferralRequest:
     decision: FailureDecision
     requirement_ref: str
     prerequisite_refs: list[str]
+
+
+@dataclass(frozen=True)
+class SplitRecordRequest:
+    state: FailureProgressState
+    decision: FailureDecision
+    split: WorkPacketSplit
+    blocker: str
 
 
 class FailureRetryPolicy:
@@ -86,6 +94,32 @@ class FailureStateTransitions:
                 ),
             ],
             splits=recorded.splits,
+            unclassified_analysis=recorded.unclassified_analysis,
+            blocker=recorded.blocker,
+        )
+
+    def record_split(self, request: SplitRecordRequest) -> FailureProgressState:
+        recorded = self.record(
+            FailureRecordRequest(
+                state=request.state,
+                decision=request.decision,
+                next_state=FailureRouteState.SPLIT_REQUIRED,
+                blocker=request.blocker,
+            )
+        )
+        split_children = {key: list(value) for key, value in recorded.split_children.items()}
+        parent_key = request.split.parent_step_id or request.split.parent_work_unit_id
+        split_children[parent_key] = list(request.split.child_step_ids)
+        return FailureProgressState(
+            state=FailureRouteState.SPLIT_REQUIRED,
+            history=recorded.history,
+            retry_counts=recorded.retry_counts,
+            deferred_requirement_refs=recorded.deferred_requirement_refs,
+            prerequisite_links=recorded.prerequisite_links,
+            split_children=split_children,
+            repair_packets=recorded.repair_packets,
+            dependency_decisions=recorded.dependency_decisions,
+            splits=[*recorded.splits, request.split],
             unclassified_analysis=recorded.unclassified_analysis,
             blocker=recorded.blocker,
         )

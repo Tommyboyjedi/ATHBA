@@ -25,8 +25,21 @@ from core.development.failure_progression import (
     RetryBudget,
     RetryRoute,
 )
-from core.development.failure_state import TERMINAL_CONTRACT_POOLS, active_failure_progress_state
+from core.development.failure_state import TERMINAL_CONTRACT_POOLS
 from core.development import failure_routing
+from core.development.resource_split import (
+    MAX_SPLIT_DEPTH,
+    ResourceLimitSplitPlanner,
+    ResourceSplitPlannerRequest,
+    SplitDecisionStatus,
+    approval_resolution,
+    next_ready_split_child,
+    split_aware_success_state,
+    split_depth_for_step,
+    split_record,
+    step_proposal,
+    trusted_revision_for_child,
+)
 from core.development.tdd_cycle_coordination import TddStateRepository
 from core.development.tdd_phase_execution import (
     PhaseExecutionRequest,
@@ -628,6 +641,7 @@ class CoordinatorDependencies:
     repair_factory: ContractRepairWorkUnitFactory | None = None
     review_material_provider: ReviewMaterialProvider | None = None
     repository_material_provider: TesterRepositoryMaterialProvider | None = None
+    split_planner: ResourceLimitSplitPlanner | None = None
     max_semantic_repairs: int = 2
     gatekeeper: SpecificationGatekeeper | None = None
     gap_adapter: SpecificationGapTddAdapter | None = None
@@ -657,6 +671,8 @@ class FailureRouterDependencies:
     failure_policy: FailureProgressionPolicy
     environment_recovery: EnvironmentRecovery | None
     dependency_planner: DependencyPrerequisitePlanner
+    split_planner: ResourceLimitSplitPlanner
+    repository_material_provider: TesterRepositoryMaterialProvider | None
     max_tester_repairs: int
     max_developer_repairs: int
 
@@ -685,7 +701,7 @@ async def _candidate_failure_transition(
     }:
         return _candidate_repair_transition(dependencies, request, observation, decision, cycle)
     if decision.action is ProgressionAction.SPLIT_PACKET:
-        return failure_routing.transition_for_split_required(decision, observation.message)
+        return await _split_transition(dependencies, request, observation, decision, cycle)
     if decision.action is ProgressionAction.REPLAN_DEPENDENCY:
         return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: {observation.message}")
     if decision.action is ProgressionAction.BLOCK_AMBIGUITY:
@@ -772,6 +788,52 @@ def _retry_route_for_action(action: ProgressionAction, phase: TddPhase) -> Retry
     return RetryRoute.TESTER_REPAIR if phase is TddPhase.RED else RetryRoute.DEVELOPER_REPAIR
 
 
+async def _split_transition(
+    dependencies: FailureRouterDependencies,
+    request: FailureRoutingRequest,
+    observation: FailureObservation,
+    decision: FailureDecision,
+    cycle: ContractCycleRecord,
+) -> failure_routing.FailureTransition:
+    requirement = _split_requirement(request.run_state.contract, cycle.step)
+    split_depth = split_depth_for_step(request.run_state.failure_progress, cycle.step.step_id)
+    if split_depth > MAX_SPLIT_DEPTH:
+        return failure_routing.transition_for_split_replan(
+            decision,
+            f"{decision.dominant.value}: split depth exhausted for {cycle.step.step_id}",
+        )
+    trusted_revision = _trusted_revision_for_phase(request.run_state, cycle, request.phase)
+    split_request = ResourceSplitPlannerRequest(
+        contract=request.run_state.contract,
+        requirement=requirement,
+        step=cycle.step,
+        evidence=observation,
+        trusted_revision=trusted_revision,
+        split_depth=split_depth,
+        repository_material=_repository_material(
+            request.run_state.contract,
+            request.run_state,
+            dependencies.repository_material_provider,
+            trusted_revision,
+        ),
+    )
+    try:
+        resolution = await dependencies.split_planner.decide(split_request)
+    except ValueError as error:
+        return failure_routing.transition_for_split_replan(
+            decision,
+            f"{decision.dominant.value}: {error}",
+        )
+    if resolution.status is SplitDecisionStatus.CANNOT_SPLIT:
+        return failure_routing.transition_for_split_replan(
+            decision,
+            f"{decision.dominant.value}: {resolution.rationale}",
+        )
+    split = split_record(split_request, resolution, request.work_unit.id)
+    blocker = f"{decision.dominant.value}: split into {', '.join(split.child_step_ids)}"
+    return failure_routing.transition_for_split_children(decision, blocker, split)
+
+
 def _trusted_revision_for_phase(
     run_state: BehaviorContractRunState,
     cycle: ContractCycleRecord,
@@ -818,9 +880,9 @@ class RepairProgressionDependencies:
 class FailedCandidateRouter:
     dependencies: FailureRouterDependencies
 
-    async def route(self, request: FailureRoutingRequest) -> BehaviorContractRunState:
+    async def route(self, request: FailureRoutingRequest) -> RunAdvance:
         transition = await _candidate_failure_transition(self.dependencies, request)
-        return failure_routing.apply_candidate_failure_transition(
+        routed = failure_routing.apply_candidate_failure_transition(
             failure_routing.CandidateFailureTransitionRequest(
                 run_state=request.run_state,
                 phase=request.phase,
@@ -829,6 +891,7 @@ class FailedCandidateRouter:
             transition,
             self.dependencies.failure_policy,
         )
+        return RunAdvance(routed, return_now=transition.return_now)
 
 
 @dataclass(frozen=True)
@@ -837,6 +900,25 @@ class ReadyPoolProgressor:
 
     async def advance(self, run_state: BehaviorContractRunState) -> RunAdvance:
         contract = run_state.contract
+        split_child = next_ready_split_child(run_state)
+        if split_child is not None:
+            cycle = ContractCycleRecord.from_step(
+                step_proposal(split_child),
+                base_revision=trusted_revision_for_child(
+                    run_state.failure_progress,
+                    split_child.step_id,
+                )
+                or run_state.semantic_base_revision,
+            )
+            return RunAdvance(
+                replace(
+                    run_state,
+                    current_pool="cycle_active",
+                    contract=replace(contract, status="cycle_active"),
+                    cycles=[*run_state.cycles, cycle],
+                    blocked_reason=None,
+                )
+            )
         if run_state.current_pool == "tdd_ready" and run_state.targeted_requirement_ref is None and self.dependencies.gatekeeper is not None and self.dependencies.gap_adapter is not None:
             gatekeeper_state = await self.dependencies.gatekeeper.ensure_state(
                 GatekeeperStateRequest(contract, run_state.gatekeeper_state)
@@ -928,7 +1010,13 @@ async def _advance_cycle_active(
         material = _repository_material(contract, run_state, dependencies.repository_material_provider)
         work_unit = dependencies.tester_factory.build(WorkUnitBuildRequest(contract, cycle.step, material))
         outcome = await dependencies.phase_executor.execute(
-            PhaseExecutionRequest(TddPhase.RED, work_unit, run_state.repository_binding.with_base_sha(run_state.semantic_base_revision))
+            PhaseExecutionRequest(
+                TddPhase.RED,
+                work_unit,
+                run_state.repository_binding.with_base_sha(
+                    cycle.base_revision or run_state.semantic_base_revision
+                ),
+            )
         )
         return await _advance_red_phase(run_state, cycle, contract, dependencies.failure_router, work_unit, outcome)
     return await _advance_green_phase(run_state, cycle, contract, dependencies)
@@ -953,13 +1041,12 @@ async def _advance_red_phase(
                     cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state, pool="approved")),
                 )
             )
-        routed = await failure_router.route(FailureRoutingRequest(run_state, TddPhase.RED, work_unit, outcome))
-        return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
+        return await failure_router.route(FailureRoutingRequest(run_state, TddPhase.RED, work_unit, outcome))
     return RunAdvance(
         replace(
             run_state,
             cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state)),
-            failure_progress=active_failure_progress_state(run_state.failure_progress),
+            failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
         )
     )
@@ -980,8 +1067,7 @@ async def _advance_green_phase(
         PhaseExecutionRequest(TddPhase.GREEN, work_unit, run_state.repository_binding.with_base_sha(base_revision))
     )
     if not outcome.accepted:
-        routed = await dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.GREEN, work_unit, outcome))
-        return RunAdvance(routed, return_now=routed.current_pool != "cycle_active")
+        return await dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.GREEN, work_unit, outcome))
     updated_cycle = replace(cycle, green_phase=outcome.phase_state, candidate_revision=outcome.phase_state.accepted_revision, pool="review_ready")
     return RunAdvance(
         replace(
@@ -989,7 +1075,7 @@ async def _advance_green_phase(
             current_pool="review_ready",
             contract=replace(contract, status="review_ready"),
             cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
-            failure_progress=active_failure_progress_state(run_state.failure_progress),
+            failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
         )
     )
@@ -1025,18 +1111,31 @@ async def _advance_approved_review(
     contract: BehaviorContract,
     cycle: ContractCycleRecord,
 ) -> RunAdvance:
+    split_resolution = approval_resolution(run_state, cycle.step)
     completed_refs = sorted(set(run_state.completed_requirement_refs).union(cycle.step.requirement_refs))
+    current_pool = "approved"
+    blocked_reason = None
+    failure_progress = split_aware_success_state(run_state.failure_progress)
+    contract_status = "approved"
+    if split_resolution is not None:
+        completed_refs = split_resolution.completed_requirement_refs
+        current_pool = split_resolution.current_pool
+        blocked_reason = split_resolution.blocked_reason
+        failure_progress = split_resolution.failure_progress
+        contract_status = current_pool
     approved_run_state = replace(
         run_state,
-        current_pool="approved",
-        contract=replace(contract, status="approved"),
+        current_pool=current_pool,
+        contract=replace(contract, status=contract_status),
         semantic_base_revision=cycle.candidate_revision,
         repository_binding=run_state.repository_binding.with_base_sha(cycle.candidate_revision),
         completed_requirement_refs=completed_refs,
-        blocked_reason=None,
+        blocked_reason=blocked_reason,
         cycles=_replace_current_cycle(run_state.cycles, replace(cycle, semantic_revision=cycle.candidate_revision, pool="approved")),
-        failure_progress=active_failure_progress_state(run_state.failure_progress),
+        failure_progress=failure_progress,
     )
+    if split_resolution is not None and current_pool == "tdd_ready":
+        return RunAdvance(approved_run_state)
     if approved_run_state.targeted_checklist_ref is None or dependencies.gatekeeper is None:
         return RunAdvance(approved_run_state)
     gatekeeper_state = await dependencies.gatekeeper.assess(
@@ -1116,7 +1215,7 @@ async def _advance_repair_ready(
             current_pool="review_ready",
             contract=replace(contract, status="review_ready"),
             cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
-            failure_progress=active_failure_progress_state(run_state.failure_progress),
+            failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
         )
     )
@@ -1163,7 +1262,8 @@ class BehaviorContractCoordinator:
         dependency_planner = deps.dependency_planner or DependencyPrerequisitePlanner(deps.reasoning_gateway)
         self.run_store = ContractRunStore(state_repo)
         phase_executor = PhaseExecutor(deps.execution_gateway)
-        failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, deps.max_tester_repairs, deps.max_developer_repairs))
+        split_planner = deps.split_planner or ResourceLimitSplitPlanner(deps.reasoning_gateway)
+        failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, split_planner, repository_material_provider, deps.max_tester_repairs, deps.max_developer_repairs))
         self.ready_progressor = ReadyPoolProgressor(ReadyPoolDependencies(step_planner, deps.gatekeeper, deps.gap_adapter, deps.repository_binding))
         self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router))
         self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs, failure_policy))
@@ -1219,6 +1319,19 @@ def _result_from_run_state(run_state: BehaviorContractRunState) -> BehaviorContr
         completed_requirement_refs=list(run_state.completed_requirement_refs),
         blocked_reason=run_state.blocked_reason,
     )
+
+
+def _split_requirement(
+    contract: BehaviorContract,
+    step: TddStepProposal,
+) -> BehaviorContractRequirement:
+    if len(step.requirement_refs) != 1:
+        raise ValueError("resource-limit split requires exactly one requirement ref")
+    requirement_ref = step.requirement_refs[0]
+    for requirement in contract.observable_requirements:
+        if requirement.ref == requirement_ref:
+            return requirement
+    raise ValueError(f"unknown split requirement ref: {requirement_ref}")
 
 
 def _repository_material(

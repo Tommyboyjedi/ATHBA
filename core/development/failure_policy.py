@@ -10,6 +10,7 @@ from core.development.failure_transitions import (
     FailureStateTransitions,
     PrerequisiteDeferralRequest,
     RetryBudget,
+    SplitRecordRequest,
 )
 from core.development.failure_values import (
     FAILURE_ACTIONS,
@@ -52,3 +53,6 @@ class FailureProgressionPolicy:
 
     def defer_for_prerequisites(self, request: PrerequisiteDeferralRequest) -> FailureProgressState:
         return self.transitions.defer_for_prerequisites(request)
+
+    def record_split(self, request: SplitRecordRequest) -> FailureProgressState:
+        return self.transitions.record_split(request)

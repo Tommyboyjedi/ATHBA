@@ -61,11 +61,90 @@ class DependencyDecision:
 
 
 @dataclass(frozen=True)
+class SplitChildStep:
+    step_id: str
+    requirement_refs: list[str]
+    focused_behavior: str
+    test_name: str
+    expected_result: str
+    test_path: str
+    production_path: str
+    red_objective: str
+    green_objective: str
+    reason_next_smallest: str
+    depends_on: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        _require_text(self.step_id, "split child step id")
+        if not self.requirement_refs:
+            raise ValueError("split child requirement refs must not be empty")
+        _string_list(self.requirement_refs, "split child requirement refs")
+        _require_text(self.focused_behavior, "split child focused behavior")
+        _require_text(self.test_name, "split child test name")
+        _require_text(self.expected_result, "split child expected result")
+        _require_text(self.test_path, "split child test path")
+        _require_text(self.production_path, "split child production path")
+        _require_text(self.red_objective, "split child red objective")
+        _require_text(self.green_objective, "split child green objective")
+        _require_text(self.reason_next_smallest, "split child next-smallest rationale")
+        _string_list(self.depends_on, "split child dependencies")
+        if self.step_id in self.depends_on:
+            raise ValueError("split child step cannot depend on itself")
+        if len(set(self.depends_on)) != len(self.depends_on):
+            raise ValueError("split child dependencies must be unique")
+
+    def equivalence_key(self) -> tuple[str, str, str, str]:
+        return (
+            self.focused_behavior.strip().lower(),
+            self.expected_result.strip().lower(),
+            self.test_name.strip().lower(),
+            self.production_path.strip().lower(),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "requirement_refs": list(self.requirement_refs),
+            "focused_behavior": self.focused_behavior,
+            "test_name": self.test_name,
+            "expected_result": self.expected_result,
+            "test_path": self.test_path,
+            "production_path": self.production_path,
+            "red_objective": self.red_objective,
+            "green_objective": self.green_objective,
+            "reason_next_smallest": self.reason_next_smallest,
+            "depends_on": list(self.depends_on),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "SplitChildStep":
+        return cls(
+            step_id=str(payload["step_id"]),
+            requirement_refs=[str(item) for item in payload.get("requirement_refs", [])],
+            focused_behavior=str(payload["focused_behavior"]),
+            test_name=str(payload["test_name"]),
+            expected_result=str(payload["expected_result"]),
+            test_path=str(payload["test_path"]),
+            production_path=str(payload["production_path"]),
+            red_objective=str(payload["red_objective"]),
+            green_objective=str(payload["green_objective"]),
+            reason_next_smallest=str(payload["reason_next_smallest"]),
+            depends_on=[str(item) for item in payload.get("depends_on", [])],
+        )
+
+
+@dataclass(frozen=True)
 class WorkPacketSplit:
     parent_work_unit_id: str
     child_work_unit_ids: list[str]
     preserved_objective: str
     rationale: str
+    parent_step_id: str | None = None
+    parent_requirement_ref: str | None = None
+    trusted_revision: str | None = None
+    split_depth: int = 1
+    child_steps: list[SplitChildStep] = field(default_factory=list)
+    completed_child_ids: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         _require_text(self.parent_work_unit_id, "split parent work unit id")
@@ -74,22 +153,55 @@ class WorkPacketSplit:
         _string_list(self.child_work_unit_ids, "split child work unit ids")
         if len(self.child_work_unit_ids) < 2 or len(set(self.child_work_unit_ids)) != len(self.child_work_unit_ids):
             raise ValueError("a split requires at least two unique child work units")
+        if self.parent_step_id is not None:
+            _require_text(self.parent_step_id, "split parent step id")
+        if self.parent_requirement_ref is not None:
+            _require_text(self.parent_requirement_ref, "split parent requirement ref")
+        if self.split_depth <= 0:
+            raise ValueError("split depth must be positive")
+        _string_list(self.completed_child_ids, "completed split child ids")
+        if len(set(self.completed_child_ids)) != len(self.completed_child_ids):
+            raise ValueError("completed split child ids must be unique")
+        if not set(self.completed_child_ids).issubset(set(self.child_work_unit_ids)):
+            raise ValueError("completed split child ids must belong to the split")
+        if self.child_steps:
+            child_step_ids = [child.step_id for child in self.child_steps]
+            if child_step_ids != self.child_work_unit_ids:
+                raise ValueError("split child steps must match the declared child id order")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "parent_work_unit_id": self.parent_work_unit_id,
+            "parent_step_id": self.parent_step_id,
+            "parent_requirement_ref": self.parent_requirement_ref,
             "child_work_unit_ids": list(self.child_work_unit_ids),
+            "child_step_ids": list(self.child_work_unit_ids),
             "preserved_objective": self.preserved_objective,
             "rationale": self.rationale,
+            "trusted_revision": self.trusted_revision,
+            "split_depth": self.split_depth,
+            "child_steps": [item.to_dict() for item in self.child_steps],
+            "completed_child_ids": list(self.completed_child_ids),
         }
+
+    @property
+    def child_step_ids(self) -> list[str]:
+        return list(self.child_work_unit_ids)
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "WorkPacketSplit":
+        child_ids = payload.get("child_step_ids", payload.get("child_work_unit_ids", []))
         return cls(
             parent_work_unit_id=str(payload["parent_work_unit_id"]),
-            child_work_unit_ids=[str(item) for item in payload["child_work_unit_ids"]],
+            parent_step_id=payload.get("parent_step_id"),
+            parent_requirement_ref=payload.get("parent_requirement_ref"),
+            child_work_unit_ids=[str(item) for item in child_ids],
             preserved_objective=str(payload["preserved_objective"]),
             rationale=str(payload["rationale"]),
+            trusted_revision=payload.get("trusted_revision"),
+            split_depth=int(payload.get("split_depth", 1)),
+            child_steps=[SplitChildStep.from_dict(dict(item)) for item in payload.get("child_steps", [])],
+            completed_child_ids=[str(item) for item in payload.get("completed_child_ids", [])],
         )
 
 
