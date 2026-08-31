@@ -54,8 +54,8 @@ Status: rollback baseline established; redesign implementation incomplete
 
 - Phase 2 Domain model: INCOMPLETE
 - Phase 3 Language adapter contract: INCOMPLETE
-- Phase 4 Scenario drafting and intent validation: INCOMPLETE
-- Phase 5 Scenario fragmentation: INCOMPLETE
+- Phase 4 Scenario drafting and intent validation: COMPLETE (Session 4)
+- Phase 5 Scenario fragmentation: PARTIAL; approved draft fragments persist, while active frontier materialisation is deferred
 - Phase 6 Strict RED boundary: INCOMPLETE
 - Phase 7 Narrow GREEN: INCOMPLETE
 - Phase 8 Deterministic regression: INCOMPLETE
@@ -88,3 +88,17 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Diagnostics: the isolated pytest hook records collection, exact-node discovery, setup/call/teardown, exception, traceback/source line, xfail/xpass, and captured output as structured diagnostic facts. Console text is not used as classifier authority.
 - Focused tests: `17 passed` for `test_python_pytest_adapter.py` plus `test_microcycle_domain.py`.
 - Validation: focused 17 passed; full 323 passed; configured mypy 13 files and adapter/probe mypy 2 files passed; compileall, coding-principles, and diff checks passed. Push pending.
+## Session 4: full scenario drafting and independent scenario-intent validation
+
+- Implementation commit: `de9472908644f3901283e8f62720e45e040d9810`.
+- Added a bounded Tester scenario-draft service that submits one test-path-only, syntax-only work unit through the existing Rack AI execution gateway. It reads the candidate test only from the accepted isolated revision and never changes the target repository development base.
+- The tester draft carries its canonical test identity, complete source, concise rationale, and source requirement refs. Candidate and review evidence, adapter identity/version, ordered fragments, and frontier index zero persist atomically in ATHBA scenario-draft state.
+- Added independent scenario-intent review with typed dispositions: `approved`, `repair_required`, `wrong_behavior`, and `insufficient_evidence`. Its prompt contains no production path or implementation objective; feedback is descriptive. One JSON-only repair is permitted for malformed review output.
+- Tester attempts are persisted and capped at four; every submission has an attempt-scoped Rack AI change key. Resume returns a frozen approved scenario without submitting another worker request. Ticket/base/source changes fail closed rather than reusing a stale draft packet.
+- No strict RED/GREEN coordinator loop, frontier materialisation, Developer work unit, ReservationBook proof, or Rack AI source/configuration change was run.
+- Focused validation: `24 passed` for scenario drafting, microcycle domain, and Python adapter tests. Full validation: `330 passed`. Mypy passed for the three new source files and the configured repository set; compileall, coding-principles, and diff checks passed.
+
+## Remaining implementation phases
+
+- Phase 4 Scenario drafting and intent validation: COMPLETE (Session 4).
+- Phase 5 Scenario fragmentation: PARTIAL; approved scenario parsing, ordered fragment persistence, and frontier initialisation are complete, while later frontier materialisation remains deliberately deferred.
