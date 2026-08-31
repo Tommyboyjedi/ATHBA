@@ -1,0 +1,484 @@
+"""Language-neutral, persistent domain records for PR23 strict TDD microcycles."""
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from enum import Enum
+from typing import Any, Protocol
+
+MICROCYCLE_SCHEMA_VERSION = 1
+
+
+class IntentStatus(str, Enum):
+    PENDING = "pending"
+    VALID = "valid"
+    REJECTED = "rejected"
+
+
+class BoundaryOutcome(str, Enum):
+    VALID_MISSING_CAPABILITY_RED = "valid_missing_capability_red"
+    VALID_BEHAVIORAL_RED = "valid_behavioral_red"
+    GREEN = "green"
+    INVALID_TEST_SYNTAX = "invalid_test_syntax"
+    FAILURE_BEFORE_FRONTIER = "failure_before_frontier"
+    INFRASTRUCTURE_FAILURE = "infrastructure_failure"
+    UNSUPPORTED_LANGUAGE_BOUNDARY = "unsupported_language_boundary"
+
+
+class MicrocycleMigrationError(Exception):
+    """Raised instead of silently treating an old full-test cycle as a microcycle."""
+
+
+def _text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{label} must be non-empty")
+    return value
+
+
+def _texts(values: tuple[str, ...], label: str) -> None:
+    if any(not isinstance(item, str) or not item.strip() for item in values):
+        raise ValueError(f"{label} must contain non-empty strings")
+
+
+def _outcome(value: object) -> str:
+    text = _text(value, "boundary outcome")
+    if text not in {item.value for item in BoundaryOutcome}:
+        raise ValueError(f"unsupported boundary outcome: {text}")
+    return text
+
+
+@dataclass(frozen=True)
+class TestScenarioDraft:
+    scenario_id: str
+    behavior_ref: str
+    language_id: str
+    source: str
+    canonical_test_identity: str
+    test_path: str
+
+    def __post_init__(self) -> None:
+        _texts((self.scenario_id, self.behavior_ref, self.language_id, self.source, self.canonical_test_identity, self.test_path), "draft fields")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "TestScenarioDraft":
+        return cls(**{key: str(item) for key, item in value.items()})
+
+
+@dataclass(frozen=True)
+class ScenarioIntentResult:
+    scenario_id: str
+    status: str
+    rationale: str
+    evidence_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _text(self.scenario_id, "scenario id")
+        if self.status not in {item.value for item in IntentStatus}:
+            raise ValueError("unsupported scenario intent status")
+        _text(self.rationale, "intent rationale")
+        _texts(self.evidence_refs, "intent evidence")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioIntentResult":
+        return cls(str(value["scenario_id"]), str(value["status"]), str(value["rationale"]), tuple(value.get("evidence_refs", ())))
+
+
+@dataclass(frozen=True)
+class ScenarioModel:
+    scenario_id: str
+    language_id: str
+    adapter_version: str
+    canonical_test_identity: str
+    complete_source: str
+    test_path: str
+
+    def __post_init__(self) -> None:
+        _texts((self.scenario_id, self.language_id, self.adapter_version, self.canonical_test_identity, self.complete_source, self.test_path), "model fields")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioModel":
+        return cls(**{key: str(item) for key, item in value.items()})
+
+
+@dataclass(frozen=True)
+class ScenarioFragment:
+    """One syntactically complete operation or block; it is never a raw line."""
+
+    fragment_id: str
+    scenario_id: str
+    kind: str
+    source: str
+    declared_capability: str
+    depends_on: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _texts((self.fragment_id, self.scenario_id, self.kind, self.source, self.declared_capability), "fragment fields")
+        _texts(self.depends_on, "fragment dependencies")
+        if self.fragment_id in self.depends_on:
+            raise ValueError("a fragment cannot depend on itself")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioFragment":
+        return cls(str(value["fragment_id"]), str(value["scenario_id"]), str(value["kind"]), str(value["source"]), str(value["declared_capability"]), tuple(value.get("depends_on", ())))
+
+
+@dataclass(frozen=True)
+class ScenarioFrontier:
+    scenario_id: str
+    index: int
+    active_fragment_id: str
+    materialised_fragment_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _texts((self.scenario_id, self.active_fragment_id), "frontier fields")
+        _texts(self.materialised_fragment_ids, "frontier fragment ids")
+        if self.index < 0 or not self.materialised_fragment_ids or self.active_fragment_id != self.materialised_fragment_ids[-1]:
+            raise ValueError("frontier must have an ordered active fragment")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioFrontier":
+        return cls(str(value["scenario_id"]), int(value["index"]), str(value["active_fragment_id"]), tuple(value["materialised_fragment_ids"]))
+
+
+@dataclass(frozen=True)
+class SourceSpan:
+    start_line: int
+    end_line: int
+
+    def __post_init__(self) -> None:
+        if self.start_line < 1 or self.end_line < self.start_line:
+            raise ValueError("source span is invalid")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "SourceSpan":
+        return cls(int(value["start_line"]), int(value["end_line"]))
+
+
+@dataclass(frozen=True)
+class FragmentSourceSpan:
+    fragment_id: str
+    span: SourceSpan
+
+    def __post_init__(self) -> None:
+        _text(self.fragment_id, "fragment span id")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"fragment_id": self.fragment_id, "span": self.span.to_dict()}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "FragmentSourceSpan":
+        return cls(str(value["fragment_id"]), SourceSpan.from_dict(dict(value["span"])))
+
+
+@dataclass(frozen=True)
+class MaterialisedTestArtifact:
+    adapter_id: str
+    adapter_version: str
+    scenario_id: str
+    frontier_index: int
+    canonical_test_identity: str
+    complete_source: str
+    active_fragment_id: str
+    fragment_source_spans: tuple[FragmentSourceSpan, ...]
+    base_revision: str
+    candidate_revision: str | None = None
+
+    def __post_init__(self) -> None:
+        _texts((self.adapter_id, self.adapter_version, self.scenario_id, self.canonical_test_identity, self.complete_source, self.active_fragment_id, self.base_revision), "artifact fields")
+        ids = tuple(item.fragment_id for item in self.fragment_source_spans)
+        if self.frontier_index < 0 or self.active_fragment_id not in ids or len(ids) != len(set(ids)):
+            raise ValueError("artifact source-span mapping is invalid")
+
+    def to_dict(self) -> dict[str, object]:
+        return {**asdict(self), "fragment_source_spans": [item.to_dict() for item in self.fragment_source_spans]}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "MaterialisedTestArtifact":
+        return cls(str(value["adapter_id"]), str(value["adapter_version"]), str(value["scenario_id"]), int(value["frontier_index"]), str(value["canonical_test_identity"]), str(value["complete_source"]), str(value["active_fragment_id"]), tuple(FragmentSourceSpan.from_dict(dict(item)) for item in value["fragment_source_spans"]), str(value["base_revision"]), value.get("candidate_revision"))
+
+
+@dataclass(frozen=True)
+class BoundaryDiagnostic:
+    kind: str
+    message: str
+    evidence_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _texts((self.kind, self.message), "diagnostic fields")
+        _texts(self.evidence_refs, "diagnostic evidence")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "BoundaryDiagnostic":
+        return cls(str(value["kind"]), str(value["message"]), tuple(value.get("evidence_refs", ())))
+
+
+@dataclass(frozen=True)
+class BoundaryAssessment:
+    outcome: str
+    active_fragment_id: str
+    diagnostic: BoundaryDiagnostic
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "outcome", _outcome(self.outcome))
+        _text(self.active_fragment_id, "active fragment id")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"outcome": self.outcome, "active_fragment_id": self.active_fragment_id, "diagnostic": self.diagnostic.to_dict()}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "BoundaryAssessment":
+        return cls(str(value["outcome"]), str(value["active_fragment_id"]), BoundaryDiagnostic.from_dict(dict(value["diagnostic"])))
+
+
+@dataclass(frozen=True)
+class RetryCounts:
+    developer: int = 0
+    regression: int = 0
+    frontier_execution: int = 0
+
+    def __post_init__(self) -> None:
+        if min(self.developer, self.regression, self.frontier_execution) < 0:
+            raise ValueError("retry counts must not be negative")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "RetryCounts":
+        return cls(**{key: int(item) for key, item in value.items()})
+
+
+@dataclass(frozen=True)
+class DeveloperAttempt:
+    attempt_number: int
+    frontier_index: int
+    base_revision: str
+    candidate_revision: str | None
+    evidence_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.attempt_number < 1 or self.frontier_index < 0:
+            raise ValueError("developer attempt is invalid")
+        _text(self.base_revision, "developer attempt base revision")
+        _texts(self.evidence_refs, "developer attempt evidence")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "DeveloperAttempt":
+        return cls(int(value["attempt_number"]), int(value["frontier_index"]), str(value["base_revision"]), value.get("candidate_revision"), tuple(value.get("evidence_refs", ())))
+
+
+@dataclass(frozen=True)
+class RegressionState:
+    status: str
+    command: tuple[str, ...]
+    evidence_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _texts((self.status,), "regression status")
+        _texts(self.command, "regression command")
+        _texts(self.evidence_refs, "regression evidence")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "RegressionState":
+        return cls(str(value["status"]), tuple(value["command"]), tuple(value.get("evidence_refs", ())))
+
+
+@dataclass(frozen=True)
+class ScenarioCompletion:
+    status: str
+    completed_revision: str | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.status, "completion status")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioCompletion":
+        return cls(str(value["status"]), value.get("completed_revision"))
+
+
+@dataclass(frozen=True)
+class MicrocycleState:
+    scenario_draft: TestScenarioDraft
+    intent: ScenarioIntentResult
+    model: ScenarioModel
+    fragments: tuple[ScenarioFragment, ...]
+    frontier: ScenarioFrontier
+    development_base_revision: str
+    current_accepted_red_revision: str | None
+    retry_counts: RetryCounts
+    boundary_evidence: tuple[BoundaryAssessment, ...]
+    developer_attempts: tuple[DeveloperAttempt, ...]
+    regression: RegressionState
+    completion: ScenarioCompletion
+    schema_version: int = MICROCYCLE_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if self.schema_version != MICROCYCLE_SCHEMA_VERSION:
+            raise MicrocycleMigrationError(f"unsupported microcycle schema version: {self.schema_version}")
+        _text(self.development_base_revision, "development base revision")
+        _validate_state(self)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": self.schema_version,
+            "scenario_draft": self.scenario_draft.to_dict(),
+            "intent": self.intent.to_dict(),
+            "model": self.model.to_dict(),
+            "fragments": [item.to_dict() for item in self.fragments],
+            "frontier": self.frontier.to_dict(),
+            "development_base_revision": self.development_base_revision,
+            "current_accepted_red_revision": self.current_accepted_red_revision,
+            "retry_counts": self.retry_counts.to_dict(),
+            "boundary_evidence": [item.to_dict() for item in self.boundary_evidence],
+            "developer_attempts": [item.to_dict() for item in self.developer_attempts],
+            "regression": self.regression.to_dict(),
+            "completion": self.completion.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "MicrocycleState":
+        if "schema_version" not in value:
+            raise MicrocycleMigrationError("legacy PR17 state has no microcycle schema version; explicit migration is required")
+        return cls(
+            TestScenarioDraft.from_dict(dict(value["scenario_draft"])),
+            ScenarioIntentResult.from_dict(dict(value["intent"])),
+            ScenarioModel.from_dict(dict(value["model"])),
+            tuple(ScenarioFragment.from_dict(dict(item)) for item in value["fragments"]),
+            ScenarioFrontier.from_dict(dict(value["frontier"])),
+            str(value["development_base_revision"]),
+            value.get("current_accepted_red_revision"),
+            RetryCounts.from_dict(dict(value["retry_counts"])),
+            tuple(BoundaryAssessment.from_dict(dict(item)) for item in value.get("boundary_evidence", ())),
+            tuple(DeveloperAttempt.from_dict(dict(item)) for item in value.get("developer_attempts", ())),
+            RegressionState.from_dict(dict(value["regression"])),
+            ScenarioCompletion.from_dict(dict(value["completion"])),
+            int(value["schema_version"]),
+        )
+
+
+def _validate_state(state: MicrocycleState) -> None:
+    scenario_id = state.scenario_draft.scenario_id
+    if state.intent.scenario_id != scenario_id or state.model.scenario_id != scenario_id or state.frontier.scenario_id != scenario_id:
+        raise ValueError("microcycle records must identify one scenario")
+    ids = tuple(fragment.fragment_id for fragment in state.fragments)
+    if not ids or len(ids) != len(set(ids)):
+        raise ValueError("fragment ids must be unique")
+    positions = {fragment_id: index for index, fragment_id in enumerate(ids)}
+    for fragment in state.fragments:
+        if fragment.scenario_id != scenario_id:
+            raise ValueError("fragment belongs to another scenario")
+        for dependency in fragment.depends_on:
+            if dependency not in positions or positions[dependency] >= positions[fragment.fragment_id]:
+                raise ValueError("fragment dependencies must be earlier and known")
+    if state.frontier.index >= len(ids) or state.frontier.materialised_fragment_ids != ids[:state.frontier.index + 1]:
+        raise ValueError("frontier must be the ordered fragment prefix")
+
+
+@dataclass(frozen=True)
+class LanguageAdapterDescriptor:
+    adapter_id: str
+    adapter_version: str
+    language_id: str
+
+    def __post_init__(self) -> None:
+        _texts((self.adapter_id, self.adapter_version, self.language_id), "adapter fields")
+
+
+@dataclass(frozen=True)
+class ScenarioParseRequest:
+    draft: TestScenarioDraft
+
+
+@dataclass(frozen=True)
+class SyntaxValidationRequest:
+    model: ScenarioModel
+
+
+@dataclass(frozen=True)
+class FragmentationRequest:
+    model: ScenarioModel
+
+
+@dataclass(frozen=True)
+class FrontierMaterialisationRequest:
+    model: ScenarioModel
+    fragments: tuple[ScenarioFragment, ...]
+    frontier: ScenarioFrontier
+    base_revision: str
+
+
+@dataclass(frozen=True)
+class BoundaryClassificationRequest:
+    diagnostic: BoundaryDiagnostic
+    artifact: MaterialisedTestArtifact
+
+
+@dataclass(frozen=True)
+class FinalTestMaterialisationRequest:
+    model: ScenarioModel
+    fragments: tuple[ScenarioFragment, ...]
+    base_revision: str
+
+
+@dataclass(frozen=True)
+class RegressionContract:
+    command: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RegressionContractRequest:
+    model: ScenarioModel
+
+
+class LanguageTestAdapter(Protocol):
+    """Protocol guarantee: every materialised frontier is complete source."""
+
+    descriptor: LanguageAdapterDescriptor
+
+    def parse_scenario(self, request: ScenarioParseRequest) -> ScenarioModel: ...
+    def validate_scenario_syntax(self, request: SyntaxValidationRequest) -> bool: ...
+    def fragment_scenario(self, request: FragmentationRequest) -> tuple[ScenarioFragment, ...]: ...
+    def materialise_frontier(self, request: FrontierMaterialisationRequest) -> MaterialisedTestArtifact: ...
+    def classify_boundary(self, request: BoundaryClassificationRequest) -> BoundaryAssessment: ...
+    def materialise_final_test(self, request: FinalTestMaterialisationRequest) -> MaterialisedTestArtifact: ...
+    def regression_contract(self, request: RegressionContractRequest) -> RegressionContract: ...
+
+
+@dataclass(frozen=True)
+class LanguageAdapterCatalog:
+    adapters: tuple[LanguageTestAdapter, ...]
+
+    def for_language(self, language_id: str) -> LanguageTestAdapter:
+        matches = tuple(adapter for adapter in self.adapters if adapter.descriptor.language_id == language_id)
+        if len(matches) != 1:
+            raise ValueError(f"unsupported language boundary: {language_id}")
+        return matches[0]
