@@ -67,11 +67,29 @@ def test_repair_packet_is_descriptive_and_round_trips() -> None:
         classification=FailureClassification.TESTER_CANDIDATE_DEFECT,
         previous_candidate="candidate",
         evidence=["The attempted test never reached the duplicate-id operation."],
+        originating_phase="red",
+        changed_paths=["docs/out_of_scope.md"],
     )
 
     restored = RepairPacket.from_dict(packet.to_dict())
     assert restored == packet
     assert "change" not in restored.evidence[0].lower()
+
+
+def test_failure_observation_round_trips_policy_scope_evidence() -> None:
+    observation = FailureObservation(
+        source="green_execution",
+        message="changed_paths out-of-scope edit",
+        evidence_refs=["packet.json"],
+        plausible=[FailureClassification.CHANGE_SCOPE_VIOLATION],
+        status="checks_failed",
+        work_unit_id="step--green",
+        phase="green",
+        allowed_paths=["reservation_book.py"],
+        changed_paths=["docs/out_of_scope.md"],
+    )
+
+    assert FailureObservation.from_dict(observation.to_dict()) == observation
 
 
 def test_retry_budgets_are_per_route_not_global() -> None:

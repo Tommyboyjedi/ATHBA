@@ -123,7 +123,7 @@ class RackAiExecutionResultMapper:
         self.parser = RackAiResultParser()
 
     def map(self, result: RackAiGatewayResult):
-        from core.execution.work_unit_gateway import WorkUnitExecutionResult
+        from core.execution.work_unit_gateway import ExecutionPolicyEvidence, WorkUnitExecutionResult
 
         attempt = self.parser.parse(self.verifier.verify(result))
         return WorkUnitExecutionResult(
@@ -138,7 +138,19 @@ class RackAiExecutionResultMapper:
             evidence_location=attempt.packet_path,
             worktree_path=attempt.worktree_path,
             error=attempt.error,
+            policy_evidence=_policy_evidence(result.packet_payload, ExecutionPolicyEvidence),
         )
+
+
+def _policy_evidence(payload: Mapping[str, Any], evidence_type: type):
+    allowed_paths = _optional_string_list(payload.get("allowed_paths"), "allowed_paths")
+    changed_paths = _optional_string_list(payload.get("changed_paths"), "changed_paths")
+    if allowed_paths is None and changed_paths is None:
+        return None
+    return evidence_type(
+        allowed_paths=allowed_paths or [],
+        changed_paths=changed_paths or [],
+    )
 
 
 class ForbiddenResourceSelectionScanner:
@@ -223,6 +235,14 @@ def _optional_mapping(value: Any, field_name: str) -> dict[str, Any] | None:
     if not isinstance(value, Mapping):
         raise ValueError(f"Rack AI field must be an object: {field_name}")
     return dict(value)
+
+
+def _optional_string_list(value: Any, field_name: str) -> list[str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise ValueError(f"Rack AI field must be a list of strings: {field_name}")
+    return [_string_value(item, f"{field_name} item") for item in value]
 
 
 def _string_value(value: object, label: str) -> str:

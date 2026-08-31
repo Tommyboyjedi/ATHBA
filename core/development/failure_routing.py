@@ -50,7 +50,11 @@ class ReviewFailureTransitionRequest:
     cycle: ContractCycleRecord
 
 
-def candidate_failure_observation(phase: TddPhase, outcome: PhaseOutcome) -> FailureObservation:
+def candidate_failure_observation(
+    phase: TddPhase,
+    work_unit: DevelopmentWorkUnit,
+    outcome: PhaseOutcome,
+) -> FailureObservation:
     result = outcome.execution_result
     message = outcome.blocked_reason or outcome.phase_state.error or f"{phase.value} phase failed"
     evidence_refs = [item for item in [outcome.phase_state.evidence_location] if item]
@@ -75,6 +79,7 @@ def candidate_failure_observation(phase: TddPhase, outcome: PhaseOutcome) -> Fai
         plausible.append(FailureClassification.CHANGE_SCOPE_VIOLATION)
     if not plausible:
         plausible.append(FailureClassification.TESTER_CANDIDATE_DEFECT if phase is TddPhase.RED else FailureClassification.DEVELOPER_CANDIDATE_DEFECT)
+    policy_evidence = None if result is None else result.policy_evidence
     return FailureObservation(
         source=f"{phase.value}_execution",
         message=message,
@@ -82,6 +87,10 @@ def candidate_failure_observation(phase: TddPhase, outcome: PhaseOutcome) -> Fai
         plausible=plausible,
         candidate_revision=None if result is None else result.accepted_revision,
         status=status,
+        work_unit_id=work_unit.id,
+        phase=phase.value,
+        allowed_paths=list(work_unit.allowed_paths if policy_evidence is None else policy_evidence.allowed_paths),
+        changed_paths=[] if policy_evidence is None else list(policy_evidence.changed_paths),
     )
 
 
@@ -100,6 +109,15 @@ def review_failure_observation(review: SemanticReviewResult) -> FailureObservati
     )
 
 
+def _repair_evidence(observation: FailureObservation) -> list[str]:
+    evidence = [observation.message, *observation.evidence_refs]
+    if observation.changed_paths:
+        evidence.append(
+            f"Candidate modified {observation.changed_paths} while allowed paths are {observation.allowed_paths}."
+        )
+    return evidence
+
+
 def transition_for_candidate_repair(
     decision: FailureDecision,
     phase: TddPhase,
@@ -116,10 +134,12 @@ def transition_for_candidate_repair(
         work_unit_id=work_unit.id,
         trusted_revision=trusted_revision,
         original_objective=work_unit.objective,
-        allowed_paths=list(work_unit.allowed_paths),
+        allowed_paths=list(observation.allowed_paths or work_unit.allowed_paths),
         classification=decision.dominant,
         previous_candidate=observation.candidate_revision,
-        evidence=[observation.message, *observation.evidence_refs],
+        evidence=_repair_evidence(observation),
+        originating_phase=observation.phase,
+        changed_paths=list(observation.changed_paths),
     )
     if retry_allowed:
         return FailureTransition(

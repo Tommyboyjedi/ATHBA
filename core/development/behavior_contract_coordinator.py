@@ -71,6 +71,11 @@ from core.development.specification_gatekeeper import (
     SpecificationGapTddAdapter,
     SpecificationGatekeeper,
 )
+from core.development.policy_scope_violation import (
+    PolicyScopeDisposition,
+    PolicyScopeResolutionRequest,
+    PolicyScopeViolationResolver,
+)
 from core.development.python_test_runtime import PythonPytestRuntime
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -650,6 +655,7 @@ class CoordinatorDependencies:
     max_developer_repairs: int = 2
     environment_recovery: EnvironmentRecovery | None = None
     dependency_planner: DependencyPrerequisitePlanner | None = None
+    policy_scope_resolver: PolicyScopeViolationResolver | None = None
 
 
 @dataclass(frozen=True)
@@ -675,6 +681,7 @@ class FailureRouterDependencies:
     repository_material_provider: TesterRepositoryMaterialProvider | None
     max_tester_repairs: int
     max_developer_repairs: int
+    policy_scope_resolver: PolicyScopeViolationResolver
 
 
 async def _candidate_failure_transition(
@@ -684,7 +691,7 @@ async def _candidate_failure_transition(
     cycle = request.run_state.current_cycle()
     if cycle is None:
         raise ValueError("failed candidate routing requires an active cycle")
-    observation = failure_routing.candidate_failure_observation(request.phase, request.outcome)
+    observation = failure_routing.candidate_failure_observation(request.phase, request.work_unit, request.outcome)
     decision = dependencies.failure_policy.decide([observation])
     if decision.action is ProgressionAction.BLOCK_EXECUTOR:
         return failure_routing.transition_for_executor_block(decision, observation.message)
@@ -693,8 +700,21 @@ async def _candidate_failure_transition(
         return failure_routing.transition_for_environment(decision, observation.message, recovered)
     if decision.action is ProgressionAction.ASSESS_MECHANICAL_DEPENDENCY:
         return await _mechanical_dependency_transition(dependencies, request, observation, decision, cycle)
+    if decision.action is ProgressionAction.REPAIR_CANDIDATE:
+        resolution = dependencies.policy_scope_resolver.resolve(
+            PolicyScopeResolutionRequest(
+                classification=decision.dominant,
+                contract=request.run_state.contract,
+                phase=request.phase,
+                step=cycle.step,
+                work_unit=request.work_unit,
+                observation=observation,
+            )
+        )
+        if resolution.disposition is not PolicyScopeDisposition.ROLE_CANDIDATE_DEFECT:
+            return failure_routing.transition_for_replan(decision, resolution.blocker or observation.message)
+        return _candidate_repair_transition(dependencies, request, observation, decision, cycle)
     if decision.action in {
-        ProgressionAction.REPAIR_CANDIDATE,
         ProgressionAction.REPAIR_TESTER,
         ProgressionAction.REPAIR_DEVELOPER,
         ProgressionAction.REPAIR_REGRESSION,
@@ -1263,7 +1283,8 @@ class BehaviorContractCoordinator:
         self.run_store = ContractRunStore(state_repo)
         phase_executor = PhaseExecutor(deps.execution_gateway)
         split_planner = deps.split_planner or ResourceLimitSplitPlanner(deps.reasoning_gateway)
-        failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, split_planner, repository_material_provider, deps.max_tester_repairs, deps.max_developer_repairs))
+        policy_scope_resolver = deps.policy_scope_resolver or PolicyScopeViolationResolver()
+        failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, split_planner, repository_material_provider, deps.max_tester_repairs, deps.max_developer_repairs, policy_scope_resolver))
         self.ready_progressor = ReadyPoolProgressor(ReadyPoolDependencies(step_planner, deps.gatekeeper, deps.gap_adapter, deps.repository_binding))
         self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router))
         self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs, failure_policy))

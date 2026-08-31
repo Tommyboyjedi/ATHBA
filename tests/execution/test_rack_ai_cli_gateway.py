@@ -121,6 +121,9 @@ async def test_gateway_returns_structured_success_and_uses_argument_array(monkey
     assert result.accepted_revision == "b" * 40
     assert result.change_id == "p1--wu-1"
     assert result.worktree_path == "/srv/rack-ai/worktrees/p1--wu-1"
+    assert result.policy_evidence is not None
+    assert result.policy_evidence.allowed_paths == ["src/app.py"]
+    assert result.policy_evidence.changed_paths == ["src/app.py"]
     assert captured["payload"]["repository"]["base_sha"] == "a" * 40
     assert captured["payload"] == {
         "change_id": "p1--wu-1",

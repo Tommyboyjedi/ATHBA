@@ -9,6 +9,14 @@ from core.execution.rack_ai_contract import RepositoryBinding
 
 
 @dataclass(frozen=True)
+class ExecutionPolicyEvidence:
+    """Executor-reported path policy evidence for one candidate attempt."""
+
+    allowed_paths: list[str]
+    changed_paths: list[str]
+
+
+@dataclass(frozen=True)
 class WorkUnitExecutionResult:
     """Executor-neutral result returned to the ATHBA application layer."""
 
@@ -23,6 +31,7 @@ class WorkUnitExecutionResult:
     evidence_location: str | None = None
     worktree_path: str | None = None
     error: str | None = None
+    policy_evidence: ExecutionPolicyEvidence | None = None
 
 
 class WorkUnitExecutionGateway(Protocol):

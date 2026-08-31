@@ -244,6 +244,10 @@ class FailureObservation:
     stdout: str | None = None
     stderr: str | None = None
     status: str | None = None
+    work_unit_id: str | None = None
+    phase: str | None = None
+    allowed_paths: list[str] = field(default_factory=list)
+    changed_paths: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         _require_text(self.source, "failure observation source")
@@ -251,6 +255,8 @@ class FailureObservation:
         _string_list(self.evidence_refs, "failure observation evidence refs")
         if len(set(self.plausible)) != len(self.plausible):
             raise ValueError("plausible classifications must be unique")
+        _string_list(self.allowed_paths, "failure observation allowed paths")
+        _string_list(self.changed_paths, "failure observation changed paths")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -262,6 +268,10 @@ class FailureObservation:
             "stdout": self.stdout,
             "stderr": self.stderr,
             "status": self.status,
+            "work_unit_id": self.work_unit_id,
+            "phase": self.phase,
+            "allowed_paths": list(self.allowed_paths),
+            "changed_paths": list(self.changed_paths),
         }
 
     @classmethod
@@ -275,6 +285,10 @@ class FailureObservation:
             stdout=payload.get("stdout"),
             stderr=payload.get("stderr"),
             status=payload.get("status"),
+            work_unit_id=payload.get("work_unit_id"),
+            phase=payload.get("phase"),
+            allowed_paths=[str(item) for item in payload.get("allowed_paths", [])],
+            changed_paths=[str(item) for item in payload.get("changed_paths", [])],
         )
 
 
@@ -319,6 +333,8 @@ class RepairPacket:
     classification: FailureClassification | None = None
     previous_candidate: str | None = None
     evidence: list[str] = field(default_factory=list)
+    originating_phase: str | None = None
+    changed_paths: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         _require_text(self.role, "repair packet role")
@@ -328,6 +344,7 @@ class RepairPacket:
             raise ValueError("repair packet must preserve allowed paths")
         _string_list(self.allowed_paths, "repair packet allowed paths")
         _string_list(self.evidence, "repair packet evidence")
+        _string_list(self.changed_paths, "repair packet changed paths")
         if self.kind is PacketKind.REPAIR and self.classification is None:
             raise ValueError("repair packets require a classification")
 
@@ -342,6 +359,8 @@ class RepairPacket:
             "classification": None if self.classification is None else self.classification.value,
             "previous_candidate": self.previous_candidate,
             "evidence": list(self.evidence),
+            "originating_phase": self.originating_phase,
+            "changed_paths": list(self.changed_paths),
         }
 
     @classmethod
@@ -357,4 +376,6 @@ class RepairPacket:
             classification=None if classification is None else FailureClassification(str(classification)),
             previous_candidate=payload.get("previous_candidate"),
             evidence=[str(item) for item in payload.get("evidence", [])],
+            originating_phase=payload.get("originating_phase"),
+            changed_paths=[str(item) for item in payload.get("changed_paths", [])],
         )

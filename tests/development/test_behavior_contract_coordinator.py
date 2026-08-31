@@ -57,7 +57,7 @@ from core.development.tdd_progression import (
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_contract import RepositoryBinding, find_forbidden_resource_selection_keys, to_rack_ai_request
 from core.execution.reasoning_gateway import ReasoningRequest, ReasoningResult
-from core.execution.work_unit_gateway import WorkUnitExecutionResult
+from core.execution.work_unit_gateway import ExecutionPolicyEvidence, WorkUnitExecutionResult
 from core.llm.contracts.provider import NormalizedResult, Provider, ProviderRequest
 
 
@@ -265,6 +265,14 @@ def single_requirement_contract() -> BehaviorContract:
     return BehaviorContract.from_dict(payload)
 
 
+def multi_production_contract() -> BehaviorContract:
+    payload = contract_payload()
+    payload["source_clauses"] = payload["source_clauses"][:2]
+    payload["observable_requirements"] = [payload["observable_requirements"][0]]
+    payload["production_paths"] = ["reservation_book.py", "reservation_index.py"]
+    return BehaviorContract.from_dict(payload)
+
+
 def proposal(requirement_ref="RB-1", *, step_id="step-1"):
     return TddStepProposal(
         step_id=step_id,
@@ -319,13 +327,28 @@ def accepted(work_unit_id: str, revision: str):
     )
 
 
-def rejected(work_unit_id: str, *, error="acceptance failed", status="checks_failed"):
+def rejected(
+    work_unit_id: str,
+    *,
+    error="acceptance failed",
+    status="checks_failed",
+    allowed_paths: list[str] | None = None,
+    changed_paths: list[str] | None = None,
+):
+    policy_evidence = None
+    if allowed_paths is not None or changed_paths is not None:
+        policy_evidence = ExecutionPolicyEvidence(
+            allowed_paths=list(allowed_paths or []),
+            changed_paths=list(changed_paths or []),
+        )
     return WorkUnitExecutionResult(
         work_unit_id=work_unit_id,
         accepted=False,
         status=status,
         change_id=f"change-{work_unit_id}",
+        evidence_location=f"/tmp/{work_unit_id}.json",
         error=error,
+        policy_evidence=policy_evidence,
     )
 
 
@@ -2390,6 +2413,335 @@ async def test_green_change_scope_violation_routes_to_developer_repair():
     assert retry_snapshot.failure_progress.repair_packets[-1].role == "Developer"
     assert result.current_pool == "replan_ready"
     assert gateway.calls[1][1] == "b" * 40
+
+
+@pytest.mark.asyncio
+async def test_green_security_violation_preserves_developer_retry_budget_and_failed_revision():
+    step = proposal()
+    repo = MemoryStateRepo()
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": rejected(
+            step.step_id + "--green",
+            error="unauthorized path_policy violation",
+            allowed_paths=["reservation_book.py"],
+            changed_paths=["docs/out_of_scope.md"],
+        ),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    saved = repo.snapshot.contract_runs[contract().id]
+    retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
+    packet = retry_snapshot.failure_progress.repair_packets[-1]
+    assert result.current_pool == "replan_ready"
+    assert saved.semantic_base_revision == "a" * 40
+    assert retry_snapshot.failure_progress.retry_counts == {RetryRoute.DEVELOPER_REPAIR.value: 1}
+    assert saved.failure_progress.retry_counts == {RetryRoute.DEVELOPER_REPAIR.value: 2}
+    assert retry_snapshot.failure_progress.history[-1].observations[0].phase == TddPhase.GREEN.value
+    assert retry_snapshot.failure_progress.history[-1].observations[0].work_unit_id == step.step_id + "--green"
+    assert packet.role == "Developer"
+    assert packet.originating_phase == TddPhase.GREEN.value
+    assert packet.allowed_paths == ["reservation_book.py"]
+    assert packet.changed_paths == ["docs/out_of_scope.md"]
+    assert packet.trusted_revision == "b" * 40
+    assert gateway.calls[1][:2] == (step.step_id + "--green", "b" * 40)
+    assert gateway.calls[2][:2] == (step.step_id + "--green", "b" * 40)
+
+
+@pytest.mark.asyncio
+async def test_red_change_scope_violation_preserves_tester_retry_budget_and_failed_revision():
+    step = proposal()
+    repo = MemoryStateRepo()
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": rejected(
+            step.step_id + "--red",
+            error="changed_paths out-of-scope edit",
+            allowed_paths=["tests/test_reservation_book.py"],
+            changed_paths=["docs/out_of_scope.md"],
+        )
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    saved = repo.snapshot.contract_runs[contract().id]
+    retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
+    packet = retry_snapshot.failure_progress.repair_packets[-1]
+    assert result.current_pool == "replan_ready"
+    assert saved.semantic_base_revision == "a" * 40
+    assert retry_snapshot.failure_progress.retry_counts == {RetryRoute.TESTER_REPAIR.value: 1}
+    assert saved.failure_progress.retry_counts == {RetryRoute.TESTER_REPAIR.value: 2}
+    assert retry_snapshot.failure_progress.history[-1].observations[0].phase == TddPhase.RED.value
+    assert retry_snapshot.failure_progress.history[-1].observations[0].work_unit_id == step.step_id + "--red"
+    assert packet.role == "Tester"
+    assert packet.originating_phase == TddPhase.RED.value
+    assert packet.allowed_paths == ["tests/test_reservation_book.py"]
+    assert packet.changed_paths == ["docs/out_of_scope.md"]
+    assert packet.trusted_revision == "a" * 40
+    assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
+    assert gateway.calls[1][:2] == (step.step_id + "--red", "a" * 40)
+
+
+@pytest.mark.asyncio
+async def test_athba_request_defect_policy_violation_fails_closed_without_role_blame():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    repo = MemoryStateRepo()
+
+    class WrongAllowedPathDeveloperFactory:
+        def build(self, request):
+            unit = ContractDeveloperWorkUnitFactory().build(request)
+            return replace(unit, allowed_paths=["tests/test_reservation_book.py"])
+
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+            step.step_id + "--green": rejected(
+                step.step_id + "--green",
+                error="unauthorized path_policy violation",
+                allowed_paths=["tests/test_reservation_book.py"],
+                changed_paths=["reservation_book.py"],
+            ),
+        }),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        developer_factory=WrongAllowedPathDeveloperFactory(),
+    ).run_contract(contract_state)
+
+    saved = repo.snapshot.contract_runs[contract_state.id]
+    observation = saved.failure_progress.history[-1].observations[0]
+    assert result.current_pool == "replan_ready"
+    assert saved.semantic_base_revision == "a" * 40
+    assert saved.failure_progress.retry_counts == {}
+    assert saved.failure_progress.repair_packets == []
+    assert observation.phase == TddPhase.GREEN.value
+    assert observation.work_unit_id == step.step_id + "--green"
+    assert observation.allowed_paths == ["tests/test_reservation_book.py"]
+    assert observation.changed_paths == ["reservation_book.py"]
+    assert "athba_request_defect" in (saved.blocked_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_change_scope_within_contract_phase_scope_replans_without_role_blame():
+    contract_state = multi_production_contract()
+    step = proposal()
+    repo = MemoryStateRepo()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+            step.step_id + "--green": rejected(
+                step.step_id + "--green",
+                error="changed_paths out-of-scope edit",
+                allowed_paths=["reservation_book.py"],
+                changed_paths=["reservation_index.py"],
+            ),
+        }),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract_state)
+
+    saved = repo.snapshot.contract_runs[contract_state.id]
+    assert result.current_pool == "replan_ready"
+    assert saved.semantic_base_revision == "a" * 40
+    assert saved.failure_progress.retry_counts == {}
+    assert saved.failure_progress.repair_packets == []
+    assert "plan_scope_change" in (saved.blocked_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_resume_green_security_violation_retry_preserves_developer_route_and_red_base():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_passed", accepted_revision="b" * 40),
+        green_phase=TddPhaseState(phase=TddPhase.GREEN.value, work_unit_id=step.step_id + "--green", status="checks_failed", error="unauthorized path_policy violation"),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="cycle_active",
+                cycles=[cycle],
+                contract_state=contract_state,
+                semantic_base_revision="b" * 40,
+                failure_progress=FailureProgressState(
+                    state=FailureRouteState.AWAITING_REPAIR,
+                    history=[failure_decision(FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION, ProgressionAction.REPAIR_CANDIDATE)],
+                    retry_counts={RetryRoute.DEVELOPER_REPAIR.value: 1},
+                    repair_packets=[RepairPacket(
+                        kind=PacketKind.REPAIR,
+                        role="Developer",
+                        work_unit_id=step.step_id + "--green",
+                        trusted_revision="b" * 40,
+                        original_objective="repair objective",
+                        allowed_paths=["reservation_book.py"],
+                        classification=FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION,
+                        previous_candidate=None,
+                        evidence=["Candidate modified docs/out_of_scope.md while allowed paths are reservation_book.py."],
+                        originating_phase=TddPhase.GREEN.value,
+                        changed_paths=["docs/out_of_scope.md"],
+                    )],
+                    blocker="security_or_execution_policy_violation: retrying Developer from trusted revision",
+                ),
+                blocked_reason="security_or_execution_policy_violation: retrying Developer from trusted revision",
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40)})
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([review_approved(step.step_id, "c" * 40), {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []}]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert gateway.calls[0][:2] == (step.step_id + "--green", "b" * 40)
+    assert result.current_pool == "completed"
+
+
+@pytest.mark.asyncio
+async def test_resume_red_change_scope_violation_retry_preserves_tester_route_and_base():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    cycle = replace(
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        red_phase=TddPhaseState(phase=TddPhase.RED.value, work_unit_id=step.step_id + "--red", status="checks_failed", error="changed_paths out-of-scope edit"),
+    )
+    snapshot = TddSnapshot(
+        project_id="reservation-book",
+        repository_binding=binding("a" * 40),
+        current_trusted_revision="a" * 40,
+        contract_runs={
+            contract_state.id: run_state(
+                current_pool="cycle_active",
+                cycles=[cycle],
+                contract_state=contract_state,
+                semantic_base_revision="a" * 40,
+                failure_progress=FailureProgressState(
+                    state=FailureRouteState.AWAITING_REPAIR,
+                    history=[failure_decision(FailureClassification.CHANGE_SCOPE_VIOLATION, ProgressionAction.REPAIR_CANDIDATE)],
+                    retry_counts={RetryRoute.TESTER_REPAIR.value: 1},
+                    repair_packets=[RepairPacket(
+                        kind=PacketKind.REPAIR,
+                        role="Tester",
+                        work_unit_id=step.step_id + "--red",
+                        trusted_revision="a" * 40,
+                        original_objective="repair objective",
+                        allowed_paths=["tests/test_reservation_book.py"],
+                        classification=FailureClassification.CHANGE_SCOPE_VIOLATION,
+                        previous_candidate=None,
+                        evidence=["Candidate modified docs/out_of_scope.md while allowed paths are tests/test_reservation_book.py."],
+                        originating_phase=TddPhase.RED.value,
+                        changed_paths=["docs/out_of_scope.md"],
+                    )],
+                    blocker="change_scope_violation: retrying Tester from trusted revision",
+                ),
+                blocked_reason="change_scope_violation: retrying Tester from trusted revision",
+            )
+        },
+    )
+    gateway = FakeExecutionGateway({
+        step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+        step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+    })
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([review_approved(step.step_id, "c" * 40), {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []}]),
+        repository_binding=binding(),
+        state_repo=MemoryStateRepo(snapshot),
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
+    assert result.current_pool == "completed"
+
+
+@pytest.mark.asyncio
+async def test_red_security_violation_retry_can_recover_and_complete():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    repo = MemoryStateRepo()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            step.step_id + "--red": [
+                rejected(
+                    step.step_id + "--red",
+                    error="unauthorized path_policy violation",
+                    allowed_paths=["tests/test_reservation_book.py"],
+                    changed_paths=["docs/out_of_scope.md"],
+                ),
+                accepted(step.step_id + "--red", "b" * 40),
+            ],
+            step.step_id + "--green": accepted(step.step_id + "--green", "c" * 40),
+        }),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+            review_approved(step.step_id, "c" * 40),
+            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []},
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    saved = repo.snapshot.contract_runs[contract_state.id]
+    assert result.current_pool == "completed"
+    assert saved.failure_progress.retry_counts == {RetryRoute.TESTER_REPAIR.value: 1}
+
+
+@pytest.mark.asyncio
+async def test_green_change_scope_violation_retry_can_recover_and_reach_review_normally():
+    contract_state = single_requirement_contract()
+    step = proposal()
+    repo = MemoryStateRepo()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=FakeExecutionGateway({
+            step.step_id + "--red": accepted(step.step_id + "--red", "b" * 40),
+            step.step_id + "--green": [
+                rejected(
+                    step.step_id + "--green",
+                    error="changed_paths out-of-scope edit",
+                    allowed_paths=["reservation_book.py"],
+                    changed_paths=["docs/out_of_scope.md"],
+                ),
+                accepted(step.step_id + "--green", "c" * 40),
+            ],
+        }),
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []},
+            review_approved(step.step_id, "c" * 40),
+            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": []},
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+        review_material_provider=StaticReviewMaterialProvider("candidate source"),
+    ).run_contract(contract_state)
+
+    saved = repo.snapshot.contract_runs[contract_state.id]
+    assert result.current_pool == "completed"
+    assert saved.failure_progress.retry_counts == {RetryRoute.DEVELOPER_REPAIR.value: 1}
 
 
 @pytest.mark.asyncio
