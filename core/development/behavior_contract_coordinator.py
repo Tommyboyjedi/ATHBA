@@ -778,26 +778,55 @@ async def _mechanical_dependency_transition(
     return failure_routing.transition_for_dependency_deferral(decision, blocker, updated_contract, planner_decision)
 
 
-def _review_failure_transition(
-    dependencies: ReviewProgressionDependencies,
-    review: SemanticReviewResult,
+def _advance_nonapproved_review(
+    run_state: BehaviorContractRunState,
+    contract: BehaviorContract,
     cycle: ContractCycleRecord,
-) -> failure_routing.FailureTransition:
-    observation = failure_routing.review_failure_observation(review)
-    decision = dependencies.failure_policy.decide([observation])
-    if decision.action is ProgressionAction.REPAIR_REVIEW:
-        exhausted = cycle.repair_attempts >= dependencies.max_semantic_repairs
-        blocker = "semantic repair budget exhausted" if exhausted else review.rationale
-        return failure_routing.transition_for_review_repair(decision, exhausted, blocker)
-    if decision.action is ProgressionAction.REPLAN_INTEGRATION:
-        return failure_routing.transition_for_replan(decision, review.rationale)
-    if decision.action is ProgressionAction.BLOCK_ARCHITECTURE:
-        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_ARCHITECTURE, failure_routing.ContractPoolStatus.BLOCKED_ARCHITECTURE, review.rationale)
-    if decision.action is ProgressionAction.BLOCK_AMBIGUITY:
-        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_AMBIGUITY, failure_routing.ContractPoolStatus.BLOCKED_AMBIGUITY, review.rationale)
-    if decision.action is ProgressionAction.ANALYZE_UNCLASSIFIED:
-        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_UNCLASSIFIED, failure_routing.ContractPoolStatus.BLOCKED_UNCLASSIFIED, review.rationale)
-    return failure_routing.transition_for_replan(decision, review.rationale)
+    review: SemanticReviewResult,
+    max_semantic_repairs: int,
+) -> RunAdvance:
+    if review.verdict == "repair_required":
+        return _review_repair_advance(run_state, contract, cycle, max_semantic_repairs)
+    if review.verdict == "replan_required":
+        return _review_replan_advance(run_state, contract, cycle, review.rationale)
+    raise ValueError(f"unsupported review verdict: {review.verdict}")
+
+
+def _review_repair_advance(
+    run_state: BehaviorContractRunState,
+    contract: BehaviorContract,
+    cycle: ContractCycleRecord,
+    max_semantic_repairs: int,
+) -> RunAdvance:
+    if cycle.repair_attempts >= max_semantic_repairs:
+        return _review_replan_advance(run_state, contract, cycle, "semantic repair budget exhausted")
+    return RunAdvance(
+        replace(
+            run_state,
+            current_pool="repair_ready",
+            contract=replace(contract, status="repair_ready"),
+            blocked_reason=None,
+            cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="repair_ready")),
+        )
+    )
+
+
+def _review_replan_advance(
+    run_state: BehaviorContractRunState,
+    contract: BehaviorContract,
+    cycle: ContractCycleRecord,
+    rationale: str,
+) -> RunAdvance:
+    return RunAdvance(
+        replace(
+            run_state,
+            current_pool="replan_ready",
+            contract=replace(contract, status="replan_ready"),
+            blocked_reason=rationale,
+            cycles=_replace_current_cycle(run_state.cycles, replace(cycle, pool="replan_ready")),
+        ),
+        return_now=True,
+    )
 
 
 def _retry_route_for_action(action: ProgressionAction, phase: TddPhase) -> RetryRoute:
@@ -887,7 +916,6 @@ class ReviewProgressionDependencies:
     review_material_provider: ReviewMaterialProvider | None
     gatekeeper: SpecificationGatekeeper | None
     max_semantic_repairs: int
-    failure_policy: FailureProgressionPolicy
 
 
 @dataclass(frozen=True)
@@ -1115,13 +1143,7 @@ async def _advance_review_ready(
     )
     cycle = replace(cycle, review_result=review, review_history=[*cycle.review_history, review])
     if review.verdict != "approved":
-        transition = _review_failure_transition(dependencies, review, cycle)
-        routed = failure_routing.apply_review_failure_transition(
-            failure_routing.ReviewFailureTransitionRequest(run_state=run_state, cycle=cycle),
-            transition,
-            dependencies.failure_policy,
-        )
-        return RunAdvance(routed, return_now=transition.return_now)
+        return _advance_nonapproved_review(run_state, contract, cycle, review, dependencies.max_semantic_repairs)
     return await _advance_approved_review(run_state, dependencies, contract, cycle)
 
 
@@ -1287,7 +1309,7 @@ class BehaviorContractCoordinator:
         failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, split_planner, repository_material_provider, deps.max_tester_repairs, deps.max_developer_repairs, policy_scope_resolver))
         self.ready_progressor = ReadyPoolProgressor(ReadyPoolDependencies(step_planner, deps.gatekeeper, deps.gap_adapter, deps.repository_binding))
         self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router))
-        self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs, failure_policy))
+        self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs))
         self.repair_progressor = RepairReadyProgressor(RepairProgressionDependencies(repair_factory, phase_executor))
 
     async def run_contract(self, contract: BehaviorContract) -> BehaviorContractCoordinationResult:

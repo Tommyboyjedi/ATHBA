@@ -13,8 +13,10 @@ from core.development.failure_records import (
 from core.development.failure_state import FailureProgressState
 from core.development.failure_transitions import FailureRecordRequest, PrerequisiteDeferralRequest, RetryBudget, SplitRecordRequest
 from core.development.failure_values import (
+    ACTIVE_FAILURE_CLASSIFICATIONS,
     FAILURE_ACTIONS,
     FAILURE_PRIORITY,
+    LEGACY_FAILURE_CLASSIFICATIONS,
     DependencyDisposition,
     FailureClassification,
     FailureRouteState,
@@ -24,10 +26,12 @@ from core.development.failure_values import (
 )
 
 __all__ = [
+    "ACTIVE_FAILURE_CLASSIFICATIONS",
     "DependencyDecision",
     "DependencyDisposition",
     "FAILURE_ACTIONS",
     "FAILURE_PRIORITY",
+    "LEGACY_FAILURE_CLASSIFICATIONS",
     "FailureClassification",
     "FailureDecision",
     "FailureDecisionPolicy",

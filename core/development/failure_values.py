@@ -69,6 +69,27 @@ FAILURE_ACTIONS = {
 }
 
 
+
+
+ACTIVE_FAILURE_CLASSIFICATIONS = (
+    FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE,
+    FailureClassification.ENVIRONMENT_FAILURE,
+    FailureClassification.RESOURCE_LIMIT_FAILURE,
+    FailureClassification.SYNTAX_OR_PARSE_FAILURE,
+    FailureClassification.BUILD_OR_LINK_FAILURE,
+    FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE,
+    FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION,
+    FailureClassification.CHANGE_SCOPE_VIOLATION,
+    FailureClassification.TESTER_CANDIDATE_DEFECT,
+    FailureClassification.DEVELOPER_CANDIDATE_DEFECT,
+)
+
+LEGACY_FAILURE_CLASSIFICATIONS = tuple(
+    classification
+    for classification in FailureClassification
+    if classification not in ACTIVE_FAILURE_CLASSIFICATIONS
+)
+
 class FailureRouteState(str, Enum):
     ACTIVE = "active"
     AWAITING_REPAIR = "awaiting_repair"

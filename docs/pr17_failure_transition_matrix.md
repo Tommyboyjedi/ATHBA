@@ -7,159 +7,66 @@ Protected legacy snapshot: `8334f42a8865b9360972f5e0422a8f61d02dedb6`
 
 ## Audit method
 
-This audit was completed by direct source and test inspection before any behavior changes.
+- Re-audited the live coordinator, failure router, dependency planner, review progression, persistence records, and focused tests at branch `HEAD` before this closure update.
+- Baseline focused suite before the final closure edits was green on the live branch for:
+  - `tests/development/test_failure_progression.py`
+  - `tests/development/test_behavior_contract_coordinator.py`
+  - `tests/execution/test_rack_ai_cli_gateway.py`
+- Post-alignment focused proof on the closure changes:
+  - `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true MONGO_USER=test MONGO_PASS=test ./.venv/bin/python -m pytest -q tests/development/test_failure_progression.py tests/development/test_behavior_contract_coordinator.py tests/execution/test_rack_ai_cli_gateway.py`
+  - Result: `123 passed, 11456 warnings in 1.66s`
 
-Primary runtime surfaces inspected:
+## State authority
 
-- `core/development/behavior_contract_coordinator.py`
-- `core/development/failure_values.py`
-- `core/development/failure_records.py`
-- `core/development/failure_state.py`
-- `core/development/failure_transitions.py`
-- `core/development/failure_policy.py`
-- `core/development/contract_run_domain.py`
-- `core/datastore/repos/tdd_state_repo.py`
-- `scripts/run_pr17_independent_reservation_book.py`
-- `core/development/specification_reconciliation.py`
+- `current_pool` is the authoritative executable runtime state.
+- `contract.status` is the durable high-level contract lifecycle summary.
+- `failure_progress.state` is durable sideband evidence about the most recent failure route, not an independent dispatcher.
+- Resume behavior is keyed by persisted `current_pool`; `failure_progress.state` preserves audit evidence, route metadata, retry history, and repair packets.
 
-Focused baseline executed on 2026-08-31:
+## Final active mechanical failure taxonomy
 
-- `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true ./.venv/bin/python -m pytest -q tests/development/test_failure_progression.py tests/development/test_behavior_contract_coordinator.py`
-- Result: `72 passed, 6629 warnings in 1.12s`
+Every active route below is implemented end to end and has status `A`.
 
-Status legend:
+| Classification | Producer | Action | Runtime route | Authoritative pool | Resume semantics | Tests | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `executor_infrastructure_failure` | `FailureObservationBuilder` on executor `transport_error` | `block_executor` | Preserve failure evidence, do not promote candidate, stop in executor-blocked terminal state | `blocked_executor` | Terminal on resume; no retry budget consumed | `test_executor_failure_stops_safely_in_blocked_executor_pool`, `test_resume_blocked_executor_is_terminal_and_does_not_execute` | `A` |
+| `environment_failure` | `FailureObservationBuilder` on missing runtime or unavailable toolchain evidence | `recover_environment` | One bounded ATHBA environment recovery attempt; success reruns same phase from same trusted base, failure blocks environment | `cycle_active` on recovery retry, `blocked_environment` on failed recovery | Resume preserves the prior recovery count and either reruns the same phase or remains terminally blocked | `test_environment_recovery_success_reruns_from_trusted_revision`, `test_environment_recovery_exhaustion_blocks_environment_truthfully`, `test_resume_environment_recovery_success_reruns_without_resetting_count`, `test_resume_blocked_environment_is_terminal_and_does_not_execute` | `A` |
+| `resource_limit_failure` | `FailureObservationBuilder` on timeout, OOM, or storage exhaustion evidence | `split_packet` | Split into bounded child work or fail closed to replan when unsafe | `tdd_ready` for executable children, `replan_ready` when split is unsafe | Resume continues from persisted split lineage and trusted-base rules | `test_resource_limit_failure_splits_into_persisted_children_and_updates_trusted_revision`, `test_resume_split_uses_persisted_children_without_replanning`, `test_cannot_split_resource_limit_failure_replans_without_child_work`, `test_split_depth_exhaustion_replans_without_calling_split_planner` | `A` |
+| `syntax_or_parse_failure` | `FailureObservationBuilder` on syntax/parse evidence | `assess_mechanical_dependency` | Dependency planner chooses `already_planned`, `add_prerequisite`, or phase-correct role repair | `tdd_ready` for dependency deferral, `cycle_active` for bounded repair | Resume follows persisted dependency decisions or repair packets from the same trusted base | `test_syntax_failure_already_planned_dependency_defers_and_parent_resumes_after_resume`, `test_syntax_failure_add_prerequisite_synthesizes_requirement_and_parent_resumes_after_resume`, `test_syntax_failure_reject_dependency_routes_to_tester_repair_from_semantic_base` | `A` |
+| `build_or_link_failure` | `FailureObservationBuilder` on build/link/package evidence | `assess_mechanical_dependency` | Same dependency-planner route as syntax/parse; GREEN reject-dependency repairs stay with Developer | `tdd_ready` or `cycle_active` depending on planner disposition | Resume preserves dependency decision or Developer repair route from accepted RED base | `test_build_link_failure_reject_dependency_routes_to_developer_repair_from_red_base` | `A` |
+| `test_collection_or_bootstrap_failure` | `FailureObservationBuilder` on collection/bootstrap/import evidence | `assess_mechanical_dependency` | Same dependency-planner route as syntax/parse | `tdd_ready` for deferral, `cycle_active` for repair | Resume follows the persisted dependency or repair state without promoting the failed candidate | `test_collection_bootstrap_failure_uses_dependency_deferral_route` | `A` |
+| `security_or_execution_policy_violation` | `FailureObservationBuilder` on Rack AI policy evidence | `repair_candidate` | Phase-aware policy/scope resolver chooses RED Tester repair, GREEN Developer repair, or fail-closed ATHBA defect route | `cycle_active` for candidate repair, `replan_ready` for ATHBA defect | Resume preserves originating phase, owner, paths, and trusted base | `test_red_security_violation_routes_to_tester_repair`, `test_green_security_violation_routes_to_developer_repair`, `test_resume_green_security_violation_retry_preserves_developer_route_and_red_base`, `test_athba_request_defect_policy_violation_fails_closed_without_role_blame` | `A` |
+| `change_scope_violation` | `FailureObservationBuilder` on changed-path or allowed-path evidence | `repair_candidate` | Phase-aware policy/scope resolver chooses RED Tester repair, GREEN Developer repair, or explicit replanning | `cycle_active` for candidate repair, `replan_ready` for scope-change or ATHBA defect | Resume preserves exact changed and allowed paths plus the originating role route | `test_red_change_scope_violation_routes_to_tester_repair`, `test_green_change_scope_violation_routes_to_developer_repair`, `test_resume_red_change_scope_violation_retry_preserves_tester_route_and_base`, `test_change_scope_within_contract_phase_scope_replans_without_role_blame` | `A` |
+| `tester_candidate_defect` | Generic RED failed-candidate fallback | `repair_tester` | Bounded Tester repair from semantic trusted base | `cycle_active`, then `replan_ready` on budget exhaustion | Resume preserves Tester repair packet and retry counts | `test_green_cannot_begin_before_accepted_red_and_tester_failures_use_bounded_retries`, `test_resume_tester_repair_retry_preserves_transition_and_trusted_base` | `A` |
+| `developer_candidate_defect` | Generic GREEN failed-candidate fallback | `repair_developer` | Bounded Developer repair from accepted RED trusted base | `cycle_active`, then `replan_ready` on budget exhaustion | Resume preserves Developer repair packet and retry counts | `test_green_generic_candidate_failure_routes_as_developer_candidate_defect_and_recovers`, `test_resume_developer_repair_retry_preserves_transition_and_red_base` | `A` |
 
-- `A` = fully implemented end-to-end
-- `B` = partially implemented
-- `C` = policy / type representation only
-- `D` = missing
-- `E` = implemented incorrectly
+## Compatibility-only vocabulary
 
-## Key architectural finding
+These values still decode for persisted snapshots, but they are no longer claimed as active independent PR17 runtime routes.
 
-Failure classification and durable `failure_progress.state` exist, but the active coordinator does **not** dispatch on `FailureRouteState`.
+| Classification | Why it is not an active independent route | Compatibility treatment |
+| --- | --- | --- |
+| `dependency_or_prerequisite_failure` | No live producer exists. Real dependency handling is reached through syntax/build/bootstrap classifications plus persisted dependency decisions. | Remains decodable from persisted payloads; documented as legacy folded into dependency assessment. |
+| `contract_or_requirement_ambiguity` | No deterministic ambiguity producer exists in live PR17 control flow. | Remains decodable; not claimed as active production vocabulary. |
+| `expected_behavior_red` | Accepted RED is normal TDD success state, not a failure. | Remains decodable; documented as legacy vocabulary replaced by normal cycle state. |
+| `accumulated_regression` | No trustworthy producer distinguishes accumulated regression from other candidate defects in current mechanics. | Remains decodable; folded into candidate-defect routing until a real producer exists. |
+| `semantic_integration_failure` | Review `replan_required` is a semantic review verdict, not a mechanical failure classification route. | Remains decodable; semantic review is documented separately. |
+| `review_quality_failure` | Review `repair_required` is a semantic review verdict with its own bounded repair loop, not a mechanical failure route. | Remains decodable; semantic review is documented separately. |
+| `architecture_constraint_violation` | No live deterministic architecture validator produces it. | Remains decodable; not claimed as active PR17 vocabulary. |
+| `unclassified_failure` | Active failed-candidate routing always falls back to phase-correct candidate defect instead. | Remains decodable; no separate production analysis loop is claimed. |
 
-`BehaviorContractCoordinator.run_contract()` stops only when `current_pool` is `completed` or `replan_ready`, and `_advance()` dispatches only on:
+## Semantic review verdicts
 
-- `tdd_ready`
-- `approved`
-- `cycle_active`
-- `review_ready`
-- `repair_ready`
+Semantic review is represented outside the mechanical failure taxonomy.
 
-As a result, most failure-route states are persisted as sideband evidence, while the real runtime state machine resumes from `current_pool` instead.
-
-## Primary matrix
-
-| # | Classification | Action | Observation Produced? | Runtime Route | Phase Correct? | Retry/Persistence | Resume | Tests | Status | Required Work |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `executor_infrastructure_failure` | `block_executor` | Yes. `FailureObservationBuilder` adds it when executor status is `transport_error`. | `FailedCandidateRouter.route()` falls through to `_route_state_for_failure()` and records `failure_progress.state=blocked_executor`, but sets `current_pool=replan_ready`. | Broadly yes, phase-agnostic. | Decision, packet, history persist. No dedicated executor recovery route. | Resume stops at `replan_ready`; nothing consumes `blocked_executor` directly. | `test_every_documented_class_has_fixed_priority_and_action`, `test_progress_state_round_trips_decision_retry_lineage_and_blocker` | `B` | Add a real blocked-executor route or make the authoritative dispatcher/state vocabulary consistent. |
-| 2 | `environment_failure` | `recover_environment` | Yes. Builder matches text fragments such as `runtime executable`, `pytest is unavailable`, or `environment`. | Special branch in `FailedCandidateRouter.route()` attempts `_environment_recovery_succeeded()`. Success reruns from trusted revision; failure falls through to `awaiting_environment_recovery` plus `current_pool=replan_ready`. | Broadly yes, phase-agnostic. | Retry budget exists and is persisted through `RetryRoute.ENVIRONMENT_RECOVERY`, but it is hard-coded to one attempt. | Resume does not re-enter a dedicated environment-recovery state; it returns from `replan_ready`. | Policy tests only; no focused route test proving success and failure branches. | `B` | Add direct route coverage and align persisted route state with resumable coordinator behavior. |
-| 3 | `resource_limit_failure` | `split_packet` | Yes. Builder matches `timeout`, `out of memory`, `no space left`, or `resource exhausted`. | `FailedCandidateRouter.route()` now calls `ResourceLimitSplitPlanner`, persists `WorkPacketSplit` lineage, returns `current_pool=tdd_ready` for executable child work, and fails closed to `replan_ready` when a split is unsafe or depth-bounded. | Yes. RED and GREEN resource-limit failures preserve the same normal TDD phases for child work. | Parent step, child ordering, requirement traceability, trusted revision, depth, completion lineage, and `split_children` all persist. | Resume consumes persisted split records from `tdd_ready`; the first child uses the split trusted base and later siblings use the latest approved trusted revision. | `test_split_record_round_trips_child_steps_and_completed_lineage`, `test_resource_limit_failure_splits_into_persisted_children_and_updates_trusted_revision`, `test_resume_split_uses_persisted_children_without_replanning`, `test_cannot_split_resource_limit_failure_replans_without_child_work`, `test_split_depth_exhaustion_replans_without_calling_split_planner` | `A` | Keep the bounded split planner and persisted lineage as the authoritative route. |
-| 4 | `syntax_or_parse_failure` | `assess_mechanical_dependency` | Yes. Builder matches `SyntaxError`, `parse error`, or `invalid syntax`. | `FailedCandidateRouter.route()` sends it to `DependencyPrerequisitePlanner.decide()`. `already_planned` or `add_prerequisite` defer work; `reject_dependency` falls into bounded role repair. | Broadly yes. Repair role follows phase, dependency assessment is phase-neutral. | Deferral, dependency decisions, retry counts, packets, and run state persist. | Resume works indirectly through `current_pool=tdd_ready` or `cycle_active`, not through `FailureRouteState`. | `test_rejected_red_is_persisted_and_cannot_become_green_base`, `test_dependency_prerequisite_planner_sends_reasoning_request_boundary` | `B` | Add direct proof for all three planner dispositions and make the dependency route semantics explicit in the matrix runner/tests. |
-| 5 | `build_or_link_failure` | `assess_mechanical_dependency` | Yes. Builder matches `build failed`, `linker`, `link failure`, or `packaging failed`. | Same branch as syntax/parse. | Broadly yes. | Same persistence as row 4. | Same as row 4. | Policy coverage only; no direct build/link route test. | `B` | Add route-specific tests; current implementation is shared heuristic plumbing, not directly proven. |
-| 6 | `test_collection_or_bootstrap_failure` | `assess_mechanical_dependency` | Yes. Builder matches `error collecting`, `ImportError`, `ModuleNotFoundError`, or `bootstrap`. | Same dependency-planner branch as rows 4 and 5. If planner rejects dependency and repair budget is exhausted, lane exits to `replan_ready`. | Broadly yes. | Deferral path and repair path both persist correctly. | Resume uses persisted `current_pool`; failed RED never becomes GREEN base. | `test_rejected_red_is_persisted_and_cannot_become_green_base`, failure policy unit tests | `B` | Add positive coverage for prerequisite deferral and post-resume continuation from persisted dependency state. |
-| 7 | `security_or_execution_policy_violation` | `repair_candidate` | Yes. Builder matches `path_policy`, `policy`, or `unauthorized`. | `FailedCandidateRouter.route()` now resolves `repair_candidate` through a phase-aware policy/scope resolver. Candidate-caused RED failures route to Tester repair, candidate-caused GREEN failures route to Developer repair, and ATHBA request defects fail closed to `replan_ready` without fabricating a role repair packet. | Yes. Ownership is explicit from originating phase rather than inferred from a tester-only policy string. | Retry counts, originating phase, allowed paths, changed paths, and trusted repair base all persist in typed failure state. | Resume reuses the persisted repair packet and retry route; GREEN policy failures stay on the Developer route and keep the accepted RED base. | `test_red_security_violation_routes_to_tester_repair`, `test_green_security_violation_routes_to_developer_repair`, `test_green_security_violation_preserves_developer_retry_budget_and_failed_revision`, `test_resume_green_security_violation_retry_preserves_developer_route_and_red_base`, `test_athba_request_defect_policy_violation_fails_closed_without_role_blame` | `A` | Keep `repair_candidate` as the phase-neutral intent and let the resolver choose owner versus fail-closed replan. |
-| 8 | `change_scope_violation` | `repair_candidate` | Yes. Builder matches `changed_paths`, `allowed_paths`, or `out-of-scope`. | The same phase-aware resolver now distinguishes candidate-owned scope violations from ATHBA plan defects and genuine plan-scope changes. Candidate-owned RED failures route to Tester repair, candidate-owned GREEN failures route to Developer repair, and same-phase broader scope requests stop in explicit replanning. | Yes. Phase ownership is explicit and the replan-only cases are no longer misattributed to Tester. | Repair packets preserve exact allowed/changed paths and retry counts remain attached only to the originating role route. | Resume keeps the persisted owner and trusted base; scope-change replans keep evidence without silently broadening allowed paths. | `test_red_change_scope_violation_routes_to_tester_repair`, `test_green_change_scope_violation_routes_to_developer_repair`, `test_red_change_scope_violation_preserves_tester_retry_budget_and_failed_revision`, `test_resume_red_change_scope_violation_retry_preserves_tester_route_and_base`, `test_change_scope_within_contract_phase_scope_replans_without_role_blame` | `A` | Preserve strict path policy while making owner selection and replan boundaries explicit. |
-| 9 | `dependency_or_prerequisite_failure` | `replan_dependency` | No production producer found. It appears in enums, policy tables, and unit tests only. | No runtime branch selects this classification from live evidence. Dependency behavior is reached through rows 4 to 6 instead. | N/A. | `FailureProgressState.defer_for_prerequisites()` persists dependency state, but under other dominant classifications. | No resume path keyed by this classification. | `test_prerequisite_deferral_preserves_state_and_records_declared_dependency` | `C` | Add a real producer and route if this classification should exist as a first-class decision; otherwise remove or fold it into documented behavior. |
-| 10 | `contract_or_requirement_ambiguity` | `block_ambiguity` | No production producer found. | `_route_state_for_failure()` knows how to map it to `blocked_ambiguity`, but no live code emits it. | N/A. | Persistable if manually injected; not produced in real routing. | No real resume path. | Policy coverage only. | `C` | Add an actual ambiguity detector and blocking path, or document it as not yet implemented. |
-| 11 | `tester_candidate_defect` | `repair_tester` | Yes. This is the RED fallback when no more specific class is detected. | Generic repair branch creates a Tester repair packet, increments `tester_repair`, retries from semantic base, then exits to `replan_ready` on budget exhaustion. | Yes for RED; it is RED-only by construction. | Retry budget, packet, history, and final block reason persist. | Resume works from persisted snapshot because `current_pool` remains `cycle_active` during retry and `replan_ready` on exhaustion. | `test_green_cannot_begin_before_accepted_red_and_tester_failures_use_bounded_retries`, failure policy retry tests | `A` | Keep as authoritative baseline for the bounded RED repair route. |
-| 12 | `developer_candidate_defect` | `repair_developer` | Yes. This is the GREEN fallback when no more specific class is detected. | Generic repair branch creates a Developer repair packet, increments `developer_repair`, retries from accepted RED base, then exits to `replan_ready` on exhaustion. | Broadly yes for GREEN. | Retry budget, packet, history, and final block reason persist. | Resume behavior follows persisted `current_pool`. | Shared router/unit coverage exists, but no direct developer-defect route test names this classification explicitly. | `B` | Add a focused GREEN defect regression that proves developer repair and trusted-base preservation under this exact classification. |
-| 13 | `expected_behavior_red` | `accept_red` | No. The classification is never emitted by `FailureObservationBuilder`. | Expected RED is handled outside `FailureProgressionPolicy`: accepted RED proceeds on the normal success path, and `already_satisfied` is handled by `_is_red_already_satisfied_from_phase()`. `FailureRouteState.ACCEPTED_RED` is never consumed. | N/A in policy terms. | Accepted RED revisions do persist in cycle state, but not as this classification or route state. | Resume uses accepted RED in `cycle.red_phase.accepted_revision`, not `accepted_red` route state. | Legacy/TDD accepted-RED behavior tests exist; no policy-route test for this classification. | `C` | Either introduce a true `expected_behavior_red` classification path or document that accepted RED is represented by the phase-success path instead. |
-| 14 | `accumulated_regression` | `repair_regression` | No production producer found. | No dedicated accumulated-regression route exists. The generic repair branch would honor the action if a classification were injected, but no classifier produces it. | N/A. | No production evidence that focused-vs-accumulated failure is distinguished. | No dedicated resume path. | Policy coverage only. | `C` | Add a real accumulated-regression detector and route, or remove it from the claimed exhaustive implementation. |
-| 15 | `semantic_integration_failure` | `replan_integration` | No production producer found. | Review-stage `replan_required` exists in `ReviewReadyProgressor`, but it bypasses `FailureProgressionPolicy` and does not persist this classification in `failure_progress`. | Review-phase semantics exist, but not through the claimed classification path. | Review outcome and pool persist, but no dominant classification, action, or failure history entry is recorded for this class. | Resume from `replan_ready` works, but not as an integration-classified route. | Review replan tests exist (`test_replan_required_moves_to_replan_ready_and_stops_lane`), but none prove this classification. | `E` | Align review-stage replan behavior with the declared classification/policy model, or narrow the claim. |
-| 16 | `review_quality_failure` | `repair_review` | No production producer found. | Review-stage `repair_required` exists in `ReviewReadyProgressor`, but it also bypasses `FailureProgressionPolicy` and `failure_progress`. | Review-phase behavior is conceptually correct, but classification/policy wiring is absent. | Semantic repair budget persists in cycle state, not in failure progression state. | Resume from `repair_ready` works through `current_pool`, not through a classified failure route. | `test_repair_required_moves_to_repair_ready`, `test_repair_result_returns_to_review_ready_before_final_approval`, `test_repair_attempts_are_bounded` | `E` | Either classify review failures explicitly or stop representing them as implemented in the failure-classification matrix. |
-| 17 | `architecture_constraint_violation` | `block_architecture` | No production producer found. | `_route_state_for_failure()` maps it to `blocked_architecture`, but no live producer or runtime branch emits it. | N/A. | Persistable only if manually supplied. | No dedicated resume behavior. | Policy coverage only. | `C` | Add a real architecture validator feeding failure progression, or document the route as not implemented. |
-| 18 | `unclassified_failure` | `analyze_unclassified` | Not from active failed-candidate routing. `FailureDecisionPolicy` chooses it only when observations have no plausible classes, but `FailureObservationBuilder` always inserts a Tester or Developer fallback instead. | No production branch builds `UnclassifiedAnalysis` or blocks on a real unclassified route. | N/A. | `UnclassifiedAnalysis` is typed and persistable, but never created in production. | No live resume path. | `test_empty_plausible_evidence_fails_closed_as_unclassified`, typed-state persistence tests | `C` | Add a real bounded unclassified-analysis route or remove the claim that it is currently implemented. |
-
-## State-machine audit
-
-### Contract run pools
-
-| State | Writer(s) | Reader(s) | Reachable? | Resumable? | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `tdd_ready` | initial run-state creation; dependency deferral; targeted gap selection; targeted gap reinsertion; RED already satisfied path | `BehaviorContractCoordinator._advance()` -> `ReadyPoolProgressor.advance()` | Yes | Yes | Real dispatcher state. |
-| `cycle_active` | ready-pool step selection; environment-recovery rerun; generic repair retry path | dispatcher -> `CycleActiveProgressor.advance()` | Yes | Yes | Real dispatcher state for RED/GREEN execution. |
-| `review_ready` | accepted GREEN; successful review repair | dispatcher -> `ReviewReadyProgressor.advance()` | Yes | Yes | Real dispatcher state. |
-| `repair_ready` | review verdict `repair_required` under budget | dispatcher -> `RepairReadyProgressor.advance()` | Yes | Yes | Real dispatcher state. |
-| `approved` | review approval; checklist-targeted approval without checklist completion | dispatcher treats it like `tdd_ready` via `ReadyPoolProgressor.advance()` | Yes | Yes | Transitional real state. |
-| `replan_ready` | failed route exits; review replan; semantic repair exhaustion; untraceable specification gap | `run_contract()` terminal return | Yes | No automatic resume path | Terminal stop state today. |
-| `completed` | `_completed_run_state()`; review approval after full checklist proof | `run_contract()` terminal return | Yes | Terminal | Final success state. |
-
-### Failure route states
-
-| Failure route state | Writer(s) | Reader(s) | Reachable? | Resumable? | Notes |
-| --- | --- | --- | --- | --- | --- |
-| `active` | default state; environment recovery success | persistence only | Yes | Sideband only | Not a coordinator dispatcher state. |
-| `awaiting_repair` | generic repair record path | persistence and retry counting only | Yes | Indirect only | `current_pool` remains `cycle_active`. |
-| `deferred_dependency` | `FailureStateTransitions.defer_for_prerequisites()` | only indirect data readers such as prerequisite lineage checks | Yes | Indirect only | Actual resumption occurs from `current_pool=tdd_ready`. |
-| `awaiting_prerequisite` | none found | none found | No | No | Dead vocabulary. |
-| `awaiting_environment_recovery` | `_route_state_for_failure(environment_failure)` on failed recovery path | none found | Yes | No dedicated resume | Written, not dispatched. |
-| `awaiting_split` | `FailureStateTransitions.record_split()` | `ReadyPoolProgressor.advance()` via persisted split lineage | Yes | Indirect only | Durable explanatory state for active split lineage; actual resumption still occurs from `current_pool=tdd_ready`. |
-| `blocked_executor` | `_route_state_for_failure(executor_infrastructure_failure)` | none found | Yes | No | Written, not dispatched. |
-| `blocked_architecture` | `_route_state_for_failure(architecture_constraint_violation)` | none found | Only if manually classified | No | No live producer. |
-| `blocked_ambiguity` | `_route_state_for_failure(contract_or_requirement_ambiguity)` | none found | Only if manually classified | No | No live producer. |
-| `blocked_unclassified` | `_route_state_for_failure(unclassified_failure)` | none found | Only if manually classified | No | No live producer/analysis builder. |
-| `accepted_red` | none found | none found | No | No | Dead vocabulary; accepted RED is represented elsewhere. |
-
-## Transition consistency findings
-
-- `FailureProgressionPolicy` is authoritative only for dominant classification, action lookup, retry counting, and failure-state recording. It is **not** the active runtime dispatcher.
-- `current_pool` and `contract.status` are the real progression states. `failure_progress.state` is usually descriptive metadata.
-- `security_or_execution_policy_violation` and `change_scope_violation` now share the phase-neutral `repair_candidate` action, and a dedicated policy/scope resolver decides originating-role repair versus fail-closed replanning from persisted path evidence.
-- `dependency_or_prerequisite_failure`, `contract_or_requirement_ambiguity`, `accumulated_regression`, `architecture_constraint_violation`, and `unclassified_failure` currently exist as enum/policy vocabulary without a live production producer.
-- `semantic_integration_failure` and `review_quality_failure` are represented functionally by review verdicts, but those verdict routes bypass failure classification, failure history, and failure-policy action recording.
-- `resource_limit_failure -> split_packet` now has a bounded split planner, durable split lineage, normal-child TDD scheduling, and a resume consumer keyed by persisted split state.
-- `expected_behavior_red -> accept_red` is not an active failure route. Accepted RED is represented by the normal accepted RED phase path, while `FailureRouteState.ACCEPTED_RED` is dead.
-- `awaiting_prerequisite` and `accepted_red` are dead vocabulary today.
-- `blocked_*` failure states are written, but coordinator termination/resume still hinges on `current_pool=replan_ready` rather than those states.
-
-## Evidence-backed conclusions
-
-- The repository **does** implement a real bounded RED repair route for `tester_candidate_defect`.
-- The repository **does** implement real GREEN review and semantic repair progression, but not through the claimed failure-classification matrix for `review_quality_failure` or `semantic_integration_failure`.
-- The repository **partially** implements the mechanical dependency-assessment family driven by syntax/build/bootstrap failures.
-- The repository **does** implement bounded packet splitting with durable resume semantics; ambiguity-blocking, architecture-blocking, accumulated-regression, and bounded unclassified-analysis remain outside the current executable behavior.
-- The repository currently presents a broader failure taxonomy than the executable state machine actually supports.
-
-## Residual findings
-
-- This audit did not change runtime behavior.
-- No Rack AI source or configuration was modified.
-- The next corrective step should be a source-of-truth decision: either narrow the declared PR17 matrix to what is executable, or implement the missing producers and route consumers so the matrix is truthful.
-
-## Post-implementation re-audit (2026-08-31)
-
-Focused post-refactor execution:
-
-- `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true MONGO_USER=test MONGO_PASS=test ./.venv/bin/python -m pytest -q tests/development/test_failure_progression.py tests/development/test_behavior_contract_coordinator.py`
-- Result: `87 passed, 8054 warnings in 1.23s`
-
-### Affected row status changes
-
-| Classification | Before | After | Evidence |
+| Review verdict | Runtime route | Pool | Persistence |
 | --- | --- | --- | --- |
-| `executor_infrastructure_failure` | `B` | `A` | `block_executor` now produces `FailureTransition(... next_pool=blocked_executor ...)`, persists `FailureRouteState.BLOCKED_EXECUTOR`, and resumes as a terminal non-executing state. |
-| `environment_failure` | `B` | `A` | `recover_environment` now either reruns from trusted revision with preserved retry count or blocks truthfully in `blocked_environment`. |
-| `resource_limit_failure` | `B` | `A` | Resource-limit failures now plan bounded child steps, persist split lineage, resume from saved split state, and preserve trusted-revision progression across child approvals. |
-| `security_or_execution_policy_violation` | `E` | `A` | Policy now uses `repair_candidate`; RED and GREEN ownership are proven by explicit phase-ownership tests and trusted-base resume tests. |
-| `change_scope_violation` | `E` | `A` | Same phase-sensitive candidate-owner correction as security violations. |
-| `tester_candidate_defect` | `A` | `A` | Existing bounded RED repair route preserved and now expressed through typed executable transitions. |
-| `developer_candidate_defect` | `B` | `A` | GREEN defect route now has direct focused tests plus typed transition/resume coverage. |
-| `expected_behavior_red` | `C` | `A` | Active taxonomy decision is now explicit: accepted RED is represented by successful RED execution, not by failure progression. Legacy compatibility vocabulary remains readable. |
-| `semantic_integration_failure` | `E` | `A` | Senior Review `replan_required` now records coherent failure evidence and action through review failure progression before landing in `replan_ready`. |
-| `review_quality_failure` | `E` | `A` | Senior Review `repair_required` now records coherent failure evidence and action while preserving semantic repair budgets and `repair_ready` runtime flow. |
+| `approved` | Continue through normal completion or next work selection | `approved` then normal progression | Stored in cycle review result |
+| `repair_required` | Bounded semantic repair loop without entering failure progression | `repair_ready` | Stored in cycle review result and semantic repair count |
+| `replan_required` | Fail closed to replanning without mechanical failure classification | `replan_ready` | Stored in cycle review result and contract blocker |
 
-### Updated state-machine conclusions
+## Conclusion
 
-- `current_pool` remains the single authoritative dispatcher. `FailureRouteState` is durable explanatory state, not a second orchestration machine.
-- Candidate failures and review failures now pass through one typed executable bridge in `core/development/failure_routing.py`.
-- Truthful terminal pools now exist for executor blockage, environment blockage, ambiguity blockage, architecture blockage, and unclassified blockage. Split requirements now re-enter normal TDD instead of terminating.
-- Successful RED remains a normal TDD success path, not a failure-classification path.
-- Resume semantics are now aligned with persisted blocked pools: terminal blocked states do not continue execution, and retry routes preserve trusted base revisions and retry counts.
-
-### Dead or compatibility-only vocabulary after implementation
-
-- `awaiting_prerequisite` remains compatibility-only historical vocabulary.
-- `accepted_red` remains compatibility-only historical vocabulary.
-- `awaiting_environment_recovery` remains loadable but is no longer the truthful active route for new runs in this phase. `awaiting_split` remains active durable lineage metadata behind resumed split work.
+- No active PR17 row remains `B`, `C`, `D`, or `E`.
+- Every active mechanical failure classification has a real producer, executable route, persistence story, and resume proof.
+- Deprecated vocabulary is retained only for backward-compatible decoding and is no longer presented as active runtime behavior.

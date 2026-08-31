@@ -1,8 +1,11 @@
+from core.development.failure_values import ACTIVE_FAILURE_CLASSIFICATIONS, LEGACY_FAILURE_CLASSIFICATIONS
 from core.development.failure_progression import (
     DependencyDecision,
     DependencyDisposition,
+    FAILURE_ACTIONS,
     FAILURE_PRIORITY,
     FailureClassification,
+    FailureDecision,
     FailureObservation,
     FailureProgressState,
     FailureProgressionPolicy,
@@ -32,6 +35,11 @@ def test_every_documented_class_has_fixed_priority_and_action() -> None:
         assert decision.dominant is classification
         assert decision.priority == FAILURE_PRIORITY[classification]
         assert isinstance(decision.action, ProgressionAction)
+
+
+def test_active_and_legacy_failure_taxonomy_are_disjoint() -> None:
+    assert set(ACTIVE_FAILURE_CLASSIFICATIONS).isdisjoint(LEGACY_FAILURE_CLASSIFICATIONS)
+    assert set(ACTIVE_FAILURE_CLASSIFICATIONS).union(LEGACY_FAILURE_CLASSIFICATIONS) == set(FailureClassification)
 
 
 def test_lowest_numeric_priority_is_dominant_and_all_plausible_classes_are_preserved() -> None:
@@ -138,6 +146,26 @@ def test_dependency_split_and_unclassified_records_are_typed_and_durable() -> No
     state = FailureProgressState(dependency_decisions=[dependency], splits=[split], unclassified_analysis=analysis)
 
     assert FailureProgressState.from_dict(state.to_dict()) == state
+
+
+def test_legacy_failure_classifications_remain_decodable_from_persisted_payloads() -> None:
+    for classification in LEGACY_FAILURE_CLASSIFICATIONS:
+        payload = {
+            "observations": [{
+                "source": "legacy",
+                "message": classification.value,
+                "evidence_refs": ["packet.json"],
+                "plausible": [classification.value],
+                "status": "legacy",
+            }],
+            "plausible": [classification.value],
+            "dominant": classification.value,
+            "priority": FAILURE_PRIORITY[classification],
+            "action": FAILURE_ACTIONS[classification].value,
+        }
+        restored = FailureDecision.from_dict(payload)
+        assert restored.dominant is classification
+        assert restored.action is FAILURE_ACTIONS[classification]
 
 
 def test_prerequisite_deferral_preserves_state_and_records_declared_dependency() -> None:
