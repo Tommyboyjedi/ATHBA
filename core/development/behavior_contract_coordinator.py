@@ -529,16 +529,93 @@ class DependencyPrerequisitePlanner:
             }, sort_keys=True),
         )
         result = await self.gateway.reason(reasoning_request)
-        decision = DependencyDecision.from_dict(_json_object(result.text, label="dependency decision"))
-        if decision.parent_requirement_ref != request.step.requirement_refs[0]:
-            raise ValueError("dependency decision must retain the blocked requirement")
-        if decision.disposition is DependencyDisposition.ALREADY_PLANNED:
-            known = set(request.contract.requirement_refs())
-            if not set(decision.prerequisite_refs).issubset(known):
-                raise ValueError("existing planned dependency must reference contract requirements")
-        if decision.disposition is DependencyDisposition.ADD_PREREQUISITE and len(decision.prerequisite_refs) != 1:
-            raise ValueError("a justified prerequisite decision must add one smallest prerequisite")
-        return decision
+        validation_error: str | None = None
+        try:
+            return _dependency_decision_from_response(request, result.text, label="dependency decision")
+        except ValueError as error:
+            if not _is_recoverable_dependency_error(error):
+                raise
+            validation_error = str(error)
+        repaired = await self.gateway.reason(
+            ReasoningRequest(
+                purpose="athba_dependency_prerequisite_decision_repair",
+                project_id=request.contract.project_id,
+                requires_large_context=False,
+                prompt=_dependency_decision_repair_prompt(
+                    request=request,
+                    invalid_decision_text=result.text,
+                    validation_error=validation_error or "dependency decision response was not valid JSON",
+                ),
+            )
+        )
+        return _dependency_decision_from_response(
+            request,
+            repaired.text,
+            label="dependency decision repair",
+        )
+
+
+def _dependency_decision_from_response(
+    request: DependencyDecisionRequest,
+    text: str,
+    *,
+    label: str,
+) -> DependencyDecision:
+    decision = DependencyDecision.from_dict(_json_object(text, label=label))
+    if decision.parent_requirement_ref != request.step.requirement_refs[0]:
+        raise ValueError("dependency decision must retain the blocked requirement")
+    if decision.disposition is DependencyDisposition.ALREADY_PLANNED:
+        known = set(request.contract.requirement_refs())
+        if not set(decision.prerequisite_refs).issubset(known):
+            raise ValueError("existing planned dependency must reference contract requirements")
+    if decision.disposition is DependencyDisposition.ADD_PREREQUISITE and len(decision.prerequisite_refs) != 1:
+        raise ValueError("a justified prerequisite decision must add one smallest prerequisite")
+    return decision
+
+
+def _is_recoverable_dependency_error(error: ValueError) -> bool:
+    return str(error) == "dependency decision response was not valid JSON"
+
+
+def _dependency_decision_repair_prompt(
+    *,
+    request: DependencyDecisionRequest,
+    invalid_decision_text: str,
+    validation_error: str,
+) -> str:
+    return json.dumps(
+        {
+            "instruction": "Repair the invalid ATHBA dependency decision. Return raw JSON only.",
+            "blocked_requirement_ref": request.step.requirement_refs[0],
+            "planned_requirements": [item.to_dict() for item in request.contract.observable_requirements],
+            "trusted_revision": request.trusted_revision,
+            "mechanical_failure": request.evidence.to_dict(),
+            "invalid_dependency_decision": invalid_decision_text,
+            "validation_error": validation_error,
+            "required_output": {
+                "disposition": "already_planned|add_prerequisite|reject_dependency",
+                "parent_requirement_ref": "string",
+                "prerequisite_refs": ["string"],
+                "prerequisite_observable": "string|null",
+                "rationale": "string",
+            },
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+            ],
+            "repair_rules": [
+                "retain the blocked requirement ref exactly",
+                "choose exactly one bounded dependency disposition",
+                "for already_planned, use only existing planned requirement refs",
+                "for add_prerequisite, add exactly one smallest observable prerequisite",
+                "do not prescribe implementation steps, tests, or patches",
+                "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
+            ],
+        },
+        sort_keys=True,
+    )
 
 
 class SeniorReviewer:

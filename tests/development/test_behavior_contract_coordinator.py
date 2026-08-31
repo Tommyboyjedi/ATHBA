@@ -2077,6 +2077,45 @@ async def test_dependency_prerequisite_planner_sends_reasoning_request_boundary(
     assert decision.prerequisite_refs == ["RB-1"]
 
 
+@pytest.mark.asyncio
+async def test_dependency_prerequisite_planner_repairs_fenced_json_response():
+    payload = contract().to_dict()
+    payload["observable_requirements"][1]["depends_on"] = ["RB-1"]
+    dependency = {
+        "disposition": "add_prerequisite",
+        "parent_requirement_ref": "RB-2",
+        "prerequisite_refs": ["RB-0"],
+        "rationale": "A smaller observable prerequisite must be proven first.",
+        "prerequisite_observable": "A new resource can be stored before reservation validation.",
+    }
+    gateway = FakeReasoningGateway([
+        f"```json\n{json.dumps(dependency)}\n```",
+        dependency,
+    ])
+    evidence = FailureObservation(
+        source="pytest",
+        message="ImportError while collecting the blocked reservation test.",
+        evidence_refs=["tests/test_reservation_book.py::test_reserve_reduces_capacity"],
+        plausible=[FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE],
+        stderr="ImportError: missing reservation dependency",
+        status="checks_failed",
+    )
+
+    decision = await DependencyPrerequisitePlanner(gateway).decide(
+        DependencyDecisionRequest(
+            contract=BehaviorContract.from_dict(payload),
+            step=proposal("RB-2"),
+            evidence=evidence,
+            trusted_revision="f" * 40,
+        )
+    )
+
+    assert decision.disposition is DependencyDisposition.ADD_PREREQUISITE
+    assert decision.prerequisite_refs == ["RB-0"]
+    assert gateway.requests[1].purpose == "athba_dependency_prerequisite_decision_repair"
+    assert "dependency decision response was not valid JSON" in gateway.requests[1].prompt
+
+
 def test_behavior_contract_run_state_round_trip_preserves_binding_resources():
     restored = BehaviorContractRunState.from_dict(
         BehaviorContractRunState(
