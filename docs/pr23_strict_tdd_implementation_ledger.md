@@ -102,3 +102,27 @@ This session establishes the rollback baseline required by PR22. It does not cla
 
 - Phase 4 Scenario drafting and intent validation: COMPLETE (Session 4).
 - Phase 5 Scenario fragmentation: PARTIAL; approved scenario parsing, ordered fragment persistence, and frontier initialisation are complete, while later frontier materialisation remains deliberately deferred.
+
+
+## Session 5: strict frontier execution and Developer GREEN
+
+- Added `StrictMicrocycleService`, which consumes the approved `MicrocycleState` from scenario drafting and persists every frontier execution, accepted RED revision, Developer candidate, diagnostic, candidate-chain revision, and per-frontier retry count.
+- Frontier materialisation uses a new bounded deterministic ATHBA Git mechanism, `GitFrontierMaterialiser`, rather than the legacy `GitService`. The legacy service is explicitly quarantined for the old chat stack; the project-environment Git client only manages project lifecycle/promotion and does not materialise isolated test-only candidates. The materialiser creates a detached disposable worktree at the current candidate-chain base, writes exactly the adapter-generated complete source at the authorised test path, stages/verifies that path only, commits the isolated candidate, and removes the disposable worktree. It never promotes the target branch or canonical development base.
+- Passing frontiers advance the isolated candidate chain without invoking Developer. The first valid active-frontier RED becomes the Developer base. Developer receives only the materialised active artifact, structured diagnostic, production path, accepted RED revision, and current base context. Its work unit permits only the production path and accepts only the active canonical pytest node.
+- Within-scenario import/type, constructor, and member capability failures remain valid RED outcomes; this route does not import or invoke dependency prerequisite planning. There is no per-frontier Senior Review route.
+- Python assertion classification now accepts the structured pytest assertion-message shape only when the source line maps to the active assertion span; this preserves the strict failure-before-frontier rejection.
+- Added focused generic proof coverage: missing type, construction, missing method, successful operation, failing assertion; hidden future fragments; syntax rejection; durable Developer four-attempt cap; persistence after RED/GREEN; and isolated Git test-only commits.
+- Deterministic regression/scenario completion beyond recording complete scenario state remains deferred, as requested.
+- Session 5 validation: focused strict suite 22 passed; full suite 335 passed; configured mypy 13 source files, compileall, coding-principles, and git diff --check all passed.
+
+## Remaining implementation phases
+
+- Phase 5 Scenario fragmentation: COMPLETE for Python strict-frontier materialisation.
+- Phase 6 Strict RED boundary: COMPLETE for Python strict-frontier execution.
+- Phase 7 Narrow GREEN: COMPLETE for Python active-frontier Developer progression.
+- Phase 8 Deterministic regression: INCOMPLETE by explicit Session 5 scope.
+- Phase 9 Advance frontier: COMPLETE for Python active-frontier progression.
+- Phase 10 Scenario completion and review: PARTIAL; completion state is recorded, while later regression/review is deliberately deferred.
+- Phase 11 Feature completion: INCOMPLETE.
+- Phase 12 Persistence and resume proof: COMPLETE for Session 5 frontier state and retry counts.
+- Phase 13 Proof order completion including fresh ReservationBook proof: INCOMPLETE; no live ReservationBook run was performed.

@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any, Protocol
 
 MICROCYCLE_SCHEMA_VERSION = 1
+MAX_MICROCYCLE_ATTEMPTS = 4
 
 
 class IntentStatus(str, Enum):
@@ -303,6 +304,37 @@ class RetryCounts:
 
 
 @dataclass(frozen=True)
+class FrontierAttemptCounts:
+    """Durable retry counters for one unchanged frontier and candidate base."""
+
+    frontier_index: int
+    base_revision: str
+    executions: int = 0
+    developer_attempts: int = 0
+
+    def __post_init__(self) -> None:
+        if self.frontier_index < 0:
+            raise ValueError("frontier attempt index must not be negative")
+        _text(self.base_revision, "frontier attempt base revision")
+        if min(self.executions, self.developer_attempts) < 0:
+            raise ValueError("frontier attempt counts must not be negative")
+        if max(self.executions, self.developer_attempts) > MAX_MICROCYCLE_ATTEMPTS:
+            raise ValueError("frontier attempt cap exceeded")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "FrontierAttemptCounts":
+        return cls(
+            int(value["frontier_index"]),
+            str(value["base_revision"]),
+            int(value.get("executions", 0)),
+            int(value.get("developer_attempts", 0)),
+        )
+
+
+@dataclass(frozen=True)
 class DeveloperAttempt:
     attempt_number: int
     frontier_index: int
@@ -374,6 +406,8 @@ class MicrocycleState:
     regression: RegressionState
     completion: ScenarioCompletion
     schema_version: int = MICROCYCLE_SCHEMA_VERSION
+    candidate_chain_revision: str | None = None
+    frontier_attempt_counts: tuple[FrontierAttemptCounts, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != MICROCYCLE_SCHEMA_VERSION:
@@ -396,6 +430,8 @@ class MicrocycleState:
             "developer_attempts": [item.to_dict() for item in self.developer_attempts],
             "regression": self.regression.to_dict(),
             "completion": self.completion.to_dict(),
+            "candidate_chain_revision": self.candidate_chain_revision,
+            "frontier_attempt_counts": [item.to_dict() for item in self.frontier_attempt_counts],
         }
 
     @classmethod
@@ -416,6 +452,8 @@ class MicrocycleState:
             RegressionState.from_dict(dict(value["regression"])),
             ScenarioCompletion.from_dict(dict(value["completion"])),
             int(value["schema_version"]),
+            value.get("candidate_chain_revision"),
+            tuple(FrontierAttemptCounts.from_dict(dict(item)) for item in value.get("frontier_attempt_counts", ())),
         )
 
 
@@ -435,6 +473,11 @@ def _validate_state(state: MicrocycleState) -> None:
                 raise ValueError("fragment dependencies must be earlier and known")
     if state.frontier.index >= len(ids) or state.frontier.materialised_fragment_ids != ids[:state.frontier.index + 1]:
         raise ValueError("frontier must be the ordered fragment prefix")
+    if state.candidate_chain_revision is not None:
+        _text(state.candidate_chain_revision, "candidate chain revision")
+    keys = tuple((item.frontier_index, item.base_revision) for item in state.frontier_attempt_counts)
+    if len(keys) != len(set(keys)):
+        raise ValueError("frontier attempt counts must be unique per frontier base")
 
 
 @dataclass(frozen=True)

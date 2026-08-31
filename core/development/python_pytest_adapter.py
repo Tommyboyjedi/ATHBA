@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -226,7 +227,7 @@ class PytestStructuredExecutor:
             return BoundaryDiagnostic("infrastructure", "test path escapes project root")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(request.artifact.complete_source, encoding="utf-8")
-        self._invalidate_module_cache(path)
+        self._invalidate_project_caches(root)
         syntax = self._syntax(path, request.test_path)
         if syntax is not None:
             return syntax
@@ -241,10 +242,9 @@ class PytestStructuredExecutor:
         return self._diagnostic(facts)
 
     @staticmethod
-    def _invalidate_module_cache(path: Path) -> None:
-        cache = path.parent / "__pycache__"
-        for entry in cache.glob(f"{path.stem}.*.pyc") if cache.exists() else ():
-            entry.unlink()
+    def _invalidate_project_caches(root: Path) -> None:
+        for cache in root.rglob("__pycache__"):
+            shutil.rmtree(cache, ignore_errors=True)
 
     @staticmethod
     def _syntax(path: Path, test_path: str) -> BoundaryDiagnostic | None:
@@ -288,7 +288,9 @@ class PythonBoundaryClassifier:
         active_kind = request.active_fragment.kind
         if exception in {"ImportError", "ModuleNotFoundError", "NameError", "AttributeError"} and active_kind in {item.value for item in (PythonFragmentKind.PRODUCTION_IMPORT, PythonFragmentKind.CONSTRUCTOR, PythonFragmentKind.CALL)}:
             return BoundaryAssessment(BoundaryOutcome.VALID_MISSING_CAPABILITY_RED.value, request.active_fragment.fragment_id, request.diagnostic)
-        if active_kind == PythonFragmentKind.ASSERTION and exception == "AssertionError":
+        if active_kind == PythonFragmentKind.ASSERTION and (
+            exception == "AssertionError" or request.diagnostic.message.lstrip().startswith("assert ")
+        ):
             return BoundaryAssessment(BoundaryOutcome.VALID_BEHAVIORAL_RED.value, request.active_fragment.fragment_id, request.diagnostic)
         if active_kind == PythonFragmentKind.RAISES_BLOCK and "DID NOT RAISE" in request.diagnostic.message:
             return BoundaryAssessment(BoundaryOutcome.VALID_BEHAVIORAL_RED.value, request.active_fragment.fragment_id, request.diagnostic)

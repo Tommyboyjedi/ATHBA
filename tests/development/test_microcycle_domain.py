@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from core.development.microcycle_domain import (
@@ -5,6 +7,7 @@ from core.development.microcycle_domain import (
     BoundaryDiagnostic,
     DeveloperAttempt,
     FragmentSourceSpan,
+    FrontierAttemptCounts,
     LanguageAdapterCatalog,
     LanguageAdapterDescriptor,
     MaterialisedTestArtifact,
@@ -53,6 +56,17 @@ def test_persisted_microcycle_round_trip_includes_retries_and_adapter_version():
     assert restored.retry_counts == RetryCounts(2, 1, 3)
     assert restored.model.adapter_version == "1"
 
+
+
+def test_frontier_attempt_counts_and_candidate_chain_round_trip():
+    persisted = replace(
+        state(),
+        candidate_chain_revision="chain-1",
+        frontier_attempt_counts=(FrontierAttemptCounts(1, "chain-1", 2, 1),),
+    )
+    restored = MicrocycleState.from_dict(persisted.to_dict())
+    assert restored.candidate_chain_revision == "chain-1"
+    assert restored.frontier_attempt_counts == (FrontierAttemptCounts(1, "chain-1", 2, 1),)
 
 def test_legacy_pr17_payload_fails_with_explicit_migration_message():
     with pytest.raises(MicrocycleMigrationError, match="explicit migration"):
