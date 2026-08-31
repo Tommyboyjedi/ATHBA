@@ -1736,7 +1736,7 @@ async def test_completed_contract_is_not_rerun():
 
 
 def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
-    step = replace(proposal(), exception_type="ValueError")
+    step = proposal()
     red = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
     green = ContractDeveloperWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
     repair = ContractRepairWorkUnitFactory().build(
@@ -1758,7 +1758,7 @@ def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     assert red.allowed_paths == ["tests/test_reservation_book.py"]
     assert green.allowed_paths == ["reservation_book.py"]
     assert repair.allowed_paths == ["reservation_book.py"]
-    assert red.acceptance.commands == [["python3", "-B", "scripts/assert_test_fails.py", step.test_name, "ValueError"]]
+    assert red.acceptance.commands == [["python3", "-B", "scripts/assert_test_fails.py", step.test_name]]
     expected_pytest = ["python3", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     assert green.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
     assert repair.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
