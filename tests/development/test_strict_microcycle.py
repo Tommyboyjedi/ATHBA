@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from core.development.deterministic_regression import DeterministicRegressionService
 from core.development.microcycle_domain import (
     BoundaryOutcome,
     FrontierMaterialisationRequest,
@@ -18,6 +19,7 @@ from core.development.microcycle_domain import (
 from core.development.python_pytest_adapter import PythonPytestAdapter
 from core.development.strict_microcycle import (
     FrontierCandidate,
+    RegressionRepairContext,
     GitFrontierMaterialiser,
     StrictMicrocycleDependencies,
     StrictMicrocycleRequest,
@@ -60,7 +62,9 @@ class CandidateRepository:
         number = len(self.calls)
         worktree = self.root / f"candidate-{number}"
         worktree.mkdir()
-        (worktree / "widget.py").write_text(self.production[request.artifact.base_revision])
+        base = request.artifact.base_revision
+        source = self.production[base] if base in self.production else self.production["method" if "method" in base else "type"]
+        (worktree / "widget.py").write_text(source)
         target = worktree / request.test_path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(request.artifact.complete_source)
@@ -70,6 +74,21 @@ class CandidateRepository:
 
     def cleanup(self, candidate):
         self.cleaned.append(candidate.candidate_revision)
+
+
+class PassingRuntime:
+    def __init__(self):
+        self.requests = []
+
+    def execute(self, request):
+        self.requests.append(request)
+        return __import__("core.development.microcycle_domain", fromlist=["RegressionCommandReport"]).RegressionCommandReport(
+            request.target, request.command, 0, "passed", f"evidence/{request.target}"
+        )
+
+
+def regression():
+    return DeterministicRegressionService(PassingRuntime())
 
 
 class Gateway:
@@ -134,22 +153,24 @@ async def test_generic_microcycle_exposes_one_frontier_at_a_time_and_persists_re
             "base": "",
             "type": "class Widget:\n    def __init__(self):\n        self.count = 0\n",
             "frontier-1-type": "class Widget:\n    def __init__(self):\n        self.count = 0\n",
+            "frontier-2-type": "class Widget:\n    def __init__(self):\n        self.count = 0\n",
             "method": "class Widget:\n    def __init__(self):\n        self.count = 0\n\n    def grow(self):\n        pass\n",
+            "frontier-4-method": "class Widget:\n    def __init__(self):\n        self.count = 0\n\n    def grow(self):\n        pass\n",
             "green": "class Widget:\n    def __init__(self):\n        self.count = 0\n\n    def grow(self):\n        self.count += 1\n",
         },
     )
     gateway = Gateway(["type", "method", "green"])
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
     )
 
     outcome = await service.run(request(tmp_path, initial_state()))
 
-    assert outcome.status == "complete"
-    assert [item.artifact.frontier_index for item in candidates.calls] == [0, 1, 2, 3]
+    assert outcome.status == "scenario_complete"
+    assert [item.artifact.frontier_index for item in candidates.calls] == [0, 0, 1, 2, 2, 3, 3]
     assert {item.artifact.canonical_test_identity for item in candidates.calls} == {"tests/test_widget.py::test_widget"}
     expected_fragments = initial_state().fragments
-    assert [item.artifact.active_fragment_id for item in candidates.calls] == [expected_fragments[index].fragment_id for index in range(4)]
+    assert [item.artifact.active_fragment_id for item in candidates.calls] == [expected_fragments[index].fragment_id for index in [0, 0, 1, 2, 2, 3, 3]]
     assert "Widget()" not in gateway.units[0][0].objective
     assert "assert widget.count" not in gateway.units[0][0].objective
     assert "assert widget.count" not in gateway.units[1][0].objective
@@ -160,14 +181,17 @@ async def test_generic_microcycle_exposes_one_frontier_at_a_time_and_persists_re
     assert outcomes == [
         BoundaryOutcome.VALID_MISSING_CAPABILITY_RED.value,
         BoundaryOutcome.GREEN.value,
+        BoundaryOutcome.GREEN.value,
         BoundaryOutcome.VALID_MISSING_CAPABILITY_RED.value,
+        BoundaryOutcome.GREEN.value,
         BoundaryOutcome.VALID_BEHAVIORAL_RED.value,
+        BoundaryOutcome.GREEN.value,
     ]
-    assert outcome.state.completion.completed_revision == "green"
+    assert outcome.state.completion.completed_revision == outcome.state.development_base_revision
     assert len(outcome.state.developer_attempts) == 3
     assert any(item.current_accepted_red_revision is not None for item in store.history)
     assert any(item.developer_attempts for item in store.history)
-    assert candidates.cleaned == [f"frontier-{index}-{base}" for index, base in enumerate(["base", "type", "frontier-1-type", "method"])]
+    assert len(candidates.cleaned) == len(candidates.calls)
 
 
 @pytest.mark.asyncio
@@ -181,7 +205,7 @@ async def test_invalid_syntax_never_reaches_developer(tmp_path):
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = Gateway([])
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: InvalidAdapter()})())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: InvalidAdapter()})(), regression())
     )
 
     outcome = await service.run(request(tmp_path, initial_state()))
@@ -197,7 +221,7 @@ async def test_developer_attempt_cap_is_durable_across_restarts(tmp_path):
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = Gateway([None, None, None, None])
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
     )
     value = request(tmp_path, initial_state())
 
@@ -242,3 +266,75 @@ def test_git_materialiser_commits_only_the_complete_authorised_test_artifact(tmp
 
 def run(root, *args):
     return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True).stdout
+
+@pytest.mark.asyncio
+async def test_regression_repair_is_bounded_to_new_failures_and_reruns_full_suite(tmp_path):
+    from core.development.deterministic_regression import ACCUMULATED_REGRESSION
+    from core.development.microcycle_domain import BoundaryAssessment, BoundaryDiagnostic, RegressionState
+
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"type": "class Widget:\n    def __init__(self):\n        self.count = 0\n"})
+    gateway = Gateway(["repair"])
+    runtime = PassingRuntime()
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(
+            store,
+            candidates,
+            gateway,
+            type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
+            DeterministicRegressionService(runtime),
+        )
+    )
+    state = initial_state()
+    assessment = BoundaryAssessment(
+        BoundaryOutcome.GREEN.value,
+        state.frontier.active_fragment_id,
+        BoundaryDiagnostic("green", "passed"),
+    )
+    state = replace(
+        state,
+        candidate_chain_revision="type",
+        boundary_evidence=(assessment,),
+        regression=RegressionState(
+            ACCUMULATED_REGRESSION,
+            ("pytest", "-q"),
+            failing_prior_test_nodes=("tests/test_prior.py::test_prior",),
+        ),
+    )
+    repaired, outcome = await service.repair_service.repair(
+        RegressionRepairContext(request(tmp_path, state), state, PythonPytestAdapter())
+    )
+
+    assert outcome.status == "green"
+    assert repaired.retry_counts.regression == 1
+    assert "tests/test_prior.py::test_prior" in gateway.units[0][0].objective
+    assert [item.target for item in runtime.requests] == [
+        "tests/test_widget.py::test_widget",
+        "accepted_regression_suite",
+    ]
+
+@pytest.mark.asyncio
+async def test_development_base_does_not_advance_until_deterministic_regression_is_clear(tmp_path):
+    from core.development.microcycle_domain import RegressionCommandReport
+
+    class FailingSuiteRuntime:
+        def execute(self, request):
+            status = "failed" if request.target == "accepted_regression_suite" else "passed"
+            return RegressionCommandReport(request.target, request.command, 1 if status == "failed" else 0, status, request.target)
+
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": "", "type": "class Widget:\n    def __init__(self):\n        self.count = 0\n"})
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(
+            store,
+            candidates,
+            Gateway(["type"]),
+            type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
+            DeterministicRegressionService(FailingSuiteRuntime()),
+        )
+    )
+
+    outcome = await service.run(request(tmp_path, initial_state()))
+
+    assert outcome.status == "accumulated_regression"
+    assert outcome.state.development_base_revision == "base"

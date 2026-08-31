@@ -357,22 +357,95 @@ class DeveloperAttempt:
 
 
 @dataclass(frozen=True)
-class RegressionState:
-    status: str
+class RegressionCommandReport:
+    """Structured evidence emitted by one deterministic project-runtime command."""
+
+    target: str
     command: tuple[str, ...]
-    evidence_refs: tuple[str, ...] = ()
+    return_code: int | None
+    status: str
+    evidence_ref: str
 
     def __post_init__(self) -> None:
-        _texts((self.status,), "regression status")
-        _texts(self.command, "regression command")
-        _texts(self.evidence_refs, "regression evidence")
+        _texts((self.target, self.status, self.evidence_ref), "regression report fields")
+        _texts(self.command, "regression report command")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
     @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "RegressionCommandReport":
+        return cls(
+            str(value["target"]),
+            tuple(str(item) for item in value["command"]),
+            None if value.get("return_code") is None else int(value["return_code"]),
+            str(value["status"]),
+            str(value["evidence_ref"]),
+        )
+
+
+@dataclass(frozen=True)
+class RegressionState:
+    status: str
+    command: tuple[str, ...]
+    evidence_refs: tuple[str, ...] = ()
+    reports: tuple[RegressionCommandReport, ...] = ()
+    failing_prior_test_nodes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _texts((self.status,), "regression status")
+        _texts(self.command, "regression command")
+        _texts(self.evidence_refs, "regression evidence")
+        _texts(self.failing_prior_test_nodes, "failing prior test nodes")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "command": list(self.command),
+            "evidence_refs": list(self.evidence_refs),
+            "reports": [item.to_dict() for item in self.reports],
+            "failing_prior_test_nodes": list(self.failing_prior_test_nodes),
+        }
+
+    @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "RegressionState":
-        return cls(str(value["status"]), tuple(value["command"]), tuple(value.get("evidence_refs", ())))
+        return cls(
+            str(value["status"]),
+            tuple(value["command"]),
+            tuple(value.get("evidence_refs", ())),
+            tuple(RegressionCommandReport.from_dict(dict(item)) for item in value.get("reports", ())),
+            tuple(value.get("failing_prior_test_nodes", ())),
+        )
+
+
+@dataclass(frozen=True)
+class BehaviorReviewState:
+    """Persistent outcome of the single post-scenario behavior review."""
+
+    verdict: str = "pending"
+    attempts: int = 0
+    evidence_refs: tuple[str, ...] = ()
+    next_behavior_ticket: str | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.verdict, "behavior review verdict")
+        if self.attempts < 0 or self.attempts > MAX_MICROCYCLE_ATTEMPTS:
+            raise ValueError("behavior review attempt count is invalid")
+        _texts(self.evidence_refs, "behavior review evidence")
+        if self.next_behavior_ticket is not None:
+            _text(self.next_behavior_ticket, "next behavior ticket")
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "BehaviorReviewState":
+        return cls(
+            str(value.get("verdict", "pending")),
+            int(value.get("attempts", 0)),
+            tuple(value.get("evidence_refs", ())),
+            value.get("next_behavior_ticket"),
+        )
 
 
 @dataclass(frozen=True)
@@ -408,6 +481,7 @@ class MicrocycleState:
     schema_version: int = MICROCYCLE_SCHEMA_VERSION
     candidate_chain_revision: str | None = None
     frontier_attempt_counts: tuple[FrontierAttemptCounts, ...] = ()
+    behavior_review: BehaviorReviewState = BehaviorReviewState()
 
     def __post_init__(self) -> None:
         if self.schema_version != MICROCYCLE_SCHEMA_VERSION:
@@ -432,6 +506,7 @@ class MicrocycleState:
             "completion": self.completion.to_dict(),
             "candidate_chain_revision": self.candidate_chain_revision,
             "frontier_attempt_counts": [item.to_dict() for item in self.frontier_attempt_counts],
+            "behavior_review": self.behavior_review.to_dict(),
         }
 
     @classmethod
@@ -454,6 +529,7 @@ class MicrocycleState:
             int(value["schema_version"]),
             value.get("candidate_chain_revision"),
             tuple(FrontierAttemptCounts.from_dict(dict(item)) for item in value.get("frontier_attempt_counts", ())),
+            BehaviorReviewState.from_dict(dict(value.get("behavior_review", {}))),
         )
 
 

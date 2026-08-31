@@ -126,3 +126,21 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Phase 11 Feature completion: INCOMPLETE.
 - Phase 12 Persistence and resume proof: COMPLETE for Session 5 frontier state and retry counts.
 - Phase 13 Proof order completion including fresh ReservationBook proof: INCOMPLETE; no live ReservationBook run was performed.
+
+
+## Session 6: deterministic regression and scenario-completion foundation
+
+- Added a project-runtime-only `DeterministicRegressionService`. It executes the current frontier, each supplied completed prior scenario node, and the adapter's accepted suite in that order; it persists structured command reports and never imports or calls a reasoning gateway.
+- GREEN now runs deterministic accumulated regression before updating `development_base_revision`. A clear regression promotes the candidate revision and immediately advances the next frontier; an accumulated or infrastructure failure leaves the base unchanged.
+- Added a bounded four-attempt regression-repair path. Its Developer packet includes the current complete frontier and only newly failing prior test nodes, then reruns the complete deterministic suite from the accepted repair revision.
+- Final-frontier completion now requires a passing materialised canonical test and clear accumulated regression. The canonical test remains one growing test node; no permanent microtests are emitted.
+- Added the isolated behavior-completion seam. It invokes one Senior behavior review only after `scenario_complete`, persists the verdict, and starts the next scenario only after approval. Repair/replan verdicts remain non-completing and fail closed.
+- Focused Session 6 suite: 21 passed. Full suite: 342 passed. Coding-principles, focused mypy, compileall, and diff checks passed.
+
+## Remaining implementation phases
+
+- Phase 8 Deterministic regression: COMPLETE for Python strict microcycles.
+- Phase 9 Advance frontier: COMPLETE; development-base promotion is regression-gated.
+- Phase 10 Scenario completion and review: PARTIAL; the post-scenario behavior-review boundary and next-scenario start seam are complete, while a concrete behavior-review repair executor still requires its own subsequent session.
+- Phase 11 Feature completion: INCOMPLETE.
+- Phase 13 Proof order including fresh ReservationBook proof: INCOMPLETE; no ReservationBook run was performed.
