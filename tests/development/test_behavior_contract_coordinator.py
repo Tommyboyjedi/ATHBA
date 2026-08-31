@@ -3115,6 +3115,40 @@ async def test_executor_failure_stops_safely_in_blocked_executor_pool():
 
 
 @pytest.mark.asyncio
+async def test_transport_timeout_exception_blocks_executor_without_advancing_trusted_revision():
+    step = proposal()
+    repo = MemoryStateRepo()
+
+    class TransportTimeoutGateway:
+        def __init__(self):
+            self.calls = []
+
+        async def execute(self, work_unit, repository_binding):
+            self.calls.append((work_unit.id, repository_binding.base_sha))
+            raise RackAiCliTransportError(
+                "Rack AI CLI subprocess exceeded ATHBA transport deadline of 1s for request timeout 1s"
+            )
+
+    gateway = TransportTimeoutGateway()
+    result = await BehaviorContractCoordinator(
+        execution_gateway=gateway,
+        reasoning_gateway=FakeReasoningGateway([
+            {"status": "propose", "rationale": "Start with RB-1.", "proposal": step.to_dict(), "completed_requirement_refs": []}
+        ]),
+        repository_binding=binding(),
+        state_repo=repo,
+    ).run_contract(contract())
+
+    saved = repo.snapshot.contract_runs[contract().id]
+    assert result.current_pool == "blocked_executor"
+    assert result.semantic_revision == "a" * 40
+    assert saved.semantic_base_revision == "a" * 40
+    assert saved.failure_progress.state is FailureRouteState.BLOCKED_EXECUTOR
+    assert saved.failure_progress.history[-1].dominant is FailureClassification.EXECUTOR_INFRASTRUCTURE_FAILURE
+    assert gateway.calls == [(step.step_id + "--red", "a" * 40)]
+
+
+@pytest.mark.asyncio
 async def test_review_repair_uses_review_state_and_preserves_runtime_flow():
     contract_state = single_requirement_contract()
     step = proposal()

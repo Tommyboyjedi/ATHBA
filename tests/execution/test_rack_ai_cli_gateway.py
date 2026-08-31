@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -5,6 +6,7 @@ import pytest
 
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_cli_gateway import RackAiCliConfig, RackAiCliExecutionGateway, RackAiCliTransportError
+from core.execution.rack_ai_cli_transport import RackAiCliWatchdog
 from core.execution.rack_ai_contract import RepositoryBinding
 
 
@@ -13,12 +15,48 @@ class FakeProcess:
         self._stdout = stdout.encode("utf-8")
         self._stderr = stderr.encode("utf-8")
         self.returncode = returncode
+        self.terminated = 0
+        self.killed = 0
 
     async def communicate(self) -> tuple[bytes, bytes]:
         return self._stdout, self._stderr
 
+    def terminate(self) -> None:
+        self.terminated += 1
 
-def sample_unit(*, status: WorkUnitStatus = WorkUnitStatus.READY) -> DevelopmentWorkUnit:
+    def kill(self) -> None:
+        self.killed += 1
+
+
+class HangingProcess(FakeProcess):
+    def __init__(self, stdout: str, stderr: str = "", *, terminate_reaps: bool = True):
+        super().__init__(stdout, stderr, returncode=None)
+        self._terminate_reaps = terminate_reaps
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        while True:
+            if self.killed:
+                return self._stdout, self._stderr
+            if self.terminated and self._terminate_reaps:
+                return self._stdout, self._stderr
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                if self.killed or (self.terminated and self._terminate_reaps):
+                    return self._stdout, self._stderr
+                continue
+
+    def terminate(self) -> None:
+        self.terminated += 1
+        if self._terminate_reaps:
+            self.returncode = -15
+
+    def kill(self) -> None:
+        self.killed += 1
+        self.returncode = -9
+
+
+def sample_unit(*, status: WorkUnitStatus = WorkUnitStatus.READY, timeout_seconds: int = 900) -> DevelopmentWorkUnit:
     return DevelopmentWorkUnit(
         id="wu-1",
         project_id="p1",
@@ -26,6 +64,7 @@ def sample_unit(*, status: WorkUnitStatus = WorkUnitStatus.READY) -> Development
         objective="Implement one bounded behavior.",
         allowed_paths=["src/app.py"],
         acceptance=AcceptanceContract(commands=[["python3", "-m", "pytest", "tests/test_app.py::test_one"]]),
+        timeout_seconds=timeout_seconds,
         status=status,
     )
 
@@ -336,6 +375,58 @@ async def test_gateway_rejects_summary_packet_verdict_contradiction(monkeypatch,
     gateway = RackAiCliExecutionGateway("p1", gateway_config(tmp_path / "state"))
     with pytest.raises(RackAiCliTransportError, match="acceptance verdict"):
         await gateway.execute(sample_unit(), sample_binding())
+
+
+@pytest.mark.asyncio
+async def test_gateway_timeout_terminates_process_and_preserves_partial_output(monkeypatch, tmp_path):
+    captured: dict[str, object] = {}
+    process = HangingProcess("change_id: partial", stderr="worker stalled")
+
+    async def fake_exec(*args, **_kwargs):
+        captured["spec_path"] = Path(args[7])
+        return process
+
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
+
+    gateway = RackAiCliExecutionGateway("p1", gateway_config(tmp_path / "state"))
+    gateway.transport.watchdog = RackAiCliWatchdog(cleanup_allowance_seconds=0, termination_grace_seconds=1)
+    load_called = False
+
+    def fail_load(_path: Path):
+        nonlocal load_called
+        load_called = True
+        raise AssertionError("packet loader should not run after timeout")
+
+    monkeypatch.setattr(gateway.transport.packet_loader, "load", fail_load)
+
+    with pytest.raises(RackAiCliTransportError, match="transport deadline of 1s") as error:
+        await gateway.execute(sample_unit(timeout_seconds=1), sample_binding())
+
+    assert process.terminated == 1
+    assert process.killed == 0
+    assert load_called is False
+    assert "worker stalled" in str(error.value)
+    assert "change_id: partial" in str(error.value)
+    assert not Path(captured["spec_path"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_gateway_timeout_kills_process_when_terminate_does_not_reap(monkeypatch, tmp_path):
+    process = HangingProcess("partial", stderr="still hung", terminate_reaps=False)
+
+    async def fake_exec(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr("core.execution.rack_ai_cli_transport.asyncio.create_subprocess_exec", fake_exec)
+
+    gateway = RackAiCliExecutionGateway("p1", gateway_config(tmp_path / "state"))
+    gateway.transport.watchdog = RackAiCliWatchdog(cleanup_allowance_seconds=0, termination_grace_seconds=1)
+
+    with pytest.raises(RackAiCliTransportError, match="transport deadline of 1s"):
+        await gateway.execute(sample_unit(timeout_seconds=1), sample_binding())
+
+    assert process.terminated == 1
+    assert process.killed == 1
 
 
 @pytest.mark.asyncio

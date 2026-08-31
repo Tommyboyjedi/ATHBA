@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,8 @@ from core.filesystem_policy import resolve_confined_absolute_path
 
 
 RackAiCliTransportError = RuntimeError
+DEFAULT_CLI_CLEANUP_ALLOWANCE_SECONDS = 30
+DEFAULT_CLI_TERMINATION_GRACE_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,61 @@ class RackAiCliResponse:
     process: RackAiCliProcessResult
     summary: RackAiCliSummary
     packet_payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class RackAiCliWatchdog:
+    cleanup_allowance_seconds: int = DEFAULT_CLI_CLEANUP_ALLOWANCE_SECONDS
+    termination_grace_seconds: int = DEFAULT_CLI_TERMINATION_GRACE_SECONDS
+
+    def __post_init__(self) -> None:
+        if self.cleanup_allowance_seconds < 0:
+            raise ValueError("cleanup allowance seconds must be non-negative")
+        if self.termination_grace_seconds <= 0:
+            raise ValueError("termination grace seconds must be positive")
+
+    def deadline_seconds(self, request: RackAiChangeRequest) -> int:
+        return max(1, request.limits.timeout_seconds + self.cleanup_allowance_seconds)
+
+    async def communicate(
+        self,
+        process: asyncio.subprocess.Process,
+        request: RackAiChangeRequest,
+    ) -> RackAiCliProcessResult:
+        task = asyncio.create_task(process.communicate())
+        deadline_seconds = self.deadline_seconds(request)
+        try:
+            stdout, stderr = await asyncio.wait_for(asyncio.shield(task), timeout=deadline_seconds)
+            return _process_result(stdout, stderr, process.returncode)
+        except asyncio.TimeoutError as error:
+            result = await self._terminate_and_reap(process, task)
+            message = (
+                "Rack AI CLI subprocess exceeded ATHBA transport deadline "
+                f"of {deadline_seconds}s for request timeout {request.limits.timeout_seconds}s"
+            )
+            raise RackAiCliTransportError(_build_error_message(message, result)) from error
+
+    async def _terminate_and_reap(
+        self,
+        process: asyncio.subprocess.Process,
+        task: asyncio.Task[tuple[bytes, bytes]],
+    ) -> RackAiCliProcessResult:
+        _signal_process(process, terminate=True)
+        try:
+            stdout, stderr = await asyncio.wait_for(asyncio.shield(task), timeout=self.termination_grace_seconds)
+            return _process_result(stdout, stderr, process.returncode)
+        except asyncio.TimeoutError:
+            _signal_process(process, terminate=False)
+            try:
+                stdout, stderr = await asyncio.wait_for(asyncio.shield(task), timeout=self.termination_grace_seconds)
+            except asyncio.TimeoutError as error:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+                raise RackAiCliTransportError(
+                    "Rack AI CLI timeout cleanup failed after terminate/kill"
+                ) from error
+            return _process_result(stdout, stderr, process.returncode)
 
 
 class RackAiCliCommandFactory:
@@ -111,6 +169,7 @@ class RackAiCliTransport:
         self.commands = RackAiCliCommandFactory(config)
         self.summary_parser = RackAiCliSummaryParser()
         self.packet_loader = RackAiPacketLoader(config.state_root)
+        self.watchdog = RackAiCliWatchdog()
 
     async def execute(self, request: RackAiChangeRequest) -> RackAiCliResponse:
         spec_path: Path | None = None
@@ -125,12 +184,7 @@ class RackAiCliTransport:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await process.communicate()
-            result = RackAiCliProcessResult(
-                stdout.decode("utf-8", errors="replace"),
-                stderr.decode("utf-8", errors="replace"),
-                process.returncode,
-            )
+            result = await self.watchdog.communicate(process, request)
             if not result.stdout_text.strip():
                 raise RackAiCliTransportError(_build_error_message("Rack AI returned no command summary", result))
             summary = self.summary_parser.parse(result.stdout_text)
@@ -140,10 +194,33 @@ class RackAiCliTransport:
             if isinstance(error, RackAiCliTransportError):
                 raise
             process = RackAiCliProcessResult("", "", 0) if "result" not in locals() else result
-            raise RackAiCliTransportError(_build_error_message(f"Rack AI returned untrustworthy output: {error}", process)) from error
+            raise RackAiCliTransportError(
+                _build_error_message(f"Rack AI returned untrustworthy output: {error}", process)
+            ) from error
         finally:
             if spec_path is not None:
                 spec_path.unlink(missing_ok=True)
+
+
+def _signal_process(process: asyncio.subprocess.Process, *, terminate: bool) -> None:
+    try:
+        if process.returncode is not None:
+            return
+        if terminate:
+            process.terminate()
+        else:
+            process.kill()
+    except ProcessLookupError:
+        return
+
+
+def _process_result(stdout: bytes, stderr: bytes, returncode: int | None) -> RackAiCliProcessResult:
+    code = 0 if returncode is None else returncode
+    return RackAiCliProcessResult(
+        stdout.decode("utf-8", errors="replace"),
+        stderr.decode("utf-8", errors="replace"),
+        code,
+    )
 
 
 def _build_error_message(message: str, process: RackAiCliProcessResult) -> str:
