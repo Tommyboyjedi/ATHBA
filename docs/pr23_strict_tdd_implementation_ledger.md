@@ -87,4 +87,4 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Materialisation: every frontier emits a complete module/test function with required `pass` scaffolding only; original and materialised fragment spans are persisted; later fragments are omitted.
 - Diagnostics: the isolated pytest hook records collection, exact-node discovery, setup/call/teardown, exception, traceback/source line, xfail/xpass, and captured output as structured diagnostic facts. Console text is not used as classifier authority.
 - Focused tests: `17 passed` for `test_python_pytest_adapter.py` plus `test_microcycle_domain.py`.
-- Validation pending: full repository suite, mypy, compileall, coding-principles, diff check, push.
+- Validation: focused 17 passed; full 323 passed; configured mypy 13 files and adapter/probe mypy 2 files passed; compileall, coding-principles, and diff checks passed. Push pending.
