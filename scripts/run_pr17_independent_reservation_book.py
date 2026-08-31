@@ -36,7 +36,8 @@ from core.development.tdd_progression import BehaviorContract, BehaviorContractR
 from core.development.test_evidence_reconciliation import GitAcceptedTestCatalog, TestEvidenceReconciler
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
-from core.execution.rack_ai_contract import RepositoryBinding, to_rack_ai_request
+from core.execution.rack_ai_contract import RepositoryBinding
+from core.execution.rack_ai_request import RackAiRequestBuildRequest
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 from core.llm.contracts.provider import ProviderRetryPolicy
@@ -80,16 +81,33 @@ class PersistingExecutionGateway:
     rack_ai_events: list[dict[str, object]] = field(default_factory=list)
 
     async def execute(self, work_unit: object, repository_binding: RepositoryBinding) -> WorkUnitExecutionResult:
+        typed_request = self.delegate.request_factory.build(
+            RackAiRequestBuildRequest(self.delegate.workload_id, repository_binding, work_unit)
+        )
+        packet_path = Path(self.delegate.config.state_root) / "state" / "changes" / typed_request.change_id / "review-packet.json"
+        started_at = datetime.now(UTC).isoformat()
         event: dict[str, object] = {
-            "request": to_rack_ai_request(self.delegate.workload_id, repository_binding, work_unit),
+            "request": typed_request.to_dict(),
+            "started_at": started_at,
+            "requested_timeout_seconds": typed_request.limits.timeout_seconds,
+            "athba_outer_deadline_seconds": self.delegate.transport.watchdog.deadline_seconds(typed_request),
+            "expected_packet_path": str(packet_path),
         }
         self.rack_ai_events.append(event)
         try:
             result = await self.delegate.execute(work_unit, repository_binding)
         except Exception as error:
+            event["terminal_at"] = datetime.now(UTC).isoformat()
             event["transport_error"] = {"type": type(error).__name__, "message": str(error)}
+            event["packet_exists"] = packet_path.exists()
+            if packet_path.exists():
+                event["packet_payload"] = json.loads(packet_path.read_text(encoding="utf-8"))
             raise
+        event["terminal_at"] = datetime.now(UTC).isoformat()
         event["result"] = asdict(result)
+        event["packet_exists"] = packet_path.exists()
+        if packet_path.exists():
+            event["packet_payload"] = json.loads(packet_path.read_text(encoding="utf-8"))
         if result.accepted:
             if result.accepted_revision is None:
                 raise RuntimeError("Rack AI accepted execution without a trusted revision")
@@ -219,6 +237,7 @@ async def main() -> None:
     evidence_path = run_root / "evidence.json"
     environment = ProjectEnvironmentService(args.projects_root)
     model = os.environ.get("ATHBA_REASONING_MODEL", "local-primary")
+    rack_ai_sha = run(["git", "-C", "/srv/rack-ai", "rev-parse", "HEAD"], cwd=Path("/srv/ATHBA")).strip()
     gateway = build_live_reasoning_gateway(model)
     rack_ai_events: list[dict[str, object]] = []
     project_id = args.run_id
@@ -235,6 +254,8 @@ async def main() -> None:
             {
                 "resumed_at": datetime.now(UTC).isoformat(),
                 "requested_stop_after_approved_cycles": args.stop_after_approved_cycles,
+                "pre_resume_current_pool": TddStateRepo(run_root / "tdd-state").load(project_id).contract_runs[contract.id].current_pool,
+                "pre_resume_completed_requirement_refs": TddStateRepo(run_root / "tdd-state").load(project_id).contract_runs[contract.id].completed_requirement_refs,
             }
         )
     else:
@@ -253,6 +274,7 @@ async def main() -> None:
                 "runtime": {"python_executable": "/srv/ATHBA/.venv/bin/python", "pytest": True},
             },
             "rack_ai_modified": False,
+            "rack_ai": {"head_sha": rack_ai_sha},
             "resume_events": [],
         }
     try:
