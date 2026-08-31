@@ -2245,6 +2245,50 @@ async def test_dependency_prerequisite_planner_sends_reasoning_request_boundary(
 
 
 @pytest.mark.asyncio
+async def test_dependency_prerequisite_planner_repairs_empty_already_planned_prerequisites():
+    payload = contract().to_dict()
+    payload["observable_requirements"][1]["depends_on"] = ["RB-1"]
+    invalid = {
+        "disposition": "already_planned",
+        "parent_requirement_ref": "RB-2",
+        "prerequisite_refs": [],
+        "rationale": "The contract already covers this dependency.",
+        "prerequisite_observable": None,
+    }
+    repaired = {
+        "disposition": "already_planned",
+        "parent_requirement_ref": "RB-2",
+        "prerequisite_refs": ["RB-1"],
+        "rationale": "RB-1 is the existing planned prerequisite for the blocked reservation behavior.",
+        "prerequisite_observable": None,
+    }
+    gateway = FakeReasoningGateway([invalid, repaired])
+    evidence = FailureObservation(
+        source="pytest",
+        message="ImportError while collecting the blocked reservation test.",
+        evidence_refs=["tests/test_reservation_book.py::test_reserve_reduces_capacity"],
+        plausible=[FailureClassification.TEST_COLLECTION_OR_BOOTSTRAP_FAILURE],
+        stderr="ImportError: missing reservation dependency",
+        status="checks_failed",
+    )
+
+    decision = await DependencyPrerequisitePlanner(gateway).decide(
+        DependencyDecisionRequest(
+            contract=BehaviorContract.from_dict(payload),
+            step=proposal("RB-2"),
+            evidence=evidence,
+            trusted_revision="f" * 40,
+        )
+    )
+
+    assert decision.disposition is DependencyDisposition.ALREADY_PLANNED
+    assert decision.prerequisite_refs == ["RB-1"]
+    assert gateway.requests[1].purpose == "athba_dependency_prerequisite_decision_repair"
+    assert "accepted dependency decisions require prerequisites" in gateway.requests[1].prompt
+    assert "never use an empty prerequisite_refs list" in gateway.requests[1].prompt
+
+
+@pytest.mark.asyncio
 async def test_dependency_prerequisite_planner_repairs_fenced_json_response():
     payload = contract().to_dict()
     payload["observable_requirements"][1]["depends_on"] = ["RB-1"]

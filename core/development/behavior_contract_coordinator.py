@@ -596,7 +596,12 @@ def _dependency_decision_from_response(
 
 
 def _is_recoverable_dependency_error(error: ValueError) -> bool:
-    return str(error) == "dependency decision response was not valid JSON"
+    return str(error) in {
+        "dependency decision response was not valid JSON",
+        "accepted dependency decisions require prerequisites",
+        "existing planned dependency must reference contract requirements",
+        "a justified prerequisite decision must add one smallest prerequisite",
+    }
 
 
 def _is_recoverable_semantic_review_error(error: ValueError) -> bool:
@@ -679,7 +684,7 @@ def _dependency_decision_repair_prompt(
             "repair_rules": [
                 "retain the blocked requirement ref exactly",
                 "choose exactly one bounded dependency disposition",
-                "for already_planned, use only existing planned requirement refs",
+                "for already_planned, include one or more existing planned requirement refs and never use an empty prerequisite_refs list",
                 "for add_prerequisite, add exactly one smallest observable prerequisite",
                 "do not prescribe implementation steps, tests, or patches",
                 "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",

@@ -35,7 +35,10 @@ class DependencyDecision:
         _require_text(self.parent_requirement_ref, "dependency decision parent requirement")
         _require_text(self.rationale, "dependency decision rationale")
         _string_list(self.prerequisite_refs, "dependency prerequisite refs")
-        if self.disposition is not DependencyDisposition.REJECT_DEPENDENCY and not self.prerequisite_refs:
+        if self.disposition in {
+            DependencyDisposition.ALREADY_PLANNED,
+            DependencyDisposition.ADD_PREREQUISITE,
+        } and not self.prerequisite_refs:
             raise ValueError("accepted dependency decisions require prerequisites")
         if self.disposition is DependencyDisposition.ADD_PREREQUISITE:
             _require_text(self.prerequisite_observable or "", "dependency prerequisite observable")
