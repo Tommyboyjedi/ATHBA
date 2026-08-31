@@ -63,3 +63,16 @@ async def test_review_repair_does_not_complete_or_start_next_behavior():
     assert result.behavior_review.verdict == REPAIR_REQUIRED
     assert result.completion.status == "scenario_complete"
     assert starter.requests == []
+
+@pytest.mark.asyncio
+async def test_single_behavior_completion_needs_no_next_scenario_starter():
+    reviewer = Reviewer(APPROVED)
+    service = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer))
+    complete = replace(initial_state(), completion=ScenarioCompletion("scenario_complete", "green"))
+
+    result = await service.complete(BehaviorCompletionCommand(complete))
+
+    assert result.completion.status == "behavior_complete"
+    assert result.behavior_review.verdict == APPROVED
+    assert result.behavior_review.next_behavior_ticket is None
+    assert len(reviewer.requests) == 1

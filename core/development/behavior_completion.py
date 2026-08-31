@@ -58,7 +58,7 @@ class NextBehaviorScenarioStarter(Protocol):
 @dataclass(frozen=True)
 class BehaviorCompletionDependencies:
     reviewer: SeniorBehaviorReviewer
-    next_scenario_starter: NextBehaviorScenarioStarter
+    next_scenario_starter: NextBehaviorScenarioStarter | None = None
 
 
 class BehaviorCompletionService:
@@ -89,6 +89,10 @@ class BehaviorCompletionService:
         return reviewed if review.verdict != APPROVED else await self._start_next(command, reviewed)
 
     async def _start_next(self, command: BehaviorCompletionCommand, state: MicrocycleState) -> MicrocycleState:
+        if self.next_scenario_starter is None:
+            completed = replace(state, completion=replace(state.completion, status="behavior_complete"))
+            self._persist(command, completed)
+            return completed
         ticket = await self.next_scenario_starter.start(
             NextBehaviorRequest(state.scenario_draft.behavior_ref, state.development_base_revision)
         )
