@@ -64,20 +64,33 @@ Semantic review remains a separate bounded state machine.
 
 ## Validation
 
-- Coding gate: pending
-- Mypy: pending
-- Full suite: pending
-- Compileall: pending
-- `git diff --check`: pending
-- `git status --short --branch`: pending
-- `git rev-parse legacy`: pending final verification
+- Coding gate:
+  - `./.venv/bin/python scripts/check_coding_principles.py`
+  - Result: `coding principles gate passed`
+- Mypy:
+  - `./.venv/bin/python -m mypy`
+  - Result: `Success: no issues found in 13 source files`
+- Full suite:
+  - `env DJANGO_SECRET_KEY=athba-test-secret CPU_ONLY=true MONGO_USER=test MONGO_PASS=test ./.venv/bin/python -m pytest -q`
+  - Result: `276 passed, 29294 warnings in 12.07s`
+- Compileall:
+  - `./.venv/bin/python -m compileall athba core llm_service tests scripts`
+  - Result: passed
+- Diff check:
+  - `git diff --check`
+  - Result: passed
+- Legacy verification:
+  - `git rev-parse legacy`
+  - Result: `8334f42a8865b9360972f5e0422a8f61d02dedb6`
 
 ## Milestone commit SHAs
 
-- Pending
+- `cd55953` `Fix phase-aware policy violation routing`
+- `5bb709e` `Document PR17 policy scope routing audit`
+- `8c3bdeb` `Align PR17 failure taxonomy with runtime routes`
 
 ## Residual findings
 
 - None beyond the explicit compatibility-only legacy vocabulary retained for persisted decode.
 
-INCOMPLETE_ITEMS = PRESENT
+INCOMPLETE_ITEMS = NONE
