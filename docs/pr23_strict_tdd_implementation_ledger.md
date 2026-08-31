@@ -68,3 +68,11 @@ Status: rollback baseline established; redesign implementation incomplete
 ## Session note
 
 This session establishes the rollback baseline required by PR22. It does not claim that the strict TDD microcycle redesign is implemented.
+
+## Session 2: language-neutral scenario and microcycle domain
+
+- Domain commit: 4e611da0d1208e89e2e400aae0d971f26daa61e6.
+- Added the isolated typed strict-TDD domain and adapter protocol; no coordinator or Rack AI wiring changed.
+- Compatibility: legacy PR17 full-test state remains untouched; missing microcycle schema versions fail with an explicit migration error.
+- Focused tests: 9 passed. Standard validation: 315 passed, mypy, compileall, coding-principles, and diff checks passed.
+- Conformance fixtures preserve Python loop, C# brace, and VBA If/End If blocks as whole fragments.
