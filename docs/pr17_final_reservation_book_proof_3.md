@@ -1,3 +1,9 @@
+# HISTORICAL EVIDENCE NOTICE
+
+> This document is retained historical evidence.
+> Its progression model is superseded by PR22.
+> It is not the current implementation contract.
+
 # PR17 Final ReservationBook Proof 3
 
 Date: 2026-08-31
