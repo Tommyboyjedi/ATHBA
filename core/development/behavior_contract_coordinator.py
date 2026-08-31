@@ -570,6 +570,11 @@ def _semantic_review_from_response(
         raise ValueError("semantic review candidate revision mismatch")
     if review.step_id != request.cycle.step.step_id:
         raise ValueError("semantic review step id mismatch")
+    out_of_scope_refs = _out_of_scope_review_source_refs(request, review)
+    if out_of_scope_refs:
+        raise ValueError(
+            "semantic review referenced source evidence outside the active review scope"
+        )
     return review
 
 
@@ -596,7 +601,10 @@ def _is_recoverable_dependency_error(error: ValueError) -> bool:
 
 
 def _is_recoverable_semantic_review_error(error: ValueError) -> bool:
-    return str(error) == "semantic review response was not valid JSON"
+    return str(error) in {
+        "semantic review response was not valid JSON",
+        "semantic review referenced source evidence outside the active review scope",
+    }
 
 
 
@@ -612,6 +620,7 @@ def _semantic_review_repair_prompt(
             "project_id": request.contract.project_id,
             "candidate_revision": request.candidate_revision,
             "step": request.cycle.step.to_dict(),
+            "review_scope": _semantic_review_scope(request),
             "invalid_review_draft": invalid_review_text,
             "validation_error": validation_error,
             "required_json_schema": {
@@ -629,6 +638,9 @@ def _semantic_review_repair_prompt(
                 "do not add commentary before or after the JSON",
                 "preserve the exact candidate_revision",
                 "preserve the exact step_id",
+                "review only the active step requirement refs plus already semantically approved requirement refs",
+                "do not require future unmet contract requirements or unrelated public API work in this review result",
+                "if you cite contract source refs in evidence_refs, they must come only from review_scope.allowed_source_refs",
                 "repair_instructions must be empty unless verdict is repair_required",
                 "repair_instructions must be non-empty when verdict is repair_required",
             ],
@@ -2142,6 +2154,15 @@ def _review_prompt(
             "candidate_revision": candidate_revision,
             "step": cycle.step.to_dict(),
             "prior_semantic_revision": run_state.semantic_base_revision,
+            "review_scope": _semantic_review_scope(
+                SemanticReviewRequest(
+                    contract,
+                    run_state,
+                    cycle,
+                    candidate_revision,
+                    review_material,
+                )
+            ),
             "review_material": review_material,
             "required_output": {
                 "verdict": "approved|repair_required|replan_required",
@@ -2159,6 +2180,9 @@ def _review_prompt(
                 "no dead imports or dead code",
                 "no misleading or noisy comments",
                 "no speculative abstractions or future behavior",
+                "review only the active step requirement refs plus already semantically approved requirement refs",
+                "do not fail this candidate solely because other future contract requirements remain unimplemented",
+                "if you cite contract source refs in evidence_refs, they must come only from review_scope.allowed_source_refs",
             ],
         },
         indent=2,
@@ -2225,6 +2249,55 @@ def _normalize_allowed_paths(paths: list[str] | None, *, label: str) -> list[str
     if not isinstance(paths, list):
         raise ValueError(f"{label} must be a list")
     return [_repository_relative_path(path, label=label) for path in paths]
+
+
+def _semantic_review_scope(request: SemanticReviewRequest) -> dict[str, object]:
+    scoped_requirement_refs = [
+        *request.run_state.completed_requirement_refs,
+        *request.cycle.step.requirement_refs,
+    ]
+    return {
+        "active_step_requirement_refs": list(request.cycle.step.requirement_refs),
+        "approved_requirement_refs": list(request.run_state.completed_requirement_refs),
+        "allowed_source_refs": _source_refs_for_requirements(
+            request.contract,
+            scoped_requirement_refs,
+        ),
+    }
+
+
+def _source_refs_for_requirements(
+    contract: BehaviorContract,
+    requirement_refs: list[str],
+) -> list[str]:
+    allowed = set(requirement_refs)
+    source_refs: list[str] = []
+    for requirement in contract.observable_requirements:
+        if requirement.ref not in allowed:
+            continue
+        for source_ref in requirement.source_refs:
+            if source_ref not in source_refs:
+                source_refs.append(source_ref)
+    return source_refs
+
+
+def _out_of_scope_review_source_refs(
+    request: SemanticReviewRequest,
+    review: SemanticReviewResult,
+) -> list[str]:
+    contract_source_refs = {clause.ref for clause in request.contract.source_clauses}
+    allowed_source_refs = set(
+        _source_refs_for_requirements(
+            request.contract,
+            [*request.run_state.completed_requirement_refs, *request.cycle.step.requirement_refs],
+        )
+    )
+    out_of_scope = [
+        ref
+        for ref in review.evidence_refs
+        if ref in contract_source_refs and ref not in allowed_source_refs
+    ]
+    return sorted(set(out_of_scope))
 
 
 def _default_review_material_provider(repository_binding: RepositoryBinding) -> ReviewMaterialProvider | None:

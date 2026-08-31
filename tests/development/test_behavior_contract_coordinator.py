@@ -1955,6 +1955,47 @@ async def test_senior_reviewer_prompt_receives_git_review_material(tmp_path: Pat
     assert "production_diff" in gateway.requests[0].prompt
     assert "test_source" in gateway.requests[0].prompt
     assert candidate_revision in gateway.requests[0].prompt
+    assert "allowed_source_refs" in gateway.requests[0].prompt
+    assert "do not fail this candidate solely because other future contract requirements remain unimplemented" in gateway.requests[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_senior_reviewer_repairs_out_of_scope_review_findings():
+    cycle = ContractCycleRecord.from_step(proposal(), base_revision="b" * 40)
+    request_state = run_state(current_pool="review_ready", semantic_base_revision="b" * 40, contract_state=contract())
+    gateway = FakeReasoningGateway([
+        {
+            "verdict": "repair_required",
+            "rationale": "Missing future reservation API.",
+            "findings": ["Future reservation behavior is not implemented."],
+            "candidate_revision": "c" * 40,
+            "step_id": cycle.step.step_id,
+            "evidence_refs": ["SRC-3"],
+            "repair_instructions": ["Implement reservation support."],
+        },
+        {
+            "verdict": "approved",
+            "rationale": "The candidate satisfies the active add-resource step.",
+            "findings": ["The active step is implemented cleanly."],
+            "candidate_revision": "c" * 40,
+            "step_id": cycle.step.step_id,
+            "evidence_refs": ["SRC-1", "SRC-2"],
+            "repair_instructions": [],
+        },
+    ])
+
+    review = await SeniorReviewer(gateway).review(
+        contract=contract(),
+        run_state=request_state,
+        cycle=replace(cycle, candidate_revision="c" * 40),
+        candidate_revision="c" * 40,
+        review_material="candidate source",
+    )
+
+    assert review.verdict == "approved"
+    assert gateway.requests[1].purpose == "athba_senior_review_repair"
+    assert "active review scope" in gateway.requests[1].prompt
+    assert '"allowed_source_refs": [' in gateway.requests[1].prompt
 
 
 @pytest.mark.asyncio
