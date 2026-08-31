@@ -31,8 +31,6 @@ class WorkUnitExecutionResult:
     evidence_location: str | None = None
     worktree_path: str | None = None
     error: str | None = None
-    stdout: str | None = None
-    stderr: str | None = None
     policy_evidence: ExecutionPolicyEvidence | None = None
 
 
