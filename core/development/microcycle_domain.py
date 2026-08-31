@@ -118,6 +118,7 @@ class ScenarioFragment:
     source: str
     declared_capability: str
     depends_on: tuple[str, ...] = ()
+    source_span: SourceSpan | None = None
 
     def __post_init__(self) -> None:
         _texts((self.fragment_id, self.scenario_id, self.kind, self.source, self.declared_capability), "fragment fields")
@@ -130,7 +131,13 @@ class ScenarioFragment:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ScenarioFragment":
-        return cls(str(value["fragment_id"]), str(value["scenario_id"]), str(value["kind"]), str(value["source"]), str(value["declared_capability"]), tuple(value.get("depends_on", ())))
+        source_span = value.get("source_span")
+        return cls(
+            str(value["fragment_id"]), str(value["scenario_id"]), str(value["kind"]),
+            str(value["source"]), str(value["declared_capability"]),
+            tuple(value.get("depends_on", ())),
+            SourceSpan.from_dict(dict(source_span)) if source_span is not None else None,
+        )
 
 
 @dataclass(frozen=True)
@@ -215,21 +222,34 @@ class MaterialisedTestArtifact:
 
 
 @dataclass(frozen=True)
+class DiagnosticFact:
+    name: str
+    value: str
+
+    def __post_init__(self) -> None:
+        _texts((self.name, self.value), "diagnostic fact")
+
+
+@dataclass(frozen=True)
 class BoundaryDiagnostic:
     kind: str
     message: str
     evidence_refs: tuple[str, ...] = ()
+    facts: tuple[DiagnosticFact, ...] = ()
 
     def __post_init__(self) -> None:
         _texts((self.kind, self.message), "diagnostic fields")
         _texts(self.evidence_refs, "diagnostic evidence")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {**asdict(self), "facts": [asdict(item) for item in self.facts]}
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "BoundaryDiagnostic":
-        return cls(str(value["kind"]), str(value["message"]), tuple(value.get("evidence_refs", ())))
+        return cls(
+            str(value["kind"]), str(value["message"]), tuple(value.get("evidence_refs", ())),
+            tuple(DiagnosticFact(str(item["name"]), str(item["value"])) for item in value.get("facts", ())),
+        )
 
 
 @dataclass(frozen=True)
@@ -437,9 +457,18 @@ class FrontierMaterialisationRequest:
 
 
 @dataclass(frozen=True)
+class FrontierExecutionRequest:
+    artifact: MaterialisedTestArtifact
+    project_root: str
+    test_path: str
+
+
+@dataclass(frozen=True)
 class BoundaryClassificationRequest:
     diagnostic: BoundaryDiagnostic
     artifact: MaterialisedTestArtifact
+    active_fragment: ScenarioFragment
+    prior_frontier_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -468,6 +497,7 @@ class LanguageTestAdapter(Protocol):
     def validate_scenario_syntax(self, request: SyntaxValidationRequest) -> bool: ...
     def fragment_scenario(self, request: FragmentationRequest) -> tuple[ScenarioFragment, ...]: ...
     def materialise_frontier(self, request: FrontierMaterialisationRequest) -> MaterialisedTestArtifact: ...
+    def execute_frontier(self, request: FrontierExecutionRequest) -> BoundaryDiagnostic: ...
     def classify_boundary(self, request: BoundaryClassificationRequest) -> BoundaryAssessment: ...
     def materialise_final_test(self, request: FinalTestMaterialisationRequest) -> MaterialisedTestArtifact: ...
     def regression_contract(self, request: RegressionContractRequest) -> RegressionContract: ...
