@@ -13,6 +13,7 @@ from core.development.contract_run_domain import (
     TddStepDecision,
     TddStepProposal,
 )
+from core.development.red_acceptance import RedCandidateAnalysis
 from core.development.specification_domain import (
     ChecklistEvidence,
     ChecklistItemAssessment,
@@ -65,6 +66,7 @@ __all__ = [
     "GATEKEEPER_ASSESSMENT_STATUSES",
     "GatekeeperAssessmentRecord",
     "REVIEW_VERDICTS",
+    "RedCandidateAnalysis",
     "SemanticReviewResult",
     "SourceRequirementClause",
     "SpecificationChecklist",

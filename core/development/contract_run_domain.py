@@ -5,6 +5,7 @@ from typing import Any
 
 from core.development.behavior_contract_domain import BehaviorContract
 from core.development.failure_state import FailureProgressState, validate_failure_progress_state
+from core.development.red_acceptance import RedCandidateAnalysis
 from core.development.progression import ExecutionAttemptRecord
 from core.development.specification_domain import SpecificationGatekeeperRunState
 from core.development.tdd_domain import TddPhaseState, green_work_unit_id, red_work_unit_id
@@ -179,6 +180,7 @@ class ContractCycleRecord:
     semantic_revision: str | None = None
     review_result: SemanticReviewResult | None = None
     review_history: list[SemanticReviewResult] = field(default_factory=list)
+    red_analysis: RedCandidateAnalysis | None = None
     repair_attempts: int = 0
 
     def __post_init__(self) -> None:
@@ -207,6 +209,7 @@ class ContractCycleRecord:
             "semantic_revision": self.semantic_revision,
             "review_result": None if self.review_result is None else self.review_result.to_dict(),
             "review_history": [item.to_dict() for item in self.review_history],
+            "red_analysis": None if self.red_analysis is None else self.red_analysis.to_dict(),
             "repair_attempts": self.repair_attempts,
         }
 
@@ -215,6 +218,7 @@ class ContractCycleRecord:
         red_phase = payload.get("red_phase")
         green_phase = payload.get("green_phase")
         review_result = payload.get("review_result")
+        red_analysis = payload.get("red_analysis")
         return cls(
             step=TddStepProposal.from_dict(dict(payload["step"])),
             pool=str(payload["pool"]),
@@ -225,6 +229,7 @@ class ContractCycleRecord:
             semantic_revision=payload.get("semantic_revision"),
             review_result=None if review_result is None else SemanticReviewResult.from_dict(dict(review_result)),
             review_history=[SemanticReviewResult.from_dict(dict(item)) for item in payload.get("review_history", [])],
+            red_analysis=None if red_analysis is None else RedCandidateAnalysis.from_dict(dict(red_analysis)),
             repair_attempts=int(payload.get("repair_attempts", 0)),
         )
 

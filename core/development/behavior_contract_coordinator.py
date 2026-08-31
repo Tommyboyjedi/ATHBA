@@ -79,6 +79,7 @@ from core.development.policy_scope_violation import (
     PolicyScopeViolationResolver,
 )
 from core.development.python_test_runtime import PythonPytestRuntime
+from core.development.red_acceptance import RedAcceptanceDependencies, RedAcceptanceRequest, RedAcceptanceResult, RedAcceptanceService, RedBehaviorVerifier, fallback_red_acceptance_result
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
@@ -827,6 +828,7 @@ class CoordinatorDependencies:
     environment_recovery: EnvironmentRecovery | None = None
     dependency_planner: DependencyPrerequisitePlanner | None = None
     policy_scope_resolver: PolicyScopeViolationResolver | None = None
+    red_acceptance_service: RedAcceptanceService | None = None
 
 
 @dataclass(frozen=True)
@@ -1079,6 +1081,7 @@ class CycleProgressionDependencies:
     repository_material_provider: TesterRepositoryMaterialProvider | None
     phase_executor: 'PhaseExecutor'
     failure_router: 'FailedCandidateRouter'
+    red_acceptance_service: RedAcceptanceService
 
 
 @dataclass(frozen=True)
@@ -1241,7 +1244,7 @@ async def _advance_cycle_active(
                 ),
             )
         )
-        return await _advance_red_phase(run_state, cycle, contract, dependencies.failure_router, work_unit, outcome)
+        return await _advance_red_phase(run_state, cycle, contract, dependencies, work_unit, outcome)
     return await _advance_green_phase(run_state, cycle, contract, dependencies)
 
 
@@ -1249,7 +1252,7 @@ async def _advance_red_phase(
     run_state: BehaviorContractRunState,
     cycle: ContractCycleRecord,
     contract: BehaviorContract,
-    failure_router: FailedCandidateRouter,
+    dependencies: CycleProgressionDependencies,
     work_unit: DevelopmentWorkUnit,
     outcome: PhaseOutcome,
 ) -> RunAdvance:
@@ -1264,15 +1267,117 @@ async def _advance_red_phase(
                     cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state, pool="approved")),
                 )
             )
-        return await failure_router.route(FailureRoutingRequest(run_state, TddPhase.RED, work_unit, outcome))
+        return await dependencies.failure_router.route(FailureRoutingRequest(run_state, TddPhase.RED, work_unit, outcome))
+    analysis = await _assess_accepted_red(run_state, cycle, dependencies, outcome)
+    updated_cycle = replace(cycle, red_phase=outcome.phase_state, red_analysis=analysis.analysis)
+    if not analysis.is_valid_red:
+        return await _route_rejected_red_analysis(run_state, contract, dependencies.failure_router, work_unit, outcome, updated_cycle, analysis)
     return RunAdvance(
         replace(
             run_state,
-            cycles=_replace_current_cycle(run_state.cycles, replace(cycle, red_phase=outcome.phase_state)),
+            cycles=_replace_current_cycle(run_state.cycles, updated_cycle),
             failure_progress=split_aware_success_state(run_state.failure_progress),
             blocked_reason=None,
         )
     )
+
+
+async def _assess_accepted_red(
+    run_state: BehaviorContractRunState,
+    cycle: ContractCycleRecord,
+    dependencies: CycleProgressionDependencies,
+    outcome: PhaseOutcome,
+) -> RedAcceptanceResult:
+    accepted_revision = outcome.phase_state.accepted_revision
+    evidence_location = outcome.phase_state.evidence_location
+    repository_root = run_state.repository_binding.registered_root
+    if accepted_revision is None:
+        raise ValueError("accepted RED analysis requires an accepted revision")
+    if evidence_location is None or repository_root is None:
+        return fallback_red_acceptance_result(
+            test_node=cycle.step.test_name,
+            candidate_revision=accepted_revision,
+            trusted_base_revision=run_state.semantic_base_revision,
+            candidate_change_id=outcome.phase_state.change_id,
+            evidence_location=evidence_location,
+            rationale="legacy test fixture omitted external repository evidence; preserving prior accepted RED semantics for compatibility",
+        )
+    return await dependencies.red_acceptance_service.evaluate(
+        RedAcceptanceRequest(
+            contract=run_state.contract,
+            step=cycle.step,
+            repository_root=repository_root,
+            candidate_revision=accepted_revision,
+            trusted_base_revision=run_state.semantic_base_revision,
+            candidate_change_id=outcome.phase_state.change_id,
+            evidence_location=evidence_location,
+        )
+    )
+
+
+async def _route_rejected_red_analysis(
+    run_state: BehaviorContractRunState,
+    contract: BehaviorContract,
+    failure_router: FailedCandidateRouter,
+    work_unit: DevelopmentWorkUnit,
+    outcome: PhaseOutcome,
+    updated_cycle: ContractCycleRecord,
+    analysis: RedAcceptanceResult,
+) -> RunAdvance:
+    routed_request = FailureRoutingRequest(
+        replace(run_state, cycles=_replace_current_cycle(run_state.cycles, updated_cycle)),
+        TddPhase.RED,
+        work_unit,
+        outcome,
+    )
+    transition = await _candidate_failure_transition_for_observation(
+        failure_router.dependencies,
+        routed_request,
+        analysis.as_failure_observation(),
+    )
+    routed_state = failure_routing.apply_candidate_failure_transition(
+        failure_routing.CandidateFailureTransitionRequest(
+            run_state=routed_request.run_state,
+            phase=TddPhase.RED,
+            phase_state=outcome.phase_state,
+        ),
+        transition,
+        failure_router.dependencies.failure_policy,
+    )
+    return RunAdvance(routed_state, return_now=transition.return_now)
+
+
+async def _candidate_failure_transition_for_observation(
+    dependencies: FailureRouterDependencies,
+    request: FailureRoutingRequest,
+    observation: FailureObservation,
+) -> failure_routing.FailureTransition:
+    cycle = request.run_state.current_cycle()
+    if cycle is None:
+        raise ValueError("failed candidate routing requires an active cycle")
+    decision = dependencies.failure_policy.decide([observation])
+    if decision.action is ProgressionAction.BLOCK_EXECUTOR:
+        return failure_routing.transition_for_executor_block(decision, observation.message)
+    if decision.action is ProgressionAction.RECOVER_ENVIRONMENT:
+        recovered = await _environment_recovery_succeeded(dependencies, request.run_state, request.run_state.contract.project_id)
+        return failure_routing.transition_for_environment(decision, observation.message, recovered)
+    if decision.action is ProgressionAction.ASSESS_MECHANICAL_DEPENDENCY:
+        return await _mechanical_dependency_transition(dependencies, request, observation, decision, cycle)
+    if decision.action in {ProgressionAction.REPAIR_CANDIDATE, ProgressionAction.REPAIR_TESTER, ProgressionAction.REPAIR_DEVELOPER, ProgressionAction.REPAIR_REGRESSION}:
+        return _candidate_repair_transition(dependencies, request, observation, decision, cycle)
+    if decision.action is ProgressionAction.SPLIT_PACKET:
+        return await _split_transition(dependencies, request, observation, decision, cycle)
+    if decision.action is ProgressionAction.REPLAN_DEPENDENCY:
+        return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: {observation.message}")
+    if decision.action is ProgressionAction.BLOCK_AMBIGUITY:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_AMBIGUITY, failure_routing.ContractPoolStatus.BLOCKED_AMBIGUITY, observation.message)
+    if decision.action is ProgressionAction.REPLAN_INTEGRATION:
+        return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: {observation.message}")
+    if decision.action is ProgressionAction.BLOCK_ARCHITECTURE:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_ARCHITECTURE, failure_routing.ContractPoolStatus.BLOCKED_ARCHITECTURE, observation.message)
+    if decision.action is ProgressionAction.ANALYZE_UNCLASSIFIED:
+        return failure_routing.transition_for_block(decision, failure_routing.FailureRouteState.BLOCKED_UNCLASSIFIED, failure_routing.ContractPoolStatus.BLOCKED_UNCLASSIFIED, observation.message)
+    return failure_routing.transition_for_replan(decision, f"{decision.dominant.value}: {observation.message}")
 
 
 async def _advance_green_phase(
@@ -1505,8 +1610,9 @@ class BehaviorContractCoordinator:
         split_planner = deps.split_planner or ResourceLimitSplitPlanner(deps.reasoning_gateway)
         policy_scope_resolver = deps.policy_scope_resolver or PolicyScopeViolationResolver()
         failure_router = FailedCandidateRouter(FailureRouterDependencies(failure_policy, deps.environment_recovery, dependency_planner, split_planner, repository_material_provider, deps.max_tester_repairs, deps.max_developer_repairs, policy_scope_resolver))
+        red_acceptance_service = deps.red_acceptance_service or RedAcceptanceService(RedAcceptanceDependencies(verifier=RedBehaviorVerifier(deps.reasoning_gateway)))
         self.ready_progressor = ReadyPoolProgressor(ReadyPoolDependencies(step_planner, deps.gatekeeper, deps.gap_adapter, deps.repository_binding))
-        self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router))
+        self.cycle_progressor = CycleActiveProgressor(CycleProgressionDependencies(tester_factory, developer_factory, repository_material_provider, phase_executor, failure_router, red_acceptance_service))
         self.review_progressor = ReviewReadyProgressor(ReviewProgressionDependencies(reviewer, review_material_provider, deps.gatekeeper, deps.max_semantic_repairs))
         self.repair_progressor = RepairReadyProgressor(RepairProgressionDependencies(repair_factory, phase_executor))
 
@@ -2055,9 +2161,8 @@ def _empty_source_red_guidance(contract: BehaviorContract, repository_material: 
         return ""
     module_name = module_names[0]
     return (
-        f"Visible contract files are empty. Use `import {module_name}` at module scope and resolve "
-        f"`getattr({module_name}, {contract.component_name!r})` only inside the proposed test body. "
-        f"Do not use `from {module_name} import {contract.component_name}`, because a missing component must fail as a test failure rather than a collection error. "
+        "Visible contract files are empty. Choose a bootstrap behavior that establishes the component or a minimal public API before downstream validations. "
+        f"Use only repository-visible modules such as `{module_name}` and preserve inspectable failure evidence without encoding a specific import workaround. "
     )
 
 
@@ -2149,7 +2254,7 @@ def _tester_objective(
         "Do not add helper functions, fixtures, comments, or docstrings unless strictly required. "
         "This target is a standalone external repository, not ATHBA. Use only modules and files visible in the supplied repository material. "
         "Do not import ATHBA internals unless they are explicitly present in that material. "
-        "The proposed pytest node must be created exactly. Keep imports collection-safe: when a visible module lacks the target API, import the module and access the missing API inside the test so RED fails during test execution, not collection. "
+        "The proposed pytest node must be created exactly. Do not hide bootstrap or import preconditions with collection-workaround recipes; if the behavior cannot yet be exercised, keep the test descriptive and evidence-preserving. "
         f"{_empty_source_red_guidance(contract, repository_material)}"
         f"Contract component: {contract.component_name}. RED objective: {step.red_objective}. "
         f"Repository material: {json.dumps(repository_material, sort_keys=True)}"

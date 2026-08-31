@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 
+from core.development.red_acceptance import PROBE_MARKER
+
 import pytest
 
 from core.development.behavior_contract_coordinator import (
@@ -317,14 +319,37 @@ def cannot_split_decision(rationale: str) -> dict[str, object]:
     return {"status": "cannot_split", "rationale": rationale, "child_steps": []}
 
 
+def _write_red_probe_packet(path: str, *, outcome: str = "failed", collection_succeeded: bool = True, requested_node_found: bool = True, requested_node_executed: bool = True, failure_phase: str | None = "call", exception_type: str | None = "AssertionError", failure_message: str | None = "assertion failed") -> str:
+    probe = {
+        "pytest_runtime_available": True,
+        "collection_succeeded": collection_succeeded,
+        "requested_node_found": requested_node_found,
+        "requested_node_executed": requested_node_executed,
+        "outcome": outcome,
+        "failure_phase": failure_phase,
+        "exception_type": exception_type,
+        "failure_message": failure_message,
+        "traceback_location": "tests/test_target.py:7",
+        "stdout": "",
+        "stderr": "",
+        "evidence_refs": [path],
+    }
+    payload = {"commands": [{"stdout": f"{PROBE_MARKER} {json.dumps(probe)}"}]}
+    packet_path = Path(path)
+    packet_path.parent.mkdir(parents=True, exist_ok=True)
+    packet_path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def accepted(work_unit_id: str, revision: str):
+    evidence_location = _write_red_probe_packet(f"/tmp/{work_unit_id}.json")
     return WorkUnitExecutionResult(
         work_unit_id=work_unit_id,
         accepted=True,
         status="checks_passed",
         accepted_revision=revision,
         change_id=f"change-{work_unit_id}",
-        evidence_location=f"/tmp/{work_unit_id}.json",
+        evidence_location=evidence_location,
     )
 
 
@@ -864,7 +889,7 @@ def test_tester_work_unit_receives_external_repository_context_without_athba_ass
     assert "standalone external repository, not ATHBA" in work_unit.objective
     assert "Do not import ATHBA internals" in work_unit.objective
     assert '"module_name": "reservation_book"' in work_unit.objective
-    assert "collection-safe" in work_unit.objective
+    assert "Do not hide bootstrap or import preconditions" in work_unit.objective
 
 
 def test_repository_material_allows_the_first_test_file_to_be_absent(tmp_path: Path):
@@ -896,7 +921,7 @@ def test_repository_material_allows_the_first_test_file_to_be_absent(tmp_path: P
     assert material["all_contract_files_empty"] is True
 
 
-def test_empty_external_source_uses_collection_safe_module_access_in_red_objective():
+def test_empty_external_source_uses_bootstrap_guidance_in_red_objective():
     material = {
         "all_contract_files_empty": True,
         "production_files": [{"module_name": "reservation_book", "content": ""}],
@@ -904,9 +929,9 @@ def test_empty_external_source_uses_collection_safe_module_access_in_red_objecti
 
     work_unit = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), proposal(), material))
 
-    assert "import reservation_book" in work_unit.objective
-    assert "getattr(reservation_book, 'ReservationBook')" in work_unit.objective
-    assert "Do not use `from reservation_book import ReservationBook`" in work_unit.objective
+    assert "Choose a bootstrap behavior" in work_unit.objective
+    assert "reservation_book" in work_unit.objective
+    assert "specific import workaround" in work_unit.objective
 
 
 @pytest.mark.asyncio
