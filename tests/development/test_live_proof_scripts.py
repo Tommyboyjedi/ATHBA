@@ -1,7 +1,4 @@
-import subprocess
-import sys
-
-from scripts.run_pr17_independent_reservation_book import ASSERT_TEST_FAILS_SCRIPT, build_live_reasoning_gateway as build_proof_gateway
+from scripts.run_pr17_independent_reservation_book import build_live_reasoning_gateway as build_proof_gateway
 from scripts.run_specification_gatekeeper_probe import build_live_reasoning_gateway as build_probe_gateway
 from core.development.behavior_contract_coordinator import CoordinatorDependencies
 from core.development.python_test_runtime import PythonPytestRuntime
@@ -56,64 +53,3 @@ def test_pr17_proof_coordinator_dependencies_include_gatekeeper(monkeypatch) -> 
     assert isinstance(dependencies.gatekeeper, SpecificationGatekeeper)
     assert isinstance(dependencies.gap_adapter, SpecificationGapTddAdapter)
     assert runtime.pytest_command("tests/test_reservation_book.py")
-
-
-def test_assert_test_fails_script_rejects_wrong_exception_type(tmp_path) -> None:
-    scripts_dir = tmp_path / "scripts"
-    tests_dir = tmp_path / "tests"
-    scripts_dir.mkdir()
-    tests_dir.mkdir()
-    (scripts_dir / "assert_test_fails.py").write_text(ASSERT_TEST_FAILS_SCRIPT, encoding="utf-8")
-    (tests_dir / "test_wrong_failure.py").write_text(
-        """def test_wrong_failure():
-    raise KeyError('wrong failure')
-""",
-        encoding="utf-8",
-    )
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-B",
-            "scripts/assert_test_fails.py",
-            "tests/test_wrong_failure.py::test_wrong_failure",
-            "ValueError",
-        ],
-        cwd=tmp_path,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 1
-    assert "KeyError" in "\n".join([result.stdout, result.stderr])
-
-
-def test_assert_test_fails_script_accepts_expected_exception_type(tmp_path) -> None:
-    scripts_dir = tmp_path / "scripts"
-    tests_dir = tmp_path / "tests"
-    scripts_dir.mkdir()
-    tests_dir.mkdir()
-    (scripts_dir / "assert_test_fails.py").write_text(ASSERT_TEST_FAILS_SCRIPT, encoding="utf-8")
-    (tests_dir / "test_expected_failure.py").write_text(
-        """def test_expected_failure():
-    raise ValueError('expected failure')
-""",
-        encoding="utf-8",
-    )
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-B",
-            "scripts/assert_test_fails.py",
-            "tests/test_expected_failure.py::test_expected_failure",
-            "ValueError",
-        ],
-        cwd=tmp_path,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0

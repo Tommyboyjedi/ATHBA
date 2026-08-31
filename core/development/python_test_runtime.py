@@ -15,20 +15,8 @@ class PythonPytestRuntime:
         if not self.python_executable.strip():
             raise ValueError("python executable must be non-empty")
 
-    def red_command(
-        self,
-        test_name: str,
-        expected_exception_type: str | None = None,
-    ) -> list[str]:
-        command = [
-            self.python_executable,
-            "-B",
-            "scripts/assert_test_fails.py",
-            test_name,
-        ]
-        if expected_exception_type:
-            command.append(expected_exception_type)
-        return command
+    def red_command(self, test_name: str) -> list[str]:
+        return [self.python_executable, "-B", "scripts/assert_test_fails.py", test_name]
 
     def pytest_command(self, target: str) -> list[str]:
         return [

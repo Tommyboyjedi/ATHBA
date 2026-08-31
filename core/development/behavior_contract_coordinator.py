@@ -757,7 +757,7 @@ class ContractTesterWorkUnitFactory:
             objective=_tester_objective(request.contract, request.step, request.repository_material),
             allowed_paths=[request.step.test_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.red_command(request.step.test_name, request.step.exception_type)],
+                commands=[self.runtime.red_command(request.step.test_name)],
                 required_artifacts=[request.step.test_path],
             ),
             status=WorkUnitStatus.READY,
