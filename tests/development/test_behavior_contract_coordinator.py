@@ -2034,6 +2034,19 @@ def test_targeted_gap_selection_skips_untraceable_checklist_item():
     assert _first_executable_gap(contract(), gatekeeper_state) is traceable
 
 
+def test_targeted_gap_selection_accepts_paraphrased_traceable_gap():
+    paraphrased = SimpleNamespace(
+        checklist_ref="create_reservation",
+        obligation_text="Clients can create uniquely identified reservations for a number of units on a resource.",
+    )
+    gatekeeper_state = SimpleNamespace(
+        checklist=SimpleNamespace(items=[SimpleNamespace(ref="create_reservation", kind="behavior")]),
+        latest_assessment=SimpleNamespace(gaps=[paraphrased]),
+    )
+
+    assert _first_executable_gap(contract(), gatekeeper_state) is paraphrased
+
+
 @pytest.mark.asyncio
 async def test_dependency_prerequisite_planner_sends_reasoning_request_boundary():
     payload = contract_payload()

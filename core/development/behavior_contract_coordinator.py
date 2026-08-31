@@ -65,6 +65,7 @@ from core.development.tdd_progression import (
     red_work_unit_id,
     repair_work_unit_id,
 )
+from core.development.specification_gap_adapter import matching_contract_source_refs_for_gap
 from core.development.specification_gatekeeper import (
     GatekeeperAssessmentRequest,
     GatekeeperStateRequest,
@@ -2090,16 +2091,15 @@ def _repository_material_for_run_state(
 def _first_executable_gap(contract: BehaviorContract, gatekeeper_state):
     if gatekeeper_state.latest_assessment is None:
         return None
-    source_by_ref = {clause.ref: clause for clause in contract.source_clauses}
     item_kinds = {item.ref: item.kind for item in gatekeeper_state.checklist.items}
     for gap in gatekeeper_state.latest_assessment.gaps:
         if item_kinds.get(gap.checklist_ref) not in {"behavior", "validation", "invariant"}:
             continue
-        if gap.checklist_ref in source_by_ref:
-            return gap
-        normalized_gap = " ".join(gap.obligation_text.lower().split())
-        if any(" ".join(clause.text.lower().split()) == normalized_gap for clause in contract.source_clauses):
-            return gap
+        try:
+            matching_contract_source_refs_for_gap(contract, gap)
+        except ValueError:
+            continue
+        return gap
     return None
 
 

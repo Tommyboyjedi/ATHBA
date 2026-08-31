@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from core.development.behavior_contract_coordinator import BehaviorContractCoordinator, SemanticReviewRequest, StepDecisionRequest
+from core.development.specification_gap_adapter import matching_contract_source_refs_for_clause
 from core.development.specification_gatekeeper import (
     ChecklistAtomizationRequest,
     GatekeeperAssessmentRequest,
@@ -183,6 +184,19 @@ def single_item_checklist() -> SpecificationChecklist:
             "items": [checklist_payload()["items"][0]],
         }
     )
+
+
+def test_matching_contract_source_refs_uses_requirement_traceability_for_paraphrase():
+    refs = matching_contract_source_refs_for_clause(
+        contract(),
+        SpecificationChecklistItem(
+            ref="SPEC-PARAPHRASE",
+            text="Clients can add resources to the ReservationBook.",
+            kind="behavior",
+        ),
+    )
+
+    assert refs == {"SPEC-1", "SPEC-2", "SPEC-3"}
 
 
 def approved_cycle(requirement_ref="BC-1", *, step_id="step-1", test_name=None):
