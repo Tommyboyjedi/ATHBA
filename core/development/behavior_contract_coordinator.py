@@ -501,8 +501,6 @@ class DynamicTddPlanner:
             raise ValueError("step proposal test name must be a pytest node id within the selected test path")
         if run_state.repository_binding.registered_root is not None and _has_athba_internal_leakage(proposal):
             raise ValueError("step proposal leaked ATHBA-internal module or path assumptions into an external repository")
-        if _has_exception_semantic_contradiction(proposal):
-            raise ValueError("step proposal exception semantics are internally inconsistent")
         return decision
 
 
@@ -684,8 +682,6 @@ def _dependency_decision_repair_prompt(
                 "for add_prerequisite, add exactly one smallest observable prerequisite",
                 "do not prescribe implementation steps, tests, or patches",
                 "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
-                "proposal.step_id, proposal.test_name, proposal.expected_result, proposal.red_objective, proposal.green_objective, and exception fields must all describe the same behavior",
-                "if proposal.exception_type is present, do not describe the step as success and do not say the operation does not raise that exception",
             ],
         },
         sort_keys=True,
@@ -1945,8 +1941,6 @@ def _step_prompt(
                 "propose one new test node, not a claim that an existing node already exists",
                 "when repository_material.all_contract_files_empty is true, choose a bootstrap behavior that establishes the contract component or one minimal public API operation; do not start with a downstream validation that assumes prior state",
                 "never declare completion unless all requirement refs are already semantically approved in persisted state",
-                "proposal.step_id, proposal.test_name, proposal.expected_result, proposal.red_objective, proposal.green_objective, and exception fields must all describe the same behavior",
-                "if proposal.exception_type is present, do not describe the step as success and do not say the operation does not raise that exception",
             ],
         },
         indent=2,
@@ -1973,7 +1967,6 @@ def _is_recoverable_step_error(error: ValueError) -> bool:
         "step proposal referenced a requirement outside the contract",
         "step proposal test name must be a pytest node id within the selected test path",
         "step proposal leaked ATHBA-internal module or path assumptions into an external repository",
-        "step proposal exception semantics are internally inconsistent",
     }
 
 
@@ -2040,16 +2033,6 @@ def _is_valid_pytest_node_for_path(test_name: str, test_path: str) -> bool:
     prefix = f"{test_path}::"
     function_name = test_name.removeprefix(prefix)
     return test_name.startswith(prefix) and bool(re.fullmatch(r"test_[A-Za-z0-9_]+", function_name))
-
-
-def _has_exception_semantic_contradiction(proposal: TddStepProposal) -> bool:
-    if proposal.exception_type is None:
-        return False
-    red_objective = proposal.red_objective.lower()
-    if any(token in red_objective for token in ("does not raise", "doesn't raise", "without raising")):
-        return True
-    identifiers = f"{proposal.step_id} {proposal.test_name}".lower()
-    return "success" in identifiers
 
 
 def _has_athba_internal_leakage(proposal: TddStepProposal) -> bool:
