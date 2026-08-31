@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 
 from core.development.specification_gap_adapter import matching_contract_source_refs_for_clause
@@ -94,7 +95,7 @@ class ChecklistEvidenceMapper:
 
     async def map(self, request: EvidenceMappingRequest) -> ChecklistItemAssessment:
         result = await self.gateway.reason(_mapping_request(request))
-        payload = _json_object(result.text, label="checklist evidence mapping")
+        payload = _json_object(_normalized_mapping_payload(result.text), label="checklist evidence mapping")
         status = str(payload.get("status"))
         rationale = str(payload.get("rationale", ""))
         selected_test_names = payload.get("selected_test_names", [])
@@ -185,6 +186,14 @@ def _evidence_mapping_prompt(*, item: SpecificationChecklistItem | SourceRequire
         },
         sort_keys=True,
     )
+
+
+def _normalized_mapping_payload(payload_text: str) -> str:
+    cleaned = payload_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, count=1)
+        cleaned = re.sub(r"\s*```$", "", cleaned, count=1)
+    return cleaned
 
 
 def _json_object(text: str, *, label: str) -> dict[str, object]:

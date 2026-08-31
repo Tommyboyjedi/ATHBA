@@ -494,6 +494,38 @@ async def test_accepted_tdd_and_review_evidence_can_prove_independent_items():
 
 
 @pytest.mark.asyncio
+async def test_gatekeeper_accepts_fenced_json_evidence_mapping_response():
+    active_contract = contract()
+    cycle = approved_cycle()
+    checklist = single_item_checklist()
+    gatekeeper = SpecificationGatekeeper(
+        FakeReasoningGateway([
+            "```json\n"
+            + json.dumps(
+                {
+                    "status": "proven",
+                    "rationale": "The accepted add_resource test proves unique resource ids.",
+                    "selected_test_names": [cycle.step.test_name],
+                }
+            )
+            + "\n```"
+        ])
+    )
+
+    state = await gatekeeper.assess(
+        GatekeeperAssessmentRequest(
+            active_contract,
+            run_state(cycles=[cycle], gatekeeper_state=SpecificationGatekeeperRunState(checklist=checklist), contract_state=active_contract),
+            SpecificationGatekeeperRunState(checklist=checklist),
+        )
+    )
+
+    assert state.latest_assessment is not None
+    assert state.latest_assessment.item_assessments[0].status == "proven"
+    assert state.latest_assessment.item_assessments[0].evidence[0].test_name == cycle.step.test_name
+
+
+@pytest.mark.asyncio
 async def test_invented_evidence_is_downgraded_and_state_round_trips():
     active_contract = contract()
     cycle = approved_cycle()
