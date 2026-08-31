@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 
-from core.development.red_acceptance import PROBE_MARKER
+from core.development.red_acceptance import PROBE_MARKER, RedAcceptanceDependencies, RedAcceptanceService
 
 import pytest
 
@@ -26,6 +26,7 @@ from core.development.behavior_contract_coordinator import (
     SemanticReviewRequest,
     SeniorReviewer,
     WorkUnitBuildRequest,
+    _assess_accepted_red,
     _first_executable_gap,
 )
 from core.development.failure_progression import (
@@ -326,6 +327,13 @@ def _write_red_probe_packet(path: str, *, outcome: str = "failed", collection_su
         "requested_node_found": requested_node_found,
         "requested_node_executed": requested_node_executed,
         "outcome": outcome,
+        "reported_node_id": "tests/test_reservation_book.py::test_add_resource_sets_availability",
+        "collected_node_ids": ["tests/test_reservation_book.py::test_add_resource_sets_availability"],
+        "setup_outcome": "passed",
+        "call_outcome": "failed" if requested_node_executed else "not_run",
+        "teardown_outcome": "passed" if requested_node_executed else "not_run",
+        "was_xfail": False,
+        "was_xpass": False,
         "failure_phase": failure_phase,
         "exception_type": exception_type,
         "failure_message": failure_message,
@@ -2040,6 +2048,54 @@ async def test_provider_reasoning_gateway_uses_provider_neutral_adapter():
     assert result.model == "local-reasoner"
     assert provider.calls[0]["model"] == "local-reasoner"
     assert provider.calls[0]["max_tokens"] == 123
+
+
+@pytest.mark.asyncio
+async def test_missing_external_red_evidence_fails_closed():
+    step = proposal()
+    analysis = await _assess_accepted_red(
+        run_state(semantic_base_revision="a" * 40, contract_state=contract(), registered_root="/tmp/external-project"),
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        SimpleNamespace(red_acceptance_service=RedAcceptanceService(RedAcceptanceDependencies())),
+        SimpleNamespace(phase_state=SimpleNamespace(accepted_revision="b" * 40, evidence_location=None, change_id="change-step-1")),
+    )
+
+    assert analysis.is_valid_red is False
+    assert analysis.analysis.artifact_assessment.disposition == "unsupported_or_unclassified"
+    assert analysis.analysis.verifier_result.disposition == "insufficient_evidence"
+    assert analysis.analysis.behavior_evidence.target_operation_executed is False
+
+
+@pytest.mark.asyncio
+async def test_malformed_external_red_probe_fails_closed(tmp_path: Path):
+    repo_root, base_revision, candidate_revision = create_review_repo(tmp_path)
+    packet_path = tmp_path / "malformed-packet.json"
+    packet_path.write_text(json.dumps({"commands": [{"stdout": "not a probe"}]}), encoding="utf-8")
+
+    analysis = await _assess_accepted_red(
+        run_state(semantic_base_revision=base_revision, contract_state=contract(), registered_root=repo_root),
+        ContractCycleRecord.from_step(proposal(), base_revision=base_revision),
+        SimpleNamespace(red_acceptance_service=RedAcceptanceService(RedAcceptanceDependencies())),
+        SimpleNamespace(phase_state=SimpleNamespace(accepted_revision=candidate_revision, evidence_location=str(packet_path), change_id="change-step-1")),
+    )
+
+    assert analysis.is_valid_red is False
+    assert analysis.analysis.verifier_result.disposition == "insufficient_evidence"
+    assert analysis.analysis.artifact_assessment.pytest_probe.requested_node_executed is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_internal_fixture_path_retains_compatibility_fallback():
+    step = proposal()
+    analysis = await _assess_accepted_red(
+        run_state(semantic_base_revision="a" * 40, contract_state=contract(), registered_root=None),
+        ContractCycleRecord.from_step(step, base_revision="a" * 40),
+        SimpleNamespace(red_acceptance_service=RedAcceptanceService(RedAcceptanceDependencies())),
+        SimpleNamespace(phase_state=SimpleNamespace(accepted_revision="b" * 40, evidence_location=None, change_id="change-step-1")),
+    )
+
+    assert analysis.is_valid_red is True
+    assert analysis.analysis.verifier_result.disposition == "valid_red"
 
 
 @pytest.mark.asyncio

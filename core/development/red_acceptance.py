@@ -34,6 +34,7 @@ PYTEST_OUTCOMES = {
     "error",
     "not_run",
 }
+PHASE_OUTCOMES = {"passed", "failed", "skipped", "not_run"}
 RED_VERIFIER_DISPOSITIONS = {
     "valid_red",
     "invalid_test",
@@ -71,6 +72,13 @@ class StructuredPytestRedProbe:
     requested_node_found: bool
     requested_node_executed: bool
     outcome: str
+    reported_node_id: str | None = None
+    collected_node_ids: list[str] = field(default_factory=list)
+    setup_outcome: str = "not_run"
+    call_outcome: str = "not_run"
+    teardown_outcome: str = "not_run"
+    was_xfail: bool = False
+    was_xpass: bool = False
     failure_phase: str | None = None
     exception_type: str | None = None
     failure_message: str | None = None
@@ -81,8 +89,16 @@ class StructuredPytestRedProbe:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "outcome", _enum_value(self.outcome, PYTEST_OUTCOMES, "pytest probe outcome"))
+        _string_list(self.collected_node_ids, "pytest probe collected node ids")
         _string_list(self.evidence_refs, "pytest probe evidence refs")
         for label, value in (
+            ("pytest probe setup outcome", self.setup_outcome),
+            ("pytest probe call outcome", self.call_outcome),
+            ("pytest probe teardown outcome", self.teardown_outcome),
+        ):
+            _enum_value(value, PHASE_OUTCOMES, label)
+        for label, value in (
+            ("pytest probe reported node id", self.reported_node_id),
             ("pytest probe failure phase", self.failure_phase),
             ("pytest probe exception type", self.exception_type),
             ("pytest probe failure message", self.failure_message),
@@ -98,6 +114,13 @@ class StructuredPytestRedProbe:
             "requested_node_found": self.requested_node_found,
             "requested_node_executed": self.requested_node_executed,
             "outcome": self.outcome,
+            "reported_node_id": self.reported_node_id,
+            "collected_node_ids": list(self.collected_node_ids),
+            "setup_outcome": self.setup_outcome,
+            "call_outcome": self.call_outcome,
+            "teardown_outcome": self.teardown_outcome,
+            "was_xfail": self.was_xfail,
+            "was_xpass": self.was_xpass,
             "failure_phase": self.failure_phase,
             "exception_type": self.exception_type,
             "failure_message": self.failure_message,
@@ -115,6 +138,13 @@ class StructuredPytestRedProbe:
             requested_node_found=bool(payload["requested_node_found"]),
             requested_node_executed=bool(payload["requested_node_executed"]),
             outcome=str(payload["outcome"]),
+            reported_node_id=payload.get("reported_node_id"),
+            collected_node_ids=[str(item) for item in payload.get("collected_node_ids", [])],
+            setup_outcome=str(payload.get("setup_outcome", "not_run")),
+            call_outcome=str(payload.get("call_outcome", "not_run")),
+            teardown_outcome=str(payload.get("teardown_outcome", "not_run")),
+            was_xfail=bool(payload.get("was_xfail", False)),
+            was_xpass=bool(payload.get("was_xpass", False)),
             failure_phase=payload.get("failure_phase"),
             exception_type=payload.get("exception_type"),
             failure_message=payload.get("failure_message"),
@@ -850,6 +880,70 @@ def _verifier_result_from_text(text: str, default_refs: list[str]) -> RedVerifie
         rationale=str(payload["rationale"]),
         findings=[str(item) for item in payload.get("findings", [])],
         evidence_refs=[str(item) for item in payload.get("evidence_refs", default_refs)],
+    )
+
+
+def fail_closed_red_acceptance_result(
+    *,
+    test_node: str,
+    candidate_revision: str | None,
+    trusted_base_revision: str | None,
+    candidate_change_id: str | None,
+    evidence_location: str | None,
+    rationale: str,
+) -> RedAcceptanceResult:
+    refs = [item for item in [evidence_location, f"pytest-node:{test_node}"] if item]
+    probe = StructuredPytestRedProbe(
+        pytest_runtime_available=False,
+        collection_succeeded=False,
+        requested_node_found=False,
+        requested_node_executed=False,
+        outcome="not_run",
+        failure_phase="collection",
+        failure_message=rationale,
+        evidence_refs=list(refs),
+    )
+    assessment = TestArtifactAssessment(
+        disposition="unsupported_or_unclassified",
+        rationale=rationale,
+        findings=[rationale],
+        static_analysis=StaticTestAnalysis(parses_successfully=True, requested_node_exists=True),
+        pytest_probe=probe,
+        evidence_refs=list(refs),
+    )
+    evidence = BehaviorEvidence(
+        test_node=test_node,
+        test_path=test_node.split("::", 1)[0],
+        source_location=None,
+        imported_symbols=[],
+        call_targets=[],
+        assertion_targets=[],
+        expected_exception_types=[],
+        target_operation_candidates=[],
+        runtime_failure_phase="collection",
+        runtime_failure_location=None,
+        runtime_exception_type=None,
+        runtime_failure_message=rationale,
+        target_operation_executed=False,
+        findings=[rationale],
+        evidence_refs=list(refs),
+    )
+    verdict = RedVerifierResult(
+        disposition="insufficient_evidence",
+        rationale=rationale,
+        findings=[rationale],
+        evidence_refs=list(refs),
+    )
+    return RedAcceptanceResult(
+        analysis=RedCandidateAnalysis(
+            candidate_change_id=candidate_change_id,
+            candidate_revision=candidate_revision,
+            trusted_base_revision=trusted_base_revision,
+            test_node=test_node,
+            artifact_assessment=assessment,
+            behavior_evidence=evidence,
+            verifier_result=verdict,
+        )
     )
 
 

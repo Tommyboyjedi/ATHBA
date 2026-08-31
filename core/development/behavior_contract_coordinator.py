@@ -79,7 +79,7 @@ from core.development.policy_scope_violation import (
     PolicyScopeViolationResolver,
 )
 from core.development.python_test_runtime import PythonPytestRuntime
-from core.development.red_acceptance import RedAcceptanceDependencies, RedAcceptanceRequest, RedAcceptanceResult, RedAcceptanceService, RedBehaviorVerifier, fallback_red_acceptance_result
+from core.development.red_acceptance import RedAcceptanceDependencies, RedAcceptanceRequest, RedAcceptanceResult, RedAcceptanceService, RedBehaviorVerifier, fail_closed_red_acceptance_result, fallback_red_acceptance_result
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
@@ -1293,7 +1293,7 @@ async def _assess_accepted_red(
     repository_root = run_state.repository_binding.registered_root
     if accepted_revision is None:
         raise ValueError("accepted RED analysis requires an accepted revision")
-    if evidence_location is None or repository_root is None:
+    if repository_root is None:
         return fallback_red_acceptance_result(
             test_node=cycle.step.test_name,
             candidate_revision=accepted_revision,
@@ -1302,17 +1302,36 @@ async def _assess_accepted_red(
             evidence_location=evidence_location,
             rationale="legacy test fixture omitted external repository evidence; preserving prior accepted RED semantics for compatibility",
         )
-    return await dependencies.red_acceptance_service.evaluate(
-        RedAcceptanceRequest(
-            contract=run_state.contract,
-            step=cycle.step,
-            repository_root=repository_root,
+    if evidence_location is None:
+        return fail_closed_red_acceptance_result(
+            test_node=cycle.step.test_name,
+            candidate_revision=accepted_revision,
+            trusted_base_revision=run_state.semantic_base_revision,
+            candidate_change_id=outcome.phase_state.change_id,
+            evidence_location=None,
+            rationale="trusted RED evidence was missing for a registered external project",
+        )
+    try:
+        return await dependencies.red_acceptance_service.evaluate(
+            RedAcceptanceRequest(
+                contract=run_state.contract,
+                step=cycle.step,
+                repository_root=repository_root,
+                candidate_revision=accepted_revision,
+                trusted_base_revision=run_state.semantic_base_revision,
+                candidate_change_id=outcome.phase_state.change_id,
+                evidence_location=evidence_location,
+            )
+        )
+    except ValueError as error:
+        return fail_closed_red_acceptance_result(
+            test_node=cycle.step.test_name,
             candidate_revision=accepted_revision,
             trusted_base_revision=run_state.semantic_base_revision,
             candidate_change_id=outcome.phase_state.change_id,
             evidence_location=evidence_location,
+            rationale=f"trusted RED evidence was unavailable or malformed for a registered external project: {error}",
         )
-    )
 
 
 async def _route_rejected_red_analysis(
