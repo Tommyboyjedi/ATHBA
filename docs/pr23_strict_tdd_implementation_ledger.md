@@ -177,3 +177,10 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Focused validation: 21 passed across behavior completion, provider review, behavior repair, strict microcycle, and deterministic regression tests. Coding-principles and compileall gates passed before full validation.
 - Implementation commit: `90f3196` development: complete behavior review repair route.
 - INCOMPLETE_ITEMS = PRESENT because the requested live proof remains deliberately unrun.
+
+
+## Session 8A final validation
+
+- Full required pytest suite passed with the mandated Django test environment.
+- Required gates passed: coding-principles, mypy, compileall, git diff --check, clean pushed PR23 status, and immutable legacy verification.
+- Pushed commits: `90f3196` implementation and `52b9760` Session 8A ledger.
