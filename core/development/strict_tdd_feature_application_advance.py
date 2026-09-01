@@ -22,6 +22,8 @@ from core.development.strict_tdd_feature_domain import (
 from core.development.strict_tdd_transitions import (
     FeatureAdvanceResult,
     FeatureTransitionKind,
+    ScenarioAdvanceResult,
+    StrictTddTransitionPath,
     TransitionFingerprint,
 )
 
@@ -187,12 +189,31 @@ async def _advance_scenario(
             evidence_refs=(*state.evidence_refs, *outcome.evidence_refs),
         )
         service.states.save(updated)
-        return _result_for(FeatureTransitionKind.SCENARIO_ADVANCED, updated, project, behavior_ref=behavior.ref)
+        return _result_for(
+            FeatureTransitionKind.SCENARIO_ADVANCED,
+            updated,
+            project,
+            behavior_ref=behavior.ref,
+            scenario_transition=advanced,
+        )
     if outcome.blocked_reason is not None or outcome.status in {"scenario_draft_blocked", "replan_required", "attempts_exhausted", "blocked"}:
         updated = service._after_scenario(state, outcome)
         service.states.save(updated)
-        return _result_for(FeatureTransitionKind.BLOCKED, updated, project, updated.blocked_reason, behavior.ref)
-    return _result_for(FeatureTransitionKind.SCENARIO_ADVANCED, state, project, behavior_ref=behavior.ref)
+        return _result_for(
+            FeatureTransitionKind.BLOCKED,
+            updated,
+            project,
+            updated.blocked_reason,
+            behavior.ref,
+            scenario_transition=advanced,
+        )
+    return _result_for(
+        FeatureTransitionKind.SCENARIO_ADVANCED,
+        state,
+        project,
+        behavior_ref=behavior.ref,
+        scenario_transition=advanced,
+    )
 
 
 def _record_completed_behavior(
@@ -247,6 +268,7 @@ def _result_for(
     blocker: str | None = None,
     behavior_ref: str | None = None,
     reasoning: bool = False,
+    scenario_transition: ScenarioAdvanceResult | None = None,
 ) -> FeatureAdvanceResult:
     fingerprint = TransitionFingerprint(
         state.status,
@@ -257,6 +279,11 @@ def _result_for(
         state.working_revision,
         (len(state.completed_behaviors),),
         _pending_action(state),
+    )
+    path = StrictTddTransitionPath(
+        kind,
+        scenario_transition.kind if scenario_transition is not None else None,
+        scenario_transition.microcycle_kind if scenario_transition is not None else None,
     )
     return FeatureAdvanceResult(
         kind,
@@ -270,13 +297,15 @@ def _result_for(
         state.working_ref,
         state.working_revision,
         state.evidence_refs,
-        reasoning,
-        False,
-        False,
+        scenario_transition.external_reasoning_invoked if scenario_transition is not None else reasoning,
+        scenario_transition.rack_ai_invoked if scenario_transition is not None else False,
+        scenario_transition.deterministic_regression_invoked if scenario_transition is not None else False,
         kind not in {FeatureTransitionKind.FEATURE_COMPLETED, FeatureTransitionKind.BLOCKED},
         blocker,
         fingerprint,
         _result(project, state),
+        scenario_transition.candidate_revision if scenario_transition is not None else None,
+        path,
     )
 
 

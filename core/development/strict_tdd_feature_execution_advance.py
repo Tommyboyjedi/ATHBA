@@ -17,6 +17,7 @@ from core.development.strict_microcycle import StrictMicrocycleRequest
 from core.development.strict_tdd_feature_application import FeatureScenarioRequest, FeatureScenarioResult
 from core.development.strict_tdd_feature_execution import _evidence, _facts, _ticket_for
 from core.development.strict_tdd_transitions import (
+    MicrocycleTransitionKind,
     ScenarioAdvanceResult,
     ScenarioTransitionKind,
     TransitionFingerprint,
@@ -93,6 +94,9 @@ async def advance(
         ),
         reasoning=microcycle.external_reasoning_invoked,
         rack_ai=microcycle.rack_ai_invoked,
+        regression=microcycle.deterministic_regression_invoked,
+        microcycle_kind=microcycle.kind,
+        candidate_revision=microcycle.candidate_revision,
     )
 
 
@@ -258,6 +262,9 @@ def _result(
     outcome: FeatureScenarioResult,
     reasoning: bool = False,
     rack_ai: bool = False,
+    regression: bool = False,
+    microcycle_kind: MicrocycleTransitionKind | None = None,
+    candidate_revision: str | None = None,
 ) -> ScenarioAdvanceResult:
     fingerprint = TransitionFingerprint(
         outcome.status,
@@ -286,6 +293,9 @@ def _result(
         outcome.blocked_reason,
         fingerprint,
         outcome,
+        microcycle_kind,
+        regression,
+        candidate_revision,
     )
 
 

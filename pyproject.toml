@@ -52,6 +52,8 @@ files = [
   "core/llm/providers/openai_provider.py",
   "core/llm/providers/anthropic_provider.py",
   "core/development/strict_tdd_transitions.py",
+  "core/development/strict_tdd_transition_provenance.py",
+  "core/development/strict_tdd_lifecycle_evidence.py",
   "core/development/strict_microcycle_advance.py",
   "core/development/strict_tdd_feature_execution_advance.py",
   "core/development/strict_tdd_feature_application_advance.py",

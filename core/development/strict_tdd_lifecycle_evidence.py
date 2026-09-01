@@ -103,9 +103,10 @@ class StrictTddLifecycleEvent:
     working_ref: str | None = None
     working_revision: str | None = None
     message: str | None = None
+    candidate_revision: str | None = None
 
     def __post_init__(self) -> None:
-        for value in (self.event_id, self.run_id, self.project_id, *self.evidence_refs, *tuple((item for item in (self.scenario_id, self.behavior_ref, self.canonical_ref, self.canonical_revision, self.working_ref, self.working_revision, self.message) if item is not None))):
+        for value in (self.event_id, self.run_id, self.project_id, *self.evidence_refs, *tuple((item for item in (self.scenario_id, self.behavior_ref, self.canonical_ref, self.canonical_revision, self.working_ref, self.working_revision, self.message, self.candidate_revision) if item is not None))):
             _safe(value, 'event value')
         if self.sequence_number < 0:
             raise ValueError('event sequence number must be non-negative')
@@ -127,7 +128,7 @@ class StrictTddLifecycleEvent:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> 'StrictTddLifecycleEvent':
-        return cls(str(value['event_id']), int(value['sequence_number']), datetime.fromisoformat(str(value['occurred_at_utc'])), str(value['run_id']), str(value['project_id']), StrictTddLifecycleEventKind(str(value['event_kind'])), StrictTddLifecycleStatus(str(value['status'])), tuple((str(item) for item in value['evidence_refs'])), value.get('scenario_id'), value.get('behavior_ref'), value.get('frontier_index'), value.get('canonical_ref'), value.get('canonical_revision'), value.get('working_ref'), value.get('working_revision'), value.get('message'))
+        return cls(str(value['event_id']), int(value['sequence_number']), datetime.fromisoformat(str(value['occurred_at_utc'])), str(value['run_id']), str(value['project_id']), StrictTddLifecycleEventKind(str(value['event_kind'])), StrictTddLifecycleStatus(str(value['status'])), tuple((str(item) for item in value['evidence_refs'])), value.get('scenario_id'), value.get('behavior_ref'), value.get('frontier_index'), value.get('canonical_ref'), value.get('canonical_revision'), value.get('working_ref'), value.get('working_revision'), value.get('message'), value.get('candidate_revision'))
 
 @dataclass(frozen=True)
 class LifecycleEventDraft:
@@ -143,9 +144,10 @@ class LifecycleEventDraft:
     working_ref: str | None = None
     working_revision: str | None = None
     message: str | None = None
+    candidate_revision: str | None = None
 
     def materialise(self, context: StrictTddLifecycleRunContext, sequence: int) -> StrictTddLifecycleEvent:
-        return StrictTddLifecycleEvent(self.event_id, sequence, datetime.now(UTC), context.run_id, context.project_id, self.event_kind, self.status, self.evidence_refs, self.scenario_id, self.behavior_ref, self.frontier_index, self.canonical_ref, self.canonical_revision, self.working_ref, self.working_revision, self.message)
+        return StrictTddLifecycleEvent(self.event_id, sequence, datetime.now(UTC), context.run_id, context.project_id, self.event_kind, self.status, self.evidence_refs, self.scenario_id, self.behavior_ref, self.frontier_index, self.canonical_ref, self.canonical_revision, self.working_ref, self.working_revision, self.message, self.candidate_revision)
 
 @dataclass(frozen=True)
 class LifecycleEventAppendRequest:

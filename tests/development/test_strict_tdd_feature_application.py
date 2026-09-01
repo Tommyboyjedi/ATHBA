@@ -16,7 +16,12 @@ from core.development.strict_tdd_feature_application import (
     StrictTddFeatureDependencies,
 )
 from core.development.strict_tdd_feature_domain import StrictTddFeatureRequest
-from core.development.strict_tdd_transitions import ScenarioAdvanceResult, ScenarioTransitionKind, TransitionFingerprint
+from core.development.strict_tdd_transitions import (
+    MicrocycleTransitionKind,
+    ScenarioAdvanceResult,
+    ScenarioTransitionKind,
+    TransitionFingerprint,
+)
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
 
 
@@ -189,5 +194,44 @@ async def test_scenario_completion_and_behavior_recording_are_separate_advances(
     scenario = next(item for item in transitions if item.kind.value == "scenario_advanced")
     recorded = next(item for item in transitions if item.kind.value == "behavior_recorded")
     assert scenario.result.completed_behaviors == ()
+    assert scenario.transition_path is not None
+    assert scenario.transition_path.scenario_kind == ScenarioTransitionKind.SCENARIO_COMPLETED
+    assert recorded.transition_path is not None
+    assert recorded.transition_path.scenario_kind is None
+    assert not recorded.external_reasoning_invoked
+    assert not recorded.rack_ai_invoked
+    assert not recorded.deterministic_regression_invoked
     assert len(recorded.result.completed_behaviors) == 1
     assert len(scenarios.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_nested_microcycle_kind_and_effect_flags_are_forwarded_without_recovery(tmp_path):
+    application, _planner, _gatekeeper, scenarios, _reconciler = service(tmp_path, contract("feature"))
+
+    async def nested(value):
+        outcome = FeatureScenarioResult(
+            value.behavior.ref, f"scenario-{value.behavior.ref}", "green_verified",
+            "refs/heads/main", "a" * 40, "refs/heads/work", "b" * 40, ("evidence://green",),
+        )
+        return ScenarioAdvanceResult(
+            ScenarioTransitionKind.MICROCYCLE_ADVANCED, "frontier_red", "green_verified",
+            outcome.behavior_ref, outcome.scenario_id, outcome.canonical_ref,
+            outcome.canonical_development_base, outcome.working_ref, outcome.working_revision,
+            outcome.evidence_refs, True, True, True, None,
+            TransitionFingerprint("green_verified", outcome.behavior_ref, outcome.scenario_id, 0, "a" * 40, "b" * 40, (), "regression"),
+            outcome, MicrocycleTransitionKind.REGRESSION_CLEAR, True, "c" * 40,
+        )
+
+    scenarios.advance = nested
+    for _ in range(4):
+        await application.advance(request())
+    advanced = await application.advance(request())
+
+    assert advanced.transition_path is not None
+    assert advanced.transition_path.scenario_kind == ScenarioTransitionKind.MICROCYCLE_ADVANCED
+    assert advanced.transition_path.microcycle_kind == MicrocycleTransitionKind.REGRESSION_CLEAR
+    assert advanced.external_reasoning_invoked
+    assert advanced.rack_ai_invoked
+    assert advanced.deterministic_regression_invoked
+    assert advanced.candidate_revision == "c" * 40

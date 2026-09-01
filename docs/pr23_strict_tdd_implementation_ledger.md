@@ -250,3 +250,13 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Added isolated-effect proof for Tester submission versus intent review, each normal microcycle boundary, behavior-repair submission/regression/promotion, and feature scenario completion versus behavior recording.
 - Added direct regression-repair submission, regression, and promotion isolation proof.
 - Added persisted, separately observable verification transitions between repair submission and deterministic regression for both regression and behavior repair.
+
+
+## Session 8B3B2A: typed transition provenance and pure lifecycle projection
+
+- Added immutable `StrictTddTransitionPath` validation and complete feature-level provenance, preserving the exact nested microcycle kind without embedding full state.
+- Scenario-to-feature effect forwarding is direct and typed: external reasoning, Rack AI, and deterministic regression flags are copied from the returned scenario transition. Behavior completion and behavior recording remain separate persisted advances.
+- Added pure typed checkpoint and terminal policy plus a deterministic lifecycle event projector with stable event identities and fallback transition evidence. The projector only emits drafts; it does not persist, invoke a sink, or call an external system.
+- Lifecycle events now retain a candidate revision fact where available. Mypy scope includes all transition, provenance, and lifecycle modules.
+- Focused validation passed: 46 tests across provenance, feature application, and lifecycle evidence. Full required validation and publication evidence follow this implementation entry.
+- INCOMPLETE_ITEMS = PRESENT: outer controller/CLI, lifecycle emission wiring, live composition, tiny live proof, and ReservationBook proof remain deliberately unimplemented or unrun.

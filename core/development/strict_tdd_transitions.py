@@ -63,6 +63,36 @@ class FeatureTransitionKind(str, Enum):
 
 
 @dataclass(frozen=True)
+class StrictTddTransitionPath:
+    """Immutable typed provenance from feature to an optional microcycle."""
+
+    feature_kind: FeatureTransitionKind
+    scenario_kind: ScenarioTransitionKind | None = None
+    microcycle_kind: MicrocycleTransitionKind | None = None
+
+    def __post_init__(self) -> None:
+        if self.microcycle_kind is not None and self.scenario_kind != ScenarioTransitionKind.MICROCYCLE_ADVANCED:
+            raise ValueError("microcycle provenance requires a microcycle scenario transition")
+        if self.scenario_kind == ScenarioTransitionKind.MICROCYCLE_ADVANCED and self.microcycle_kind is None:
+            raise ValueError("microcycle advancement requires its exact microcycle kind")
+        if self.scenario_kind is not None and self.feature_kind not in {
+            FeatureTransitionKind.SCENARIO_ADVANCED,
+            FeatureTransitionKind.BLOCKED,
+        }:
+            raise ValueError("nested scenario provenance requires a scenario-consuming feature transition")
+        if self.feature_kind in {
+            FeatureTransitionKind.PROJECT_LOADED,
+            FeatureTransitionKind.CONTRACT_PERSISTED,
+            FeatureTransitionKind.GATEKEEPER_PERSISTED,
+            FeatureTransitionKind.BEHAVIOR_SELECTED,
+            FeatureTransitionKind.BEHAVIOR_RECORDED,
+            FeatureTransitionKind.RECONCILIATION_COMPLETED,
+            FeatureTransitionKind.FEATURE_COMPLETED,
+        } and (self.scenario_kind is not None or self.microcycle_kind is not None):
+            raise ValueError("feature boundary transition must not claim nested provenance")
+
+
+@dataclass(frozen=True)
 class TransitionFingerprint:
     """Only stable persisted workflow identity; excludes evidence prose and timestamps."""
 
@@ -128,6 +158,15 @@ class ScenarioAdvanceResult:
     blocker_or_replan_reason: str | None
     fingerprint: TransitionFingerprint
     result: FeatureScenarioResult
+    microcycle_kind: MicrocycleTransitionKind | None = None
+    deterministic_regression_invoked: bool = False
+    candidate_revision: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == ScenarioTransitionKind.MICROCYCLE_ADVANCED and self.microcycle_kind is None:
+            raise ValueError("microcycle scenario transition requires a microcycle kind")
+        if self.kind != ScenarioTransitionKind.MICROCYCLE_ADVANCED and self.microcycle_kind is not None:
+            raise ValueError("only microcycle scenario transitions may claim a microcycle kind")
 
 
 @dataclass(frozen=True)
@@ -155,3 +194,9 @@ class FeatureAdvanceResult:
     blocker_or_replan_reason: str | None
     fingerprint: TransitionFingerprint
     result: StrictTddFeatureResult
+    candidate_revision: str | None = None
+    transition_path: StrictTddTransitionPath | None = None
+
+    def __post_init__(self) -> None:
+        if self.transition_path is not None and self.transition_path.feature_kind != self.kind:
+            raise ValueError("feature result kind must agree with its transition path")
