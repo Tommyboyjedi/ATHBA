@@ -1,7 +1,6 @@
 """Session 4 bounded scenario drafting; it deliberately does not run microcycles."""
 from __future__ import annotations
 
-import ast
 import json
 import subprocess
 from dataclasses import dataclass, replace
@@ -19,6 +18,8 @@ from core.development.microcycle_domain import (
     ScenarioFrontier,
     ScenarioIntentResult,
     ScenarioParseRequest,
+    ScenarioSourceCandidate,
+    ScenarioStaticAnalysis,
     SyntaxValidationRequest,
     TestScenarioDraft,
 )
@@ -129,6 +130,14 @@ class ScenarioIntentReviewRequest:
     complete_scenario_source: str
     static_fragment_kinds: tuple[str, ...]
     canonical_test_identity: str
+    static_analysis: ScenarioStaticAnalysis
+
+
+@dataclass(frozen=True)
+class ScenarioCandidatePreparation:
+    candidate: ScenarioSourceCandidate
+    static_analysis: ScenarioStaticAnalysis
+    draft: TestScenarioDraft
 
 
 class ScenarioIntentReviewer:
@@ -164,15 +173,16 @@ class ScenarioFreezeFactory:
     """Builds immutable microcycle planning state without exposing a frontier."""
 
     def freeze(self, request: ScenarioFreezeRequest) -> MicrocycleState:
-        adapter = request.adapter_catalog.for_language(request.draft.language_id)
-        model = adapter.parse_scenario(ScenarioParseRequest(request.draft))
+        approved_draft = replace(request.draft, scenario_rationale=request.intent.rationale)
+        adapter = request.adapter_catalog.for_language(approved_draft.language_id)
+        model = adapter.parse_scenario(ScenarioParseRequest(approved_draft))
         adapter.validate_scenario_syntax(SyntaxValidationRequest(model))
         fragments = adapter.fragment_scenario(FragmentationRequest(model))
         first = fragments[0]
-        frontier = ScenarioFrontier(request.draft.scenario_id, 0, first.fragment_id, (first.fragment_id,))
+        frontier = ScenarioFrontier(approved_draft.scenario_id, 0, first.fragment_id, (first.fragment_id,))
         regression = adapter.regression_contract(RegressionContractRequest(model))
         return MicrocycleState(
-            request.draft,
+            approved_draft,
             request.intent,
             model,
             fragments,
@@ -216,7 +226,7 @@ class ScenarioDraftingService:
                 outcome = await self.submit_candidate(request, binding)
             if outcome.approved or outcome.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value:
                 return outcome
-            if outcome.state.attempts and outcome.state.attempts[-1].intent is not None:
+            if outcome.state.attempts and outcome.state.attempts[-1].status != "candidate_submitted":
                 return outcome
         raise RuntimeError("scenario draft compatibility transition guard exhausted")
 
@@ -254,18 +264,39 @@ class ScenarioDraftingService:
             raise ValueError("scenario intent review requires an unreviewed accepted draft")
         try:
             source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
-            draft = _draft_from_candidate(request, source)
-            intent = await self.intent_reviewer.review(_review_request(draft, request, self.adapter_catalog))
-            reviewed = replace(attempt, status=intent.status, feedback=intent.rationale, intent=intent)
+            prepared = _prepare_candidate(request, attempt, source, self.adapter_catalog)
+            feedback = prepared.static_analysis.rejection_feedback()
+            if feedback is not None:
+                invalid = replace(
+                    attempt,
+                    status="candidate_invalid",
+                    feedback=feedback,
+                    candidate=prepared.candidate,
+                    static_analysis=prepared.static_analysis,
+                )
+                updated = replace(state, attempts=(*state.attempts[:-1], invalid))
+                self.state_store.save(updated)
+                return ScenarioDraftOutcome(updated, False)
+            intent = await self.intent_reviewer.review(
+                _review_request(prepared.draft, request, self.adapter_catalog, prepared.static_analysis)
+            )
+            reviewed = replace(
+                attempt,
+                status=intent.status,
+                feedback=intent.rationale,
+                intent=intent,
+                candidate=prepared.candidate,
+                static_analysis=prepared.static_analysis,
+            )
             updated = replace(state, attempts=(*state.attempts[:-1], reviewed))
             if intent.status == "approved":
                 frozen = ScenarioFreezeFactory().freeze(
-                    ScenarioFreezeRequest(draft, intent, self.adapter_catalog, request.development_base_revision)
+                    ScenarioFreezeRequest(prepared.draft, intent, self.adapter_catalog, request.development_base_revision)
                 )
                 updated = replace(updated, approved_microcycle=frozen, status=ScenarioDraftStatus.APPROVED.value)
             self.state_store.save(updated)
             return ScenarioDraftOutcome(updated, False)
-        except ValueError as error:
+        except (SyntaxError, ValueError) as error:
             invalid = replace(attempt, status="candidate_invalid", feedback=str(error))
             updated = replace(state, attempts=(*state.attempts[:-1], invalid))
             self.state_store.save(updated)
@@ -341,29 +372,46 @@ def _last_feedback(state: ScenarioDraftRunState) -> str | None:
     return state.attempts[-1].feedback if state.attempts else None
 
 
-def _draft_from_candidate(request: ScenarioDraftRequest, source: str) -> TestScenarioDraft:
-    rationale, refs = _metadata(source)
-    if refs != request.source_requirement_refs:
-        raise ValueError("candidate source requirement refs do not match the requested ticket refs")
-    identity = _canonical_python_identity(request.allowed_test_path, source)
-    if identity != request.ticket.test_name:
-        raise ValueError("candidate test identity does not match the behavior ticket")
-    return TestScenarioDraft(
+def _prepare_candidate(
+    request: ScenarioDraftRequest,
+    attempt: ScenarioDraftAttempt,
+    source: str,
+    catalog: LanguageAdapterCatalog,
+) -> ScenarioCandidatePreparation:
+    if attempt.candidate_revision is None or attempt.evidence_location is None:
+        raise ValueError("candidate preparation requires accepted Rack AI evidence")
+    provisional = ScenarioSourceCandidate(
         request.scenario_id,
         request.ticket.step_id,
         request.language_id,
-        source,
-        identity,
         request.allowed_test_path,
-        rationale,
-        refs,
+        source,
+        request.ticket.test_name,
+        attempt.candidate_revision,
+        attempt.evidence_location,
     )
+    adapter = catalog.for_language(request.language_id)
+    analysis = adapter.analyse_candidate(provisional, request.ticket.production_path)
+    candidate = replace(provisional, actual_test_identity=analysis.actual_test_identity)
+    canonical = adapter.canonicalise_candidate(candidate, request.ticket.test_name)
+    draft = TestScenarioDraft(
+        request.scenario_id,
+        request.ticket.step_id,
+        request.language_id,
+        canonical.source,
+        request.ticket.test_name,
+        request.allowed_test_path,
+        "awaiting independent scenario intent review",
+        request.source_requirement_refs,
+    )
+    return ScenarioCandidatePreparation(candidate, analysis, draft)
 
 
 def _review_request(
     draft: TestScenarioDraft,
     request: ScenarioDraftRequest,
     catalog: LanguageAdapterCatalog,
+    static_analysis: ScenarioStaticAnalysis,
 ) -> ScenarioIntentReviewRequest:
     adapter = catalog.for_language(request.language_id)
     model = adapter.parse_scenario(ScenarioParseRequest(draft))
@@ -377,31 +425,8 @@ def _review_request(
         complete_scenario_source=draft.source,
         static_fragment_kinds=tuple(item.kind for item in fragments),
         canonical_test_identity=draft.canonical_test_identity,
+        static_analysis=static_analysis,
     )
-
-
-def _metadata(source: str) -> tuple[str, tuple[str, ...]]:
-    rationale = _metadata_value(source, "# ATHBA-SCENARIO-RATIONALE:")
-    refs = _metadata_value(source, "# ATHBA-SOURCE-REFS:")
-    parsed_refs = tuple(item.strip() for item in refs.split(",") if item.strip())
-    if not rationale or not parsed_refs:
-        raise ValueError("candidate must return scenario rationale and source requirement refs")
-    return rationale, parsed_refs
-
-
-def _metadata_value(source: str, prefix: str) -> str:
-    for line in source.splitlines():
-        if line.startswith(prefix):
-            return line.removeprefix(prefix).strip()
-    return ""
-
-
-def _canonical_python_identity(test_path: str, source: str) -> str:
-    module = ast.parse(source)
-    functions = [node for node in module.body if isinstance(node, ast.FunctionDef)]
-    if len(functions) != 1 or not functions[0].name.startswith("test_"):
-        raise ValueError("candidate must define exactly one canonical pytest test")
-    return f"{test_path}::{functions[0].name}"
 
 
 def _safe_test_path(test_path: str) -> None:
@@ -430,7 +455,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None) -> st
             "id": request.ticket.step_id,
             "behavior": request.ticket.focused_behavior,
             "expected_result": request.ticket.expected_result,
-            "canonical_test_identity": request.ticket.test_name,
+            "planned_canonical_test_identity": request.ticket.test_name,
         },
         "source_requirement_refs": list(request.source_requirement_refs),
         "language": request.language_id,
@@ -448,8 +473,8 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None) -> st
             "edit only the allowed test path",
             "do not edit production code",
             "write one complete syntactically valid scenario",
-            "include # ATHBA-SCENARIO-RATIONALE: followed by concise rationale",
-            "include # ATHBA-SOURCE-REFS: followed by the supplied refs in order",
+            "exercise the declared production path without a substitute implementation or behavior mock",
+            "do not skip, xfail, or evade a missing production capability",
             "do not materialise a frontier or start implementation",
         ],
     }
@@ -469,6 +494,10 @@ def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:
         "static_scenario_facts": {
             "canonical_test_identity": request.canonical_test_identity,
             "fragment_kinds": list(request.static_fragment_kinds),
+            "production_reference_paths": list(request.static_analysis.production_reference_paths),
+            "substitute_definitions": list(request.static_analysis.substitute_definitions),
+            "mocked_behavior_targets": list(request.static_analysis.mocked_behavior_targets),
+            "evasion_markers": list(request.static_analysis.evasion_markers),
         },
         "response_schema": {
             "disposition": "approved | repair_required | wrong_behavior | insufficient_evidence",

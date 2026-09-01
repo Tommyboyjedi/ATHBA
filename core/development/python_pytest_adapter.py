@@ -5,10 +5,11 @@ import ast
 import json
 import os
 import shutil
+import re
 import subprocess
 import sys
 import textwrap
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
@@ -18,7 +19,8 @@ from core.development.microcycle_domain import (
     FragmentSourceSpan, FragmentationRequest, FrontierExecutionRequest,
     FrontierMaterialisationRequest, LanguageAdapterDescriptor, MaterialisedTestArtifact,
     RegressionContract, RegressionContractRequest, ScenarioFragment, ScenarioModel,
-    ScenarioParseRequest, SourceSpan, SyntaxValidationRequest,
+    ScenarioParseRequest, ScenarioSourceCandidate, ScenarioStaticAnalysis, SourceSpan,
+    SyntaxValidationRequest,
 )
 
 PYTHON_LANGUAGE_ID = "python"
@@ -74,6 +76,13 @@ class _Parsed:
     nodes: tuple[_Node, ...]
 
 
+@dataclass(frozen=True)
+class _MockAnalysisRequest:
+    module: ast.Module
+    production_name: str
+    production_module: str
+
+
 class PythonScenarioParser:
     """Parses one ordinary pytest test and rejects dynamic or ambiguous drafts."""
 
@@ -83,7 +92,10 @@ class PythonScenarioParser:
         except SyntaxError as error:
             raise ValueError(f"unsupported or invalid Python scenario syntax: {error.msg}") from error
         functions = [node for node in module.body if isinstance(node, ast.FunctionDef)]
-        if len(functions) != 1 or any(not isinstance(node, (ast.Import, ast.ImportFrom, ast.FunctionDef)) for node in module.body):
+        if len(functions) != 1 or any(
+            not isinstance(node, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign, ast.FunctionDef))
+            for node in module.body
+        ):
             raise ValueError("supported scenarios contain module imports and exactly one test function")
         function = functions[0]
         if not function.name.startswith("test_") or any(self._is_parameterize(item) for item in function.decorator_list):
@@ -169,6 +181,128 @@ class PythonScenarioParser:
             if isinstance(call.func, ast.Attribute):
                 return call.func.attr
         return type(node).__name__
+
+
+class PythonCandidateAnalyzer:
+    """Owns Python candidate validity and production-reference integrity facts."""
+
+    def analyse(
+        self,
+        candidate: ScenarioSourceCandidate,
+        production_path: str,
+    ) -> ScenarioStaticAnalysis:
+        module = ast.parse(candidate.source)
+        functions = [node for node in module.body if isinstance(node, ast.FunctionDef)]
+        if len(functions) != 1 or not functions[0].name.startswith("test_"):
+            raise ValueError("candidate must define exactly one supported pytest test")
+        function = functions[0]
+        identity = f"{candidate.test_path}::{function.name}"
+        production_module = Path(production_path).with_suffix("").as_posix().replace("/", ".")
+        production_name = production_module.rsplit(".", 1)[-1]
+        reference_paths = (production_path,) if self._references(module, production_module) else ()
+        substitutes = self._substitutes(module, production_name)
+        mocked_targets = self._mocked_targets(
+            _MockAnalysisRequest(module, production_name, production_module)
+        )
+        evasions = self._evasions(module)
+        analysis = ScenarioStaticAnalysis(
+            identity,
+            reference_paths,
+            substitutes,
+            mocked_targets,
+            evasions,
+        )
+        if analysis.rejection_feedback() is None:
+            PythonScenarioParser().parse(candidate.source)
+        return analysis
+
+    @staticmethod
+    def _references(module: ast.Module, production_module: str) -> bool:
+        for node in ast.walk(module):
+            if isinstance(node, ast.Import) and any(
+                item.name == production_module or item.name.startswith(f"{production_module}.")
+                for item in node.names
+            ):
+                return True
+            if isinstance(node, ast.ImportFrom) and node.module == production_module:
+                return True
+        return False
+
+    @staticmethod
+    def _substitutes(module: ast.Module, production_name: str) -> tuple[str, ...]:
+        expected = re.sub(r"[^a-z0-9]", "", production_name.lower())
+        matches = []
+        for node in module.body:
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+                defined = re.sub(r"[^a-z0-9]", "", node.name.lower())
+                if defined != "test" and expected in defined and not node.name.startswith("test_"):
+                    matches.append(node.name)
+        return tuple(matches)
+
+    @staticmethod
+    def _mocked_targets(request: _MockAnalysisRequest) -> tuple[str, ...]:
+        lowered = request.production_name.lower()
+        matches = []
+        for node in ast.walk(request.module):
+            if isinstance(node, ast.ClassDef) and "mock" in node.name.lower() and lowered in node.name.lower():
+                matches.append(node.name)
+            if isinstance(node, ast.Call):
+                call_source = ast.unparse(node)
+                if isinstance(node.func, ast.Attribute):
+                    owner = ast.unparse(node.func.value)
+                    if node.func.attr in {"patch", "setattr"} and request.production_module in call_source:
+                        matches.append(owner)
+                if isinstance(node.func, ast.Name) and node.func.id == "patch" and request.production_module in call_source:
+                    matches.append(node.func.id)
+        return tuple(dict.fromkeys(matches))
+
+    @staticmethod
+    def _evasions(module: ast.Module) -> tuple[str, ...]:
+        matches = []
+        for node in ast.walk(module):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"skip", "xfail"}:
+                matches.append(node.func.attr)
+            if isinstance(node, ast.Try):
+                catches_import = any(
+                    isinstance(handler.type, ast.Tuple)
+                    and any(isinstance(item, ast.Name) and item.id in {"ImportError", "ModuleNotFoundError"} for item in handler.type.elts)
+                    or isinstance(handler.type, ast.Name) and handler.type.id in {"ImportError", "ModuleNotFoundError"}
+                    for handler in node.handlers
+                )
+                hides_failure = any(
+                    isinstance(item, ast.Assert) and isinstance(item.test, ast.Constant) and item.test.value is True
+                    for handler in node.handlers
+                    for item in handler.body
+                )
+                if catches_import and hides_failure:
+                    matches.append("missing_capability_evasion")
+        return tuple(dict.fromkeys(matches))
+
+
+class PythonCandidateCanonicaliser:
+    """Renames one supported pytest function before ATHBA freezes its draft."""
+
+    def canonicalise(
+        self,
+        candidate: ScenarioSourceCandidate,
+        planned_identity: str,
+    ) -> ScenarioSourceCandidate:
+        planned_path, separator, planned_name = planned_identity.partition("::")
+        if separator != "::" or planned_path != candidate.test_path or not planned_name.startswith("test_"):
+            raise ValueError("planned pytest identity is invalid")
+        module = ast.parse(candidate.source)
+        function = next(node for node in module.body if isinstance(node, ast.FunctionDef))
+        if function.name == planned_name:
+            return candidate
+        lines = candidate.source.splitlines()
+        line_index = function.lineno - 1
+        lines[line_index] = re.sub(
+            rf"(\s*def\s+){re.escape(function.name)}(?=\s*\()",
+            rf"\1{planned_name}",
+            lines[line_index],
+            count=1,
+        )
+        return replace(candidate, source="\n".join(lines) + "\n")
 
 
 class PythonFrontierMaterialiser:
@@ -317,6 +451,20 @@ class PythonPytestAdapter:
     def validate_scenario_syntax(self, request: SyntaxValidationRequest) -> bool:
         PythonScenarioParser().parse(request.model.complete_source)
         return True
+
+    def analyse_candidate(
+        self,
+        candidate: ScenarioSourceCandidate,
+        production_path: str,
+    ) -> ScenarioStaticAnalysis:
+        return PythonCandidateAnalyzer().analyse(candidate, production_path)
+
+    def canonicalise_candidate(
+        self,
+        candidate: ScenarioSourceCandidate,
+        planned_identity: str,
+    ) -> ScenarioSourceCandidate:
+        return PythonCandidateCanonicaliser().canonicalise(candidate, planned_identity)
 
     def fragment_scenario(self, request: FragmentationRequest) -> tuple[ScenarioFragment, ...]:
         parsed = PythonScenarioParser().parse(request.model.complete_source)

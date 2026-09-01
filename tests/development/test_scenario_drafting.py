@@ -1,9 +1,10 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
-from core.development.microcycle_domain import LanguageAdapterCatalog
+from core.development.microcycle_domain import FinalTestMaterialisationRequest, LanguageAdapterCatalog
 from core.development.python_pytest_adapter import PythonPytestAdapter
 from core.development.scenario_drafting import (
     ScenarioDraftingDependencies,
@@ -315,6 +316,8 @@ async def test_resume_after_approval_reuses_durable_frozen_state_without_submiss
     assert resumed_gateway.calls == []
     assert second.state.approved_microcycle.current_accepted_red_revision is None
     assert second.state.approved_microcycle.developer_attempts == ()
+    assert second.state.attempts[0].candidate is not None
+    assert second.state.attempts[0].candidate.actual_test_identity.endswith("test_catalog_records_item")
 
 
 @pytest.mark.asyncio
@@ -352,3 +355,136 @@ async def test_candidate_submission_and_intent_review_have_isolated_effects():
     assert reviewed.approved
     assert len(gateway.calls) == 1
     assert len(reasoning.requests) == 1
+
+
+
+def plain_catalog_candidate(name="test_model_catalog_behavior", *, prefix="", body=None):
+    scenario_body = body or (
+        "    catalog = Catalog()\n"
+        "    catalog.add('a')\n"
+        "    assert catalog.item_id('a') == 'a'\n"
+    )
+    return f"{prefix}from catalog import Catalog\n\ndef {name}():\n{scenario_body}"
+
+
+@pytest.mark.asyncio
+async def test_plain_candidate_uses_authoritative_provenance_and_adapter_canonicalisation():
+    source = plain_catalog_candidate()
+    service, _gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "h" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"h" * 40: source},
+    )
+
+    outcome = await service.draft(request("catalog"), binding())
+
+    frozen = outcome.state.approved_microcycle
+    assert frozen is not None
+    assert "# ATHBA-SCENARIO" not in frozen.scenario_draft.source
+    assert frozen.scenario_draft.source_requirement_refs == request("catalog").source_requirement_refs
+    assert frozen.scenario_draft.scenario_rationale == "The scenario covers the requested observable behavior."
+    assert frozen.scenario_draft.canonical_test_identity == ticket("catalog").test_name
+    assert "def test_catalog_records_item():" in frozen.scenario_draft.source
+    attempt = outcome.state.attempts[0]
+    assert attempt.candidate is not None
+    assert attempt.candidate.actual_test_identity.endswith("test_model_catalog_behavior")
+    assert attempt.static_analysis is not None
+    assert attempt.static_analysis.production_reference_paths == ("catalog.py",)
+    assert "test_catalog_records_item" in reasoning.requests[0].prompt
+    final_artifact = PythonPytestAdapter().materialise_final_test(
+        FinalTestMaterialisationRequest(
+            frozen.model,
+            frozen.fragments,
+            frozen.development_base_revision,
+        )
+    )
+    assert final_artifact.canonical_test_identity == ticket("catalog").test_name
+    assert "def test_catalog_records_item():" in final_artifact.complete_source
+
+
+@pytest.mark.asyncio
+async def test_model_comments_are_ordinary_source_not_authoritative_metadata():
+    source = plain_catalog_candidate(
+        prefix="# ATHBA-SCENARIO-RATIONALE: untrusted rationale\n# ATHBA-SOURCE-REFS: WRONG-REF\n",
+    )
+    service, _gateway, _reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "i" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"i" * 40: source},
+    )
+
+    outcome = await service.draft(request("catalog"), binding())
+
+    frozen = outcome.state.approved_microcycle
+    assert frozen is not None
+    assert frozen.scenario_draft.source_requirement_refs == ("SRC-CATALOG",)
+    assert frozen.scenario_draft.scenario_rationale == "The scenario covers the requested observable behavior."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "feedback"),
+    [
+        ("from catalog import Catalog\n", "exactly one supported"),
+        (
+            "from catalog import Catalog\n\ndef test_one():\n    assert Catalog\n\ndef test_two():\n    assert Catalog\n",
+            "exactly one supported",
+        ),
+        ("from catalog import Catalog\n\ndef test_broken(:\n    pass\n", "invalid syntax"),
+        (
+            "class Catalog:\n    pass\n\ndef test_catalog():\n    assert Catalog\n",
+            "substitute production implementation",
+        ),
+        (
+            "from unittest.mock import patch\nfrom catalog import Catalog\n\ndef test_catalog():\n    with patch('catalog.Catalog'):\n        assert True\n",
+            "mocks the behavior",
+        ),
+        (
+            "from catalog import Catalog\n\ndef test_catalog():\n    try:\n        from catalog import Catalog\n    except ImportError:\n        assert True\n        return\n    assert Catalog\n",
+            "missing-capability evasion",
+        ),
+        ("def test_catalog():\n    assert True\n", "does not reference"),
+    ],
+)
+async def test_invalid_candidates_receive_specific_deterministic_feedback(source, feedback):
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "j" * 40, "draft-1")],
+        [],
+        {"j" * 40: source},
+    )
+
+    outcome = await service.draft(request("catalog"), binding())
+
+    assert outcome.state.attempts[0].status == "candidate_invalid"
+    assert feedback in outcome.state.attempts[0].feedback
+    assert reasoning.requests == []
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_legitimate_test_data_helper_is_not_globally_prohibited():
+    source = plain_catalog_candidate(
+        prefix="ITEM_ID = 'a'\n\n",
+        body=(
+            "    catalog = Catalog()\n"
+            "    catalog.add(ITEM_ID)\n"
+            "    assert catalog.item_id(ITEM_ID) == ITEM_ID\n"
+        ),
+    )
+    service, _gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "k" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"k" * 40: source},
+    )
+
+    outcome = await service.draft(request("catalog"), binding())
+
+    assert outcome.approved
+    assert reasoning.requests
+
+
+def test_language_neutral_domain_has_no_python_comment_or_name_policy():
+    source = Path("core/development/microcycle_domain.py").read_text(encoding="utf-8")
+
+    assert "ATHBA-SCENARIO-" not in source
+    assert "ast." not in source

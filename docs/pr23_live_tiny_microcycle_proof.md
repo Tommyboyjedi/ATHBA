@@ -4,6 +4,15 @@ Date: 2026-09-01
 
 Status: FAIL -- bounded model-capability blocker during real Tester scenario drafting.
 
+> **Session 8C1 review note:** The historical four-attempt failure remains
+> factual, but the blanket MODEL_CAPABILITY_BLOCKER classification was
+> premature. Later architectural review found that attempts one and two were
+> partly rejected by ATHBA-owned source-metadata and exact-identity
+> requirements, while attempts three and four had distinct scenario defects.
+> See [PR23 scenario submission contract review](pr23_scenario_submission_contract_review.md).
+> This note does not change the recorded live outcome or authorize another run.
+
+
 ## Scope and preconditions
 
 - ATHBA branch: `pr23-strict-tdd-microcycle-implementation` at `c9c30a0355b2389e21ac94e746325ce9600c2b89`.

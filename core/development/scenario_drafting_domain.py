@@ -5,7 +5,12 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
 
-from core.development.microcycle_domain import MicrocycleState, ScenarioIntentResult
+from core.development.microcycle_domain import (
+    MicrocycleState,
+    ScenarioIntentResult,
+    ScenarioSourceCandidate,
+    ScenarioStaticAnalysis,
+)
 from core.development.tdd_progression import TddStepProposal
 
 MAX_TESTER_SCENARIO_ATTEMPTS = 4
@@ -70,6 +75,8 @@ class ScenarioDraftAttempt:
     status: str
     feedback: str | None = None
     intent: ScenarioIntentResult | None = None
+    candidate: ScenarioSourceCandidate | None = None
+    static_analysis: ScenarioStaticAnalysis | None = None
 
     def __post_init__(self) -> None:
         if self.attempt_number < 1:
@@ -83,11 +90,15 @@ class ScenarioDraftAttempt:
         return {
             **asdict(self),
             "intent": None if self.intent is None else self.intent.to_dict(),
+            "candidate": None if self.candidate is None else self.candidate.to_dict(),
+            "static_analysis": None if self.static_analysis is None else asdict(self.static_analysis),
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ScenarioDraftAttempt":
         intent = value.get("intent")
+        candidate = value.get("candidate")
+        static_analysis = value.get("static_analysis")
         return cls(
             attempt_number=int(value["attempt_number"]),
             work_unit_id=str(value["work_unit_id"]),
@@ -97,6 +108,14 @@ class ScenarioDraftAttempt:
             status=str(value["status"]),
             feedback=value.get("feedback"),
             intent=None if intent is None else ScenarioIntentResult.from_dict(dict(intent)),
+            candidate=None if candidate is None else ScenarioSourceCandidate.from_dict(dict(candidate)),
+            static_analysis=None if static_analysis is None else ScenarioStaticAnalysis(
+                actual_test_identity=str(static_analysis["actual_test_identity"]),
+                production_reference_paths=tuple(static_analysis.get("production_reference_paths", ())),
+                substitute_definitions=tuple(static_analysis.get("substitute_definitions", ())),
+                mocked_behavior_targets=tuple(static_analysis.get("mocked_behavior_targets", ())),
+                evasion_markers=tuple(static_analysis.get("evasion_markers", ())),
+            ),
         )
 
 

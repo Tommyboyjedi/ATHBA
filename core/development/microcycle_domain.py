@@ -132,6 +132,71 @@ class ScenarioIntentResult:
 
 
 @dataclass(frozen=True)
+class ScenarioSourceCandidate:
+    """Model-authored source and Rack AI evidence before ATHBA freezes a draft."""
+
+    scenario_id: str
+    behavior_ref: str
+    language_id: str
+    test_path: str
+    source: str
+    actual_test_identity: str
+    candidate_revision: str
+    evidence_location: str
+
+    def __post_init__(self) -> None:
+        _texts(
+            (
+                self.scenario_id,
+                self.behavior_ref,
+                self.language_id,
+                self.test_path,
+                self.source,
+                self.actual_test_identity,
+                self.candidate_revision,
+                self.evidence_location,
+            ),
+            "scenario source candidate fields",
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioSourceCandidate":
+        return cls(**{key: str(item) for key, item in value.items()})
+
+
+@dataclass(frozen=True)
+class ScenarioStaticAnalysis:
+    """Adapter-owned facts about one candidate, before semantic intent review."""
+
+    actual_test_identity: str
+    production_reference_paths: tuple[str, ...] = ()
+    substitute_definitions: tuple[str, ...] = ()
+    mocked_behavior_targets: tuple[str, ...] = ()
+    evasion_markers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _text(self.actual_test_identity, "static analysis test identity")
+        _texts(self.production_reference_paths, "production reference paths")
+        _texts(self.substitute_definitions, "substitute definitions")
+        _texts(self.mocked_behavior_targets, "mocked behavior targets")
+        _texts(self.evasion_markers, "scenario evasion markers")
+
+    def rejection_feedback(self) -> str | None:
+        if self.substitute_definitions:
+            return "candidate defines a substitute production implementation"
+        if self.mocked_behavior_targets:
+            return "candidate mocks the behavior under development"
+        if self.evasion_markers:
+            return "candidate contains a skip, xfail, or missing-capability evasion"
+        if not self.production_reference_paths:
+            return "candidate does not reference the declared production path"
+        return None
+
+
+@dataclass(frozen=True)
 class ScenarioModel:
     scenario_id: str
     language_id: str
@@ -789,6 +854,8 @@ class LanguageTestAdapter(Protocol):
 
     def parse_scenario(self, request: ScenarioParseRequest) -> ScenarioModel: ...
     def validate_scenario_syntax(self, request: SyntaxValidationRequest) -> bool: ...
+    def analyse_candidate(self, candidate: ScenarioSourceCandidate, production_path: str) -> ScenarioStaticAnalysis: ...
+    def canonicalise_candidate(self, candidate: ScenarioSourceCandidate, planned_identity: str) -> ScenarioSourceCandidate: ...
     def fragment_scenario(self, request: FragmentationRequest) -> tuple[ScenarioFragment, ...]: ...
     def materialise_frontier(self, request: FrontierMaterialisationRequest) -> MaterialisedTestArtifact: ...
     def execute_frontier(self, request: FrontierExecutionRequest) -> BoundaryDiagnostic: ...

@@ -301,3 +301,33 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - A comparison against the outer feature transition's canonical-revision field was rejected as a false observation: that projection is feature-level while the scenario is in progress and is not the frontier identity. The durable microcycle state and candidate revision are the authoritative proof sources.
 - Receipt redelivery remains separately permitted: it reuses the prior event ID and sequence before application advance. Its recovery test proves the original application call remains one and that resumed application work is only the distinct subsequent completion transition.
 - COMPLETED_FRONTIER_REPEATED = NO; INCOMPLETE_ITEMS = PRESENT: remaining gates are exactly live tiny proof and ReservationBook proof.
+
+## Session 8C1: scenario submission contract correction
+
+- Replaced model-authored ATHBA metadata envelopes with typed
+  ScenarioSourceCandidate and adapter-owned ScenarioStaticAnalysis records.
+  Source requirement references now remain authoritative in ScenarioDraftRequest
+  and ScenarioDraftRunState; the frozen TestScenarioDraft receives semantic
+  rationale from the approved ScenarioIntentResult.
+- Python/pytest accepts exactly one supported scenario test and deterministically
+  normalises its function name to the planned canonical identity before freeze.
+  The model-authored actual identity remains persisted for traceability.
+- Adapter static analysis records declared production-path references, focused
+  substitute definitions, behavior mocks, and skip/xfail or
+  missing-capability evasions. It fails closed only for those focused defects;
+  ordinary data helpers remain allowed.
+- Added docs/pr23_scenario_submission_contract_review.md, including separate
+  forensic findings for all four historical ToggleSwitch candidates. The
+  historical proof document now clarifies that its blanket model-blocker
+  classification was premature, without rewriting the factual failed run.
+- Focused scenario-contract suite: 19 passed. Required full suite: 460 passed
+  in 142.29 seconds (captured wall duration 144 seconds). The earlier 120-second
+  cutoff was insufficient: the two slowest valid tests were the deterministic
+  runner replay (43.15s) and real-temporary-Git feature composition (23.25s).
+- Final gates: coding-principles PASS; configured mypy (28 files) PASS; explicit
+  changed-module mypy PASS; compileall PASS; git diff --check PASS. Process
+  sampling and verbose output showed no live endpoint, Rack AI CLI, JCode, or
+  network call initiated by this test run.
+- No live proof, ReservationBook, PR21, Rack AI source/configuration change, or
+  merge was performed. INCOMPLETE_ITEMS = PRESENT: the live tiny-feature and
+  fresh ReservationBook proof gates remain deferred.
