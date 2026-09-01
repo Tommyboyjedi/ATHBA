@@ -21,7 +21,8 @@ class Reviewer:
 
     async def review(self, request):
         self.requests.append(request)
-        return BehaviorReviewResult(self.verdict, "reviewed", ("senior/evidence",))
+        findings = ("semantic defect remains",) if self.verdict == REPAIR_REQUIRED else ()
+        return BehaviorReviewResult(self.verdict, "reviewed", ("senior/evidence",), findings)
 
 
 class Starter:

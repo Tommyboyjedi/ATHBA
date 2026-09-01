@@ -27,6 +27,14 @@ class BoundaryOutcome(str, Enum):
     UNSUPPORTED_LANGUAGE_BOUNDARY = "unsupported_language_boundary"
 
 
+class BehaviorReviewVerdict(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REPAIR_REQUIRED = "repair_required"
+    REPLAN_REQUIRED = "replan_required"
+    ATTEMPTS_EXHAUSTED = "attempts_exhausted"
+
+
 class MicrocycleMigrationError(Exception):
     """Raised instead of silently treating an old full-test cycle as a microcycle."""
 
@@ -419,32 +427,137 @@ class RegressionState:
 
 
 @dataclass(frozen=True)
-class BehaviorReviewState:
-    """Persistent outcome of the single post-scenario behavior review."""
+class BehaviorRepairExecution:
+    work_unit_id: str
+    candidate_revision: str | None
+    evidence_refs: tuple[str, ...] = ()
 
-    verdict: str = "pending"
+    def __post_init__(self) -> None:
+        _text(self.work_unit_id, "behavior repair work unit")
+        _texts(self.evidence_refs, "behavior repair evidence")
+
+
+@dataclass(frozen=True)
+class BehaviorRepairProgress:
+    attempts: int = 0
+    current_candidate_revision: str | None = None
+    execution: BehaviorRepairExecution | None = None
+    regression: RegressionState | None = None
+
+    def __post_init__(self) -> None:
+        if self.attempts < 0 or self.attempts > MAX_MICROCYCLE_ATTEMPTS:
+            raise ValueError("behavior repair attempt count is invalid")
+        if self.current_candidate_revision is not None:
+            _text(self.current_candidate_revision, "behavior repair candidate revision")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "attempts": self.attempts,
+            "current_candidate_revision": self.current_candidate_revision,
+            "execution": asdict(self.execution) if self.execution is not None else None,
+            "regression": self.regression.to_dict() if self.regression is not None else None,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "BehaviorRepairProgress":
+        execution = value.get("execution")
+        regression = value.get("regression")
+        return cls(
+            int(value.get("attempts", 0)),
+            value.get("current_candidate_revision"),
+            BehaviorRepairExecution(
+                str(execution["work_unit_id"]),
+                execution.get("candidate_revision"),
+                tuple(execution.get("evidence_refs", ())),
+            ) if execution is not None else None,
+            RegressionState.from_dict(dict(regression)) if regression is not None else None,
+        )
+
+
+@dataclass(frozen=True)
+class BehaviorReplanState:
+    candidate_revision: str
+    rationale: str
+    findings: tuple[str, ...]
+    evidence_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _texts((self.candidate_revision, self.rationale), "behavior replan fields")
+        _texts(self.findings, "behavior replan findings")
+        _texts(self.evidence_refs, "behavior replan evidence")
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "BehaviorReplanState":
+        return cls(
+            str(value["candidate_revision"]),
+            str(value["rationale"]),
+            tuple(value.get("findings", ())),
+            tuple(value.get("evidence_refs", ())),
+        )
+
+
+@dataclass(frozen=True)
+class BehaviorReviewState:
+    """Persistent decision and distinct bounded post-review repair progress."""
+
+    verdict: str = BehaviorReviewVerdict.PENDING.value
     attempts: int = 0
     evidence_refs: tuple[str, ...] = ()
     next_behavior_ticket: str | None = None
+    rationale: str = ""
+    findings: tuple[str, ...] = ()
+    reviewed_candidate_revision: str | None = None
+    repair: BehaviorRepairProgress = BehaviorRepairProgress()
+    replan: BehaviorReplanState | None = None
+    production_diff: str = ""
 
     def __post_init__(self) -> None:
-        _text(self.verdict, "behavior review verdict")
-        if self.attempts < 0 or self.attempts > MAX_MICROCYCLE_ATTEMPTS:
-            raise ValueError("behavior review attempt count is invalid")
+        if self.verdict not in {item.value for item in BehaviorReviewVerdict}:
+            raise ValueError("unsupported behavior review verdict")
+        if self.attempts < 0:
+            raise ValueError("behavior review attempts must not be negative")
         _texts(self.evidence_refs, "behavior review evidence")
+        _texts(self.findings, "behavior review findings")
+        if self.rationale:
+            _text(self.rationale, "behavior review rationale")
+        if self.verdict == BehaviorReviewVerdict.REPAIR_REQUIRED.value and not self.findings:
+            raise ValueError("behavior repair review requires descriptive findings")
+        if self.verdict == BehaviorReviewVerdict.APPROVED.value and self.findings:
+            raise ValueError("approved behavior review cannot retain repair findings")
+        if self.reviewed_candidate_revision is not None:
+            _text(self.reviewed_candidate_revision, "reviewed candidate revision")
         if self.next_behavior_ticket is not None:
             _text(self.next_behavior_ticket, "next behavior ticket")
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {
+            "verdict": self.verdict,
+            "attempts": self.attempts,
+            "evidence_refs": list(self.evidence_refs),
+            "next_behavior_ticket": self.next_behavior_ticket,
+            "rationale": self.rationale,
+            "findings": list(self.findings),
+            "reviewed_candidate_revision": self.reviewed_candidate_revision,
+            "repair": self.repair.to_dict(),
+            "replan": asdict(self.replan) if self.replan is not None else None,
+            "production_diff": self.production_diff,
+        }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "BehaviorReviewState":
+        repair = value.get("repair", {})
+        replan = value.get("replan")
         return cls(
-            str(value.get("verdict", "pending")),
+            str(value.get("verdict", BehaviorReviewVerdict.PENDING.value)),
             int(value.get("attempts", 0)),
             tuple(value.get("evidence_refs", ())),
             value.get("next_behavior_ticket"),
+            str(value.get("rationale", "")),
+            tuple(value.get("findings", ())),
+            value.get("reviewed_candidate_revision"),
+            BehaviorRepairProgress.from_dict(dict(repair)),
+            BehaviorReplanState.from_dict(dict(replan)) if replan is not None else None,
+            str(value.get("production_diff", "")),
         )
 
 

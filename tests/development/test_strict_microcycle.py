@@ -338,3 +338,113 @@ async def test_development_base_does_not_advance_until_deterministic_regression_
 
     assert outcome.status == "accumulated_regression"
     assert outcome.state.development_base_revision == "base"
+
+
+class SequencedReviewer:
+    def __init__(self, results):
+        self.results = list(results)
+        self.requests = []
+
+    async def review(self, request):
+        self.requests.append(request)
+        return self.results.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_completed_behavior_repair_is_regressed_then_reviewed_again_before_completion(tmp_path):
+    from core.development.behavior_completion import (
+        APPROVED,
+        REPAIR_REQUIRED,
+        BehaviorCompletionDependencies,
+        BehaviorCompletionService,
+        BehaviorReviewResult,
+    )
+    from core.development.behavior_repair import BehaviorRepairDependencies, BehaviorRepairService
+
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"repair": "class Widget:\n    pass\n"})
+    gateway = Gateway(["repair"])
+    reviewer = SequencedReviewer([
+        BehaviorReviewResult(REPAIR_REQUIRED, "semantic gap", ("review/1",), ("durable update is missing",)),
+        BehaviorReviewResult(APPROVED, "repair resolves the gap", ("review/2",)),
+    ])
+    completion = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer))
+    repair = BehaviorRepairService(
+        BehaviorRepairDependencies(store, candidates, gateway, regression())
+    )
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(
+            store,
+            candidates,
+            gateway,
+            type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
+            regression(),
+            behavior_completion=completion,
+            behavior_repair=repair,
+        )
+    )
+    state = replace(
+        initial_state(),
+        completion=ScenarioCompletion("scenario_complete", "base"),
+        regression=RegressionState("regression_clear", ("pytest", "-q")),
+    )
+
+    outcome = await service.run(request(tmp_path, state))
+
+    assert outcome.status == "behavior_complete"
+    assert len(reviewer.requests) == 2
+    assert len(gateway.units) == 1
+    assert outcome.state.behavior_review.repair.attempts == 1
+    assert outcome.state.behavior_review.verdict == APPROVED
+
+
+@pytest.mark.asyncio
+async def test_replan_is_durable_and_never_submits_a_developer_repair(tmp_path):
+    from core.development.behavior_completion import (
+        REPLAN_REQUIRED,
+        BehaviorCompletionDependencies,
+        BehaviorCompletionService,
+        BehaviorReviewResult,
+    )
+    from core.development.behavior_repair import BehaviorRepairDependencies, BehaviorRepairService
+
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": ""})
+    gateway = Gateway([])
+    reviewer = SequencedReviewer([
+        BehaviorReviewResult(
+            REPLAN_REQUIRED,
+            "the plan has no observable acceptance boundary",
+            ("review/replan",),
+            ("a higher-level behavior split is required",),
+        )
+    ])
+    completion = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer))
+    repair = BehaviorRepairService(
+        BehaviorRepairDependencies(store, candidates, gateway, regression())
+    )
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(
+            store,
+            candidates,
+            gateway,
+            type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
+            regression(),
+            behavior_completion=completion,
+            behavior_repair=repair,
+        )
+    )
+    state = replace(
+        initial_state(),
+        completion=ScenarioCompletion("scenario_complete", "base"),
+        regression=RegressionState("regression_clear", ("pytest", "-q")),
+    )
+
+    first = await service.run(request(tmp_path, state))
+    resumed = await service.run(request(tmp_path, state))
+
+    assert first.status == resumed.status == REPLAN_REQUIRED
+    assert first.state.behavior_review.replan is not None
+    assert first.state.completion.status == "scenario_complete"
+    assert gateway.units == []
+    assert len(reviewer.requests) == 1

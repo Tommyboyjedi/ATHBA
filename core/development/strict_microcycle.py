@@ -10,7 +10,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from core.development.behavior_completion import BehaviorCompletionCommand, BehaviorCompletionService
+from core.development.behavior_completion import REPAIR_REQUIRED, BehaviorCompletionCommand, BehaviorCompletionService
+from core.development.behavior_repair import BehaviorRepairRequest, BehaviorRepairService
 from core.development.deterministic_regression import (
     DeterministicRegressionRequest,
     DeterministicRegressionService,
@@ -187,6 +188,7 @@ class StrictMicrocycleDependencies:
     developer_factory: DeveloperFrontierWorkUnitFactory = DeveloperFrontierWorkUnitFactory()
     regression_repair_factory: RegressionRepairWorkUnitFactory = RegressionRepairWorkUnitFactory()
     behavior_completion: BehaviorCompletionService | None = None
+    behavior_repair: BehaviorRepairService | None = None
 
 
 @dataclass(frozen=True)
@@ -277,21 +279,29 @@ class StrictMicrocycleService:
             RegressionRepairDependencies(self.state_store, self.candidates, self.gateway, self.regression, self.regression_repair_factory)
         )
         self.behavior_completion = dependencies.behavior_completion
+        self.behavior_repair = dependencies.behavior_repair
 
     async def run(self, request: StrictMicrocycleRequest) -> StrictMicrocycleOutcome:
         state = _load_state(self.state_store, self.adapters, request)
         adapter = self.adapters.for_language(state.model.language_id)
         submitted = 0
-        if state.completion.status == "scenario_complete":
-            return await _complete_behavior(self.behavior_completion, self.state_store, state, submitted)
-        if state.completion.status == "behavior_complete":
-            return StrictMicrocycleOutcome(state, "behavior_complete", submitted)
-        while state.completion.status == "pending":
+        while True:
+            if state.completion.status == "behavior_complete":
+                return StrictMicrocycleOutcome(state, "behavior_complete", submitted)
+            if state.completion.status == "scenario_complete":
+                routed = await _route_completed_behavior(
+                    CompletedBehaviorRouteRequest(request, state, adapter, self.behavior_completion, self.behavior_repair, self.repair_service, self.state_store)
+                )
+                state, outcome = routed.state, routed.outcome
+                submitted += outcome.developer_submissions
+                if outcome.status == "continue":
+                    continue
+                return StrictMicrocycleOutcome(state, outcome.status, submitted)
             if state.regression.status == REGRESSION_CLEAR:
                 if state.frontier.index == len(state.fragments) - 1:
                     state = replace(state, completion=ScenarioCompletion("scenario_complete", state.development_base_revision))
                     self.state_store.save(state)
-                    return await _complete_behavior(self.behavior_completion, self.state_store, state, submitted)
+                    continue
                 state = _advance(state, state.development_base_revision)
                 self.state_store.save(state)
                 continue
@@ -313,7 +323,6 @@ class StrictMicrocycleService:
                 continue
             if outcome.status != "green":
                 return StrictMicrocycleOutcome(state, outcome.status, submitted)
-        return StrictMicrocycleOutcome(state, "complete", submitted)
 
     def _execute_frontier(self, context: FrontierExecutionContext) -> StrictMicrocycleOutcome:
         request, state, adapter = context.request, context.state, context.adapter
@@ -383,6 +392,79 @@ class StrictMicrocycleService:
         return state, StrictMicrocycleOutcome(state, "advanced", 1)
 
 
+
+
+@dataclass(frozen=True)
+class CompletedBehaviorRoute:
+    state: MicrocycleState
+    outcome: StrictMicrocycleOutcome
+
+
+@dataclass(frozen=True)
+class CompletedBehaviorRouteRequest:
+    microcycle: StrictMicrocycleRequest
+    state: MicrocycleState
+    adapter: LanguageTestAdapter
+    completion: BehaviorCompletionService | None
+    behavior_repair: BehaviorRepairService | None
+    regression_repair: RegressionRepairService
+    state_store: MicrocycleStateStore
+
+
+async def _route_completed_behavior(request: CompletedBehaviorRouteRequest) -> CompletedBehaviorRoute:
+    state = request.state
+    review = state.behavior_review
+    progress = review.repair
+    if request.behavior_repair is not None and progress.current_candidate_revision:
+        if state.regression.status == ACCUMULATED_REGRESSION:
+            state, repair = await request.regression_repair.repair(
+                RegressionRepairContext(request.microcycle, state, request.adapter)
+            )
+            if repair.status != "green":
+                return CompletedBehaviorRoute(state, repair)
+            state = _record_repair_regression(state)
+            request.state_store.save(state)
+            return CompletedBehaviorRoute(state, StrictMicrocycleOutcome(state, "continue", repair.developer_submissions))
+        if progress.regression is not None and progress.regression.status != REGRESSION_CLEAR:
+            result = await request.behavior_repair.repair(
+                _behavior_repair_request(request.microcycle, state, request.adapter)
+            )
+            status = "continue" if result.status == "behavior_repair_regression_clear" else result.status
+            return CompletedBehaviorRoute(result.state, StrictMicrocycleOutcome(result.state, status, result.developer_submissions))
+    reviewed = await _complete_behavior(request.completion, request.state_store, state, 0)
+    if reviewed.status != REPAIR_REQUIRED or request.behavior_repair is None:
+        return CompletedBehaviorRoute(reviewed.state, reviewed)
+    repaired = await request.behavior_repair.repair(
+        _behavior_repair_request(request.microcycle, reviewed.state, request.adapter)
+    )
+    status = "continue" if repaired.status == "behavior_repair_regression_clear" else repaired.status
+    return CompletedBehaviorRoute(repaired.state, StrictMicrocycleOutcome(repaired.state, status, repaired.developer_submissions))
+
+
+def _behavior_repair_request(
+    request: StrictMicrocycleRequest,
+    state: MicrocycleState,
+    adapter: LanguageTestAdapter,
+) -> BehaviorRepairRequest:
+    return BehaviorRepairRequest(
+        request.project_id,
+        request.production_path,
+        request.repository_root,
+        request.repository_binding,
+        state,
+        adapter,
+        request.prior_completed_test_nodes,
+        request.include_accepted_regression_suite,
+    )
+
+
+def _record_repair_regression(state: MicrocycleState) -> MicrocycleState:
+    repair = replace(
+        state.behavior_review.repair,
+        current_candidate_revision=state.development_base_revision,
+        regression=state.regression,
+    )
+    return replace(state, behavior_review=replace(state.behavior_review, repair=repair))
 
 
 async def _complete_behavior(

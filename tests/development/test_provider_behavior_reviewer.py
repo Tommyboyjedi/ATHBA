@@ -57,3 +57,17 @@ async def test_provider_reviewer_rejects_non_json_response():
 
     with pytest.raises(ValueError, match="not valid JSON"):
         await ProviderSeniorBehaviorReviewer(gateway).review(review_request())
+
+@pytest.mark.asyncio
+async def test_provider_reviewer_accepts_ordinary_fenced_json_once():
+    gateway = RecordingGateway(
+        """```json
+{"verdict":"repair_required","rationale":"semantic gap","findings":["state is not durable"],"evidence_refs":["pytest current passed"]}
+```"""
+    )
+
+    result = await ProviderSeniorBehaviorReviewer(gateway).review(review_request())
+
+    assert result.verdict == "repair_required"
+    assert result.findings == ("state is not durable",)
+    assert len(gateway.requests) == 1
