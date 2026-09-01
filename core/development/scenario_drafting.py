@@ -362,7 +362,7 @@ def _append_attempt(
     attempts = (*state.attempts, attempt)
     status = (
         ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
-        if len(attempts) >= MAX_TESTER_SCENARIO_ATTEMPTS
+        if len(attempts) >= MAX_TESTER_SCENARIO_ATTEMPTS and attempt.status != "candidate_submitted"
         else ScenarioDraftStatus.DRAFTING.value
     )
     return ScenarioDraftOutcome(replace(state, attempts=attempts, status=status), True)

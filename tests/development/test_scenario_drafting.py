@@ -266,7 +266,7 @@ async def test_tester_scenario_attempts_stop_at_four():
         outcome = await value.draft(request("catalog"), binding())
     final = await value.draft(request("catalog"), binding())
 
-    assert outcome is not None and outcome.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+    assert outcome is not None and outcome.state.status == ScenarioDraftStatus.DRAFTING.value
     assert final.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
     assert len(final.state.attempts) == MAX_TESTER_SCENARIO_ATTEMPTS
     assert len(gateway.calls) == MAX_TESTER_SCENARIO_ATTEMPTS
