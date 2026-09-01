@@ -33,6 +33,16 @@ async def advance(
     project = service.environment.create_or_load_python_project(request.project_id)
     state = service.states.load(request.project_id)
     if state is None:
+        state = StrictTddFeatureState(
+            request.project_id,
+            request.source_requirement_hash,
+            StrictTddFeatureStatus.PLANNING.value,
+            canonical_ref=f"refs/heads/{project.default_ref}",
+            canonical_development_base=project.trusted_base_sha,
+        )
+        service.states.save(state)
+        return _result_for(FeatureTransitionKind.PROJECT_LOADED, state, project)
+    if state.status == StrictTddFeatureStatus.PLANNING.value and state.contract_payload is None:
         return await _persist_contract(service, request, project)
     if state.status == StrictTddFeatureStatus.PLANNING.value:
         return await _persist_checklist(service, state, project)
