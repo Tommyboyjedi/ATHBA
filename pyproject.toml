@@ -51,6 +51,13 @@ files = [
   "core/llm/contracts/provider.py",
   "core/llm/providers/openai_provider.py",
   "core/llm/providers/anthropic_provider.py",
+  "core/development/strict_tdd_transitions.py",
+  "core/development/strict_microcycle_advance.py",
+  "core/development/strict_tdd_feature_execution_advance.py",
+  "core/development/strict_tdd_feature_application_advance.py",
+  "core/development/strict_microcycle.py",
+  "core/development/behavior_repair.py",
+  "core/development/scenario_drafting.py",
 ]
 check_untyped_defs = true
 no_implicit_optional = true

@@ -25,3 +25,22 @@ Future checkpoint code selects `MicrocycleTransitionKind.FRONTIER_RED_ACCEPTED`,
 ## Boundaries
 
 This session intentionally emits no lifecycle events, starts no controller or CLI, and does not compose or call live dependencies. Rack AI remains a capability boundary; no Rack AI source or configuration is changed.
+
+
+## Atomic-transition hardening
+
+The transition APIs now persist an explicit pending action in `MicrocycleState`.
+A normal frontier progresses through: observe frontier, submit Developer work,
+verify the Developer candidate is GREEN, run deterministic regression, promote
+the canonical base, then advance the frontier. No one transition combines two
+of those effects. Regression and behavior repairs use the same submit,
+regress, and promotion boundaries. Scenario drafting persists a Tester
+candidate before a later independent intent-review transition. Feature planning
+persists project, contract, Gatekeeper checklist, behavior selection, scenario
+execution, behavior recording, reconciliation, and completion as separate
+feature transitions.
+
+Transition result flags describe only the current action. In particular,
+scenario candidate submission sets only `rack_ai_invoked`; intent review sets
+only `external_reasoning_invoked`; regression execution sets only
+`deterministic_regression_invoked`; canonical promotion sets none of them.

@@ -224,3 +224,25 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Passing frontiers, regression clearance, frontier advancement, scenario completion, behavior review, behavior completion, draft/revision initialization, feature planning, behavior selection, and final reconciliation are individually surfaced through typed results. Checkpoint selection uses transition kinds rather than evidence prose.
 - Source-packing policy now rejects executable semicolon packing and one-line compound bodies while allowing semicolons in comments/strings and Protocol ellipsis declarations. The previously packed lifecycle-evidence module was mechanically expanded into conventional readable code.
 - Remaining work: outer run controller, lifecycle-event emission from returned transitions, CLI, live composition, tiny live proof, and ReservationBook proof remain deliberately unimplemented/unrun.
+
+
+## Atomic-transition hardening corrective pass
+
+- Independent review findings addressed: transition payloads no longer use bare
+  `object`; active transition modules have no dynamic context classes and no
+  reflection-based collaborator discovery.
+- `MicrocycleState` schema v2 persists a typed pending action. Version-one
+  state remains loadable through deterministic pending-action migration.
+- Scenario drafting now separates Tester candidate submission from intent
+  review. Revision initialization catches only the typed missing-state signal;
+  revision divergence remains fail-closed.
+- Normal, regression-repair, and behavior-repair flows split external
+  submission, deterministic regression, and canonical promotion into distinct
+  persisted advances. Feature scenario completion is followed by a persisted
+  project-synchronization transition before final scenario completion.
+- Mypy coverage now includes strict_tdd_transitions.py,
+  strict_microcycle_advance.py, strict_tdd_feature_execution_advance.py,
+  strict_tdd_feature_application_advance.py, strict_microcycle.py,
+  behavior_repair.py, and scenario_drafting.py through `[tool.mypy].files`.
+- No live endpoint, Rack AI source/configuration, ReservationBook proof, or
+  PR21 implementation was invoked by this corrective pass.

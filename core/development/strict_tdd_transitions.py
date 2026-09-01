@@ -3,6 +3,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.development.microcycle_domain import MicrocycleState
+    from core.development.strict_microcycle import StrictMicrocycleRequest
+    from core.development.strict_tdd_feature_application import FeatureScenarioRequest, FeatureScenarioResult
+    from core.development.strict_tdd_feature_domain import StrictTddFeatureRequest, StrictTddFeatureResult
 
 
 class MicrocycleTransitionKind(str, Enum):
@@ -11,16 +18,20 @@ class MicrocycleTransitionKind(str, Enum):
     FRONTIER_RED_ACCEPTED = "frontier_red_accepted"
     DEVELOPER_CANDIDATE_REJECTED = "developer_candidate_rejected"
     DEVELOPER_CANDIDATE_ACCEPTED = "developer_candidate_accepted"
+    GREEN_VERIFIED = "green_verified"
     REGRESSION_CLEAR = "regression_clear"
+    CANONICAL_BASE_PROMOTED = "canonical_base_promoted"
     ACCUMULATED_REGRESSION = "accumulated_regression"
     REGRESSION_INFRASTRUCTURE_FAILURE = "regression_infrastructure_failure"
     REGRESSION_REPAIR_SUBMITTED = "regression_repair_submitted"
+    REGRESSION_REPAIR_VERIFIED = "regression_repair_verified"
     REGRESSION_REPAIR_CLEARED = "regression_repair_cleared"
     FRONTIER_ADVANCED = "frontier_advanced"
     SCENARIO_COMPLETED = "scenario_completed"
     BEHAVIOR_REVIEW_APPROVED = "behavior_review_approved"
     BEHAVIOR_REVIEW_REPAIR_REQUIRED = "behavior_review_repair_required"
     BEHAVIOR_REPAIR_SUBMITTED = "behavior_repair_submitted"
+    BEHAVIOR_REPAIR_VERIFIED = "behavior_repair_verified"
     BEHAVIOR_REPAIR_REGRESSION_CLEAR = "behavior_repair_regression_clear"
     BEHAVIOR_REPLAN_REQUIRED = "behavior_replan_required"
     BEHAVIOR_COMPLETED = "behavior_completed"
@@ -29,8 +40,9 @@ class MicrocycleTransitionKind(str, Enum):
 
 
 class ScenarioTransitionKind(str, Enum):
-    DRAFT_ATTEMPTED = "draft_attempted"
-    INTENT_APPROVED = "intent_approved"
+    DRAFT_CANDIDATE_SUBMITTED = "scenario_draft_candidate_submitted"
+    INTENT_APPROVED = "scenario_intent_approved"
+    INTENT_REPAIR_REQUIRED = "scenario_intent_repair_required"
     REVISION_INITIALISED = "revision_initialised"
     MICROCYCLE_ADVANCED = "microcycle_advanced"
     PROJECT_SYNCHRONISED = "project_synchronised"
@@ -40,7 +52,8 @@ class ScenarioTransitionKind(str, Enum):
 
 class FeatureTransitionKind(str, Enum):
     PROJECT_LOADED = "project_loaded"
-    PLAN_PERSISTED = "plan_persisted"
+    CONTRACT_PERSISTED = "contract_persisted"
+    GATEKEEPER_PERSISTED = "gatekeeper_persisted"
     BEHAVIOR_SELECTED = "behavior_selected"
     SCENARIO_ADVANCED = "scenario_advanced"
     BEHAVIOR_RECORDED = "behavior_recorded"
@@ -65,7 +78,7 @@ class TransitionFingerprint:
 
 @dataclass(frozen=True)
 class MicrocycleAdvanceRequest:
-    request: object
+    request: StrictMicrocycleRequest
 
 
 @dataclass(frozen=True)
@@ -89,12 +102,12 @@ class MicrocycleAdvanceResult:
     another_transition_available: bool
     blocker_or_replan_reason: str | None
     fingerprint: TransitionFingerprint
-    state: object
+    state: MicrocycleState
 
 
 @dataclass(frozen=True)
 class ScenarioAdvanceRequest:
-    request: object
+    request: FeatureScenarioRequest
 
 
 @dataclass(frozen=True)
@@ -114,12 +127,12 @@ class ScenarioAdvanceResult:
     another_transition_available: bool
     blocker_or_replan_reason: str | None
     fingerprint: TransitionFingerprint
-    result: object
+    result: FeatureScenarioResult
 
 
 @dataclass(frozen=True)
 class FeatureAdvanceRequest:
-    request: object
+    request: StrictTddFeatureRequest
 
 
 @dataclass(frozen=True)
@@ -141,4 +154,4 @@ class FeatureAdvanceResult:
     another_transition_available: bool
     blocker_or_replan_reason: str | None
     fingerprint: TransitionFingerprint
-    result: object
+    result: StrictTddFeatureResult

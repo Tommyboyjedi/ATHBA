@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from core.development.behavior_contract_domain import BehaviorContract
+from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
+from core.development.project_environment import DevelopmentProject
 from core.development.behavior_contract_coordinator import ContractPlanningRequest
 from core.development.specification_assessment import GatekeeperStateRequest
 from core.development.strict_tdd_feature_application import (
@@ -13,6 +14,7 @@ from core.development.strict_tdd_feature_application import (
     _result,
 )
 from core.development.strict_tdd_feature_domain import (
+    CompletedBehaviorReference,
     StrictTddFeatureRequest,
     StrictTddFeatureState,
     StrictTddFeatureStatus,
@@ -50,6 +52,8 @@ async def advance(
         return _result_for(FeatureTransitionKind.FEATURE_COMPLETED, state, project)
     if state.status == StrictTddFeatureStatus.BLOCKED.value:
         return _result_for(FeatureTransitionKind.BLOCKED, state, project, state.blocked_reason)
+    if state.pending_completed_behavior is not None:
+        return _record_completed_behavior(service, state, project)
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
     behavior = _next_behavior(state, contract)
     if state.current_scenario_id is not None and behavior is not None:
@@ -66,7 +70,7 @@ async def advance(
 async def _persist_contract(
     service: StrictTddFeatureApplicationService,
     request: StrictTddFeatureRequest,
-    project: object,
+    project: DevelopmentProject,
 ) -> FeatureAdvanceResult:
     contract = await service.contract_planner.create_contract(
         ContractPlanningRequest(
@@ -85,13 +89,13 @@ async def _persist_contract(
         canonical_development_base=project.trusted_base_sha,
     )
     service.states.save(state)
-    return _result_for(FeatureTransitionKind.PLAN_PERSISTED, state, project, reasoning=True)
+    return _result_for(FeatureTransitionKind.CONTRACT_PERSISTED, state, project, reasoning=True)
 
 
 async def _persist_checklist(
     service: StrictTddFeatureApplicationService,
     state: StrictTddFeatureState,
-    project: object,
+    project: DevelopmentProject,
 ) -> FeatureAdvanceResult:
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
     checklist = await service.gatekeeper.ensure_state(GatekeeperStateRequest(contract, None))
@@ -101,13 +105,13 @@ async def _persist_checklist(
         gatekeeper_payload=checklist.to_dict(),
     )
     service.states.save(updated)
-    return _result_for(FeatureTransitionKind.PLAN_PERSISTED, updated, project, reasoning=True)
+    return _result_for(FeatureTransitionKind.GATEKEEPER_PERSISTED, updated, project, reasoning=True)
 
 
 def _select_behavior(
     service: StrictTddFeatureApplicationService,
     state: StrictTddFeatureState,
-    project: object,
+    project: DevelopmentProject,
     behavior_ref: str,
 ) -> FeatureAdvanceResult:
     scenario_id = f"{state.project_id}--{behavior_ref}"
@@ -119,7 +123,7 @@ def _select_behavior(
 async def _reconcile(
     service: StrictTddFeatureApplicationService,
     state: StrictTddFeatureState,
-    project: object,
+    project: DevelopmentProject,
     contract: BehaviorContract,
 ) -> FeatureAdvanceResult:
     reconciliation = await service.reconciler.reconcile(
@@ -155,8 +159,8 @@ def _behavior_for_scenario(contract: BehaviorContract, scenario_id: str):
 async def _advance_scenario(
     service: StrictTddFeatureApplicationService,
     state: StrictTddFeatureState,
-    project: object,
-    behavior: object,
+    project: DevelopmentProject,
+    behavior: BehaviorContractRequirement,
 ) -> FeatureAdvanceResult:
     request = FeatureScenarioRequest(
         project,
@@ -164,21 +168,53 @@ async def _advance_scenario(
         behavior,
         state.canonical_development_base or project.trusted_base_sha,
     )
-    executor = service.scenarios
-    if hasattr(executor, "advance"):
-        advanced = await executor.advance(request)
-        outcome = advanced.result
-    else:
-        outcome = await executor.execute(request)
+    outcome = await service.scenarios.execute(request)
     if outcome.status == "behavior_complete":
-        updated = service._after_scenario(state, outcome)
+        pending = CompletedBehaviorReference(
+            outcome.behavior_ref,
+            outcome.scenario_id,
+            outcome.canonical_development_base,
+            outcome.evidence_refs,
+        )
+        updated = replace(
+            state,
+            canonical_ref=outcome.canonical_ref,
+            canonical_development_base=outcome.canonical_development_base,
+            working_ref=None,
+            working_revision=None,
+            pending_completed_behavior=pending,
+            evidence_refs=(*state.evidence_refs, *outcome.evidence_refs),
+        )
         service.states.save(updated)
-        return _result_for(FeatureTransitionKind.BEHAVIOR_RECORDED, updated, project, behavior_ref=behavior.ref)
+        return _result_for(FeatureTransitionKind.SCENARIO_ADVANCED, updated, project, behavior_ref=behavior.ref)
     if outcome.blocked_reason is not None or outcome.status in {"scenario_draft_blocked", "replan_required", "attempts_exhausted", "blocked"}:
         updated = service._after_scenario(state, outcome)
         service.states.save(updated)
         return _result_for(FeatureTransitionKind.BLOCKED, updated, project, updated.blocked_reason, behavior.ref)
     return _result_for(FeatureTransitionKind.SCENARIO_ADVANCED, state, project, behavior_ref=behavior.ref)
+
+
+def _record_completed_behavior(
+    service: StrictTddFeatureApplicationService,
+    state: StrictTddFeatureState,
+    project: DevelopmentProject,
+) -> FeatureAdvanceResult:
+    completed = state.pending_completed_behavior
+    if completed is None:
+        raise ValueError("behavior recording requires a pending completed behavior")
+    updated = replace(
+        state,
+        current_scenario_id=None,
+        pending_completed_behavior=None,
+        completed_behaviors=(*state.completed_behaviors, completed),
+    )
+    service.states.save(updated)
+    return _result_for(
+        FeatureTransitionKind.BEHAVIOR_RECORDED,
+        updated,
+        project,
+        behavior_ref=completed.behavior_ref,
+    )
 
 
 class StrictTddFeatureRunLoop:
@@ -206,7 +242,7 @@ class StrictTddFeatureRunLoop:
 def _result_for(
     kind: FeatureTransitionKind,
     state: StrictTddFeatureState,
-    project: object,
+    project: DevelopmentProject,
     blocker: str | None = None,
     behavior_ref: str | None = None,
     reasoning: bool = False,

@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Protocol
 
-MICROCYCLE_SCHEMA_VERSION = 1
+MICROCYCLE_SCHEMA_VERSION = 2
 MAX_MICROCYCLE_ATTEMPTS = 4
 
 
@@ -33,6 +33,25 @@ class BehaviorReviewVerdict(str, Enum):
     REPAIR_REQUIRED = "repair_required"
     REPLAN_REQUIRED = "replan_required"
     ATTEMPTS_EXHAUSTED = "attempts_exhausted"
+
+
+class MicrocyclePendingAction(str, Enum):
+    OBSERVE_FRONTIER = "observe_frontier"
+    SUBMIT_DEVELOPER = "submit_developer"
+    VERIFY_DEVELOPER_GREEN = "verify_developer_green"
+    RUN_REGRESSION = "run_regression"
+    PROMOTE_CANONICAL_BASE = "promote_canonical_base"
+    ADVANCE_FRONTIER = "advance_frontier"
+    REVIEW_BEHAVIOR = "review_behavior"
+    SUBMIT_REGRESSION_REPAIR = "submit_regression_repair"
+    RUN_REPAIR_REGRESSION = "run_repair_regression"
+    PROMOTE_REGRESSION_REPAIR = "promote_regression_repair"
+    SUBMIT_BEHAVIOR_REPAIR = "submit_behavior_repair"
+    VERIFY_BEHAVIOR_REPAIR = "verify_behavior_repair"
+    RUN_BEHAVIOR_REPAIR_REGRESSION = "run_behavior_repair_regression"
+    PROMOTE_BEHAVIOR_REPAIR = "promote_behavior_repair"
+    COMPLETE_BEHAVIOR = "complete_behavior"
+    BLOCKED = "blocked"
 
 
 class MicrocycleMigrationError(Exception):
@@ -595,10 +614,13 @@ class MicrocycleState:
     candidate_chain_revision: str | None = None
     frontier_attempt_counts: tuple[FrontierAttemptCounts, ...] = ()
     behavior_review: BehaviorReviewState = BehaviorReviewState()
+    pending_action: str = MicrocyclePendingAction.OBSERVE_FRONTIER.value
 
     def __post_init__(self) -> None:
         if self.schema_version != MICROCYCLE_SCHEMA_VERSION:
             raise MicrocycleMigrationError(f"unsupported microcycle schema version: {self.schema_version}")
+        if self.pending_action not in {item.value for item in MicrocyclePendingAction}:
+            raise ValueError("unsupported microcycle pending action")
         _text(self.development_base_revision, "development base revision")
         _validate_state(self)
 
@@ -620,6 +642,7 @@ class MicrocycleState:
             "candidate_chain_revision": self.candidate_chain_revision,
             "frontier_attempt_counts": [item.to_dict() for item in self.frontier_attempt_counts],
             "behavior_review": self.behavior_review.to_dict(),
+            "pending_action": self.pending_action,
         }
 
     @classmethod
@@ -639,11 +662,26 @@ class MicrocycleState:
             tuple(DeveloperAttempt.from_dict(dict(item)) for item in value.get("developer_attempts", ())),
             RegressionState.from_dict(dict(value["regression"])),
             ScenarioCompletion.from_dict(dict(value["completion"])),
-            int(value["schema_version"]),
+            MICROCYCLE_SCHEMA_VERSION,
             value.get("candidate_chain_revision"),
             tuple(FrontierAttemptCounts.from_dict(dict(item)) for item in value.get("frontier_attempt_counts", ())),
             BehaviorReviewState.from_dict(dict(value.get("behavior_review", {}))),
+            str(value.get("pending_action", _legacy_pending_action(value))),
         )
+
+
+def _legacy_pending_action(value: dict[str, Any]) -> str:
+    completion = dict(value.get("completion", {}))
+    if completion.get("status") == "scenario_complete":
+        return MicrocyclePendingAction.REVIEW_BEHAVIOR.value
+    regression = dict(value.get("regression", {}))
+    if regression.get("status") == "regression_clear":
+        return MicrocyclePendingAction.PROMOTE_CANONICAL_BASE.value
+    if regression.get("status") == "accumulated_regression":
+        return MicrocyclePendingAction.SUBMIT_REGRESSION_REPAIR.value
+    if value.get("current_accepted_red_revision"):
+        return MicrocyclePendingAction.SUBMIT_DEVELOPER.value
+    return MicrocyclePendingAction.OBSERVE_FRONTIER.value
 
 
 def _validate_state(state: MicrocycleState) -> None:

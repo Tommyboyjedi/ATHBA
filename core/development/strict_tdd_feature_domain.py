@@ -83,6 +83,7 @@ class StrictTddFeatureState:
     gatekeeper_payload: dict[str, object] | None = None
     current_scenario_id: str | None = None
     completed_behaviors: tuple[CompletedBehaviorReference, ...] = ()
+    pending_completed_behavior: CompletedBehaviorReference | None = None
     canonical_ref: str | None = None
     canonical_development_base: str | None = None
     working_ref: str | None = None
@@ -124,11 +125,24 @@ class StrictTddFeatureState:
             str(payload["project_id"]), str(payload["source_requirement_hash"]),
             str(payload["status"]), payload.get("contract_payload"),
             payload.get("gatekeeper_payload"), payload.get("current_scenario_id"),
-            completed, payload.get("canonical_ref"), payload.get("canonical_development_base"),
+            completed,
+            _pending_completed_behavior(payload.get("pending_completed_behavior")),
+            payload.get("canonical_ref"), payload.get("canonical_development_base"),
             payload.get("working_ref"), payload.get("working_revision"),
             payload.get("blocked_reason"), tuple(payload.get("final_reconciliation", ())),
             tuple(str(item) for item in payload.get("evidence_refs", ())),
         )
+
+
+def _pending_completed_behavior(payload: dict[str, Any] | None) -> CompletedBehaviorReference | None:
+    if payload is None:
+        return None
+    return CompletedBehaviorReference(
+        str(payload["behavior_ref"]),
+        str(payload["scenario_id"]),
+        str(payload["canonical_revision"]),
+        tuple(str(ref) for ref in payload["evidence_refs"]),
+    )
 
 
 @dataclass(frozen=True)

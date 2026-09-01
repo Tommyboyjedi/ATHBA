@@ -1,15 +1,18 @@
 """One-transition scenario executor beneath the strict-TDD feature application."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from core.development.microcycle_revision_lifecycle import MicrocycleRevisionStateNotFound
 from core.development.microcycle_revision_state import (
+    MicrocycleRevisionState,
     RevisionBindingRequest,
     RevisionInitialisationRequest,
     RevisionRecoveryRequest,
 )
-from core.development.scenario_drafting_domain import ScenarioDraftRequest
+from core.development.scenario_drafting_domain import ScenarioDraftRequest, ScenarioDraftRunState
 from core.development.strict_microcycle import StrictMicrocycleRequest
 from core.development.strict_tdd_feature_application import FeatureScenarioRequest, FeatureScenarioResult
 from core.development.strict_tdd_feature_execution import _evidence, _facts, _ticket_for
@@ -19,14 +22,24 @@ from core.development.strict_tdd_transitions import (
     TransitionFingerprint,
 )
 
+if TYPE_CHECKING:
+    from core.development.strict_tdd_feature_execution import StrictFeatureScenarioExecutor
+
 MAX_SCENARIO_COMPATIBILITY_TRANSITIONS = 100
 
 
-async def advance(executor: object, request: FeatureScenarioRequest) -> ScenarioAdvanceResult:
+async def advance(
+    executor: StrictFeatureScenarioExecutor,
+    request: FeatureScenarioRequest,
+) -> ScenarioAdvanceResult:
     scenario_id = f"{request.project.project_id}--{request.behavior.ref}"
     draft_state = executor.drafting.state_store.load(scenario_id)
-    if draft_state is None or draft_state.approved_microcycle is None:
-        return await _draft(executor, request, scenario_id)
+    if draft_state is None:
+        return await _submit_draft(executor, request, scenario_id)
+    if draft_state.approved_microcycle is None:
+        if _intent_review_is_pending(draft_state):
+            return await _review_intent(executor, request, scenario_id)
+        return await _submit_draft(executor, request, scenario_id)
     binding_request = RevisionBindingRequest(
         scenario_id,
         request.project.project_id,
@@ -35,8 +48,8 @@ async def advance(executor: object, request: FeatureScenarioRequest) -> Scenario
     )
     try:
         lifecycle = executor.revisions.recover(RevisionRecoveryRequest(scenario_id))
-    except ValueError:
-        executor.revisions.initialise(
+    except MicrocycleRevisionStateNotFound:
+        lifecycle = executor.revisions.initialise(
             RevisionInitialisationRequest(
                 scenario_id,
                 f"refs/heads/{request.project.default_ref}",
@@ -44,21 +57,14 @@ async def advance(executor: object, request: FeatureScenarioRequest) -> Scenario
                 (f"scenario-draft:{scenario_id}",),
             )
         )
-        lifecycle = executor.revisions.recover(RevisionRecoveryRequest(scenario_id))
         return _result(
             ScenarioTransitionKind.REVISION_INITIALISED,
             request,
             lifecycle,
-            FeatureScenarioResult(
-                request.behavior.ref,
-                scenario_id,
-                "revision_initialised",
-                lifecycle.canonical_ref,
-                lifecycle.canonical_development_base,
-                lifecycle.working_ref,
-                lifecycle.working_revision,
-            ),
+            _outcome(request, scenario_id, "revision_initialised", lifecycle),
         )
+    if lifecycle.status == "behavior_complete":
+        return _after_behavior_completion(executor, request, draft_state, lifecycle)
     microcycle = await executor.microcycles.advance(
         StrictMicrocycleRequest(
             request.project.project_id,
@@ -73,43 +79,38 @@ async def advance(executor: object, request: FeatureScenarioRequest) -> Scenario
         )
     )
     lifecycle = executor.revisions.recover(RevisionRecoveryRequest(scenario_id))
-    if microcycle.kind.value == "behavior_completed":
-        executor.synchronizer.synchronize(request.project.project_id, lifecycle.canonical_development_base)
-        outcome = FeatureScenarioResult(
-            request.behavior.ref,
-            scenario_id,
-            "behavior_complete",
-            lifecycle.canonical_ref,
-            lifecycle.canonical_development_base,
-            None,
-            None,
-            _evidence(microcycle.state),
-        )
-        return _result(ScenarioTransitionKind.SCENARIO_COMPLETED, request, lifecycle, outcome)
-    outcome = FeatureScenarioResult(
-        request.behavior.ref,
-        scenario_id,
-        microcycle.kind.value,
-        lifecycle.canonical_ref,
-        lifecycle.canonical_development_base,
-        lifecycle.working_ref,
-        lifecycle.working_revision,
-        _evidence(microcycle.state),
-        microcycle.blocker_or_replan_reason,
-    )
     return _result(
         ScenarioTransitionKind.MICROCYCLE_ADVANCED,
         request,
         lifecycle,
-        outcome,
+        _outcome(
+            request,
+            scenario_id,
+            microcycle.kind.value,
+            lifecycle,
+            _evidence(microcycle.state),
+            microcycle.blocker_or_replan_reason,
+        ),
         reasoning=microcycle.external_reasoning_invoked,
         rack_ai=microcycle.rack_ai_invoked,
     )
 
 
-async def _draft(executor: object, request: FeatureScenarioRequest, scenario_id: str) -> ScenarioAdvanceResult:
+def _intent_review_is_pending(state: ScenarioDraftRunState) -> bool:
+    return bool(
+        state.attempts
+        and state.attempts[-1].candidate_revision is not None
+        and state.attempts[-1].intent is None
+    )
+
+
+async def _submit_draft(
+    executor: StrictFeatureScenarioExecutor,
+    request: FeatureScenarioRequest,
+    scenario_id: str,
+) -> ScenarioAdvanceResult:
     ticket = _ticket_for(request)
-    outcome = await executor.drafting.draft(
+    outcome = await executor.drafting.submit_candidate(
         ScenarioDraftRequest(
             scenario_id,
             ticket,
@@ -122,24 +123,76 @@ async def _draft(executor: object, request: FeatureScenarioRequest, scenario_id:
         ),
         request.project.binding().with_base_sha(request.canonical_development_base),
     )
-    status = "intent_approved" if outcome.approved else "scenario_draft_blocked"
-    result = FeatureScenarioResult(
-        request.behavior.ref,
-        scenario_id,
-        status,
-        f"refs/heads/{request.project.default_ref}",
-        request.canonical_development_base,
+    result = _draft_outcome(request, scenario_id, outcome.state.status)
+    return _result(
+        ScenarioTransitionKind.DRAFT_CANDIDATE_SUBMITTED,
+        request,
         None,
-        None,
-        blocked_reason=None if outcome.approved else outcome.state.status,
+        result,
+        rack_ai=outcome.submitted_attempt,
     )
-    kind = ScenarioTransitionKind.INTENT_APPROVED if outcome.approved else ScenarioTransitionKind.DRAFT_ATTEMPTED
-    return _draft_result(kind, request, result, rack_ai=outcome.submitted_attempt)
+
+
+async def _review_intent(
+    executor: StrictFeatureScenarioExecutor,
+    request: FeatureScenarioRequest,
+    scenario_id: str,
+) -> ScenarioAdvanceResult:
+    ticket = _ticket_for(request)
+    outcome = await executor.drafting.review_intent(
+        ScenarioDraftRequest(
+            scenario_id,
+            ticket,
+            tuple(request.behavior.source_refs),
+            "python",
+            "pytest",
+            ticket.test_path,
+            _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
+            request.canonical_development_base,
+        )
+    )
+    approved = outcome.approved
+    kind = ScenarioTransitionKind.INTENT_APPROVED if approved else ScenarioTransitionKind.INTENT_REPAIR_REQUIRED
+    status = "intent_approved" if approved else "intent_repair_required"
+    return _result(kind, request, None, _draft_outcome(request, scenario_id, status), reasoning=True)
+
+
+def _after_behavior_completion(
+    executor: StrictFeatureScenarioExecutor,
+    request: FeatureScenarioRequest,
+    draft_state: ScenarioDraftRunState,
+    lifecycle: MicrocycleRevisionState,
+) -> ScenarioAdvanceResult:
+    scenario_id = draft_state.scenario_id
+    if not draft_state.project_synchronised:
+        executor.synchronizer.synchronize(request.project.project_id, lifecycle.canonical_development_base)
+        executor.drafting.state_store.save(replace(draft_state, project_synchronised=True))
+        return _result(
+            ScenarioTransitionKind.PROJECT_SYNCHRONISED,
+            request,
+            lifecycle,
+            _outcome(request, scenario_id, "project_synchronised", lifecycle),
+        )
+    microcycle = draft_state.approved_microcycle
+    if microcycle is None:
+        raise ValueError("completed scenario must retain its approved microcycle")
+    return _result(
+        ScenarioTransitionKind.SCENARIO_COMPLETED,
+        request,
+        lifecycle,
+        _outcome(
+            request,
+            scenario_id,
+            "behavior_complete",
+            lifecycle,
+            _evidence(microcycle),
+        ),
+    )
 
 
 @dataclass(frozen=True)
 class StrictFeatureScenarioRunLoop:
-    executor: object
+    executor: StrictFeatureScenarioExecutor
 
     async def execute(self, request: FeatureScenarioRequest) -> FeatureScenarioResult:
         for _ in range(MAX_SCENARIO_COMPATIBILITY_TRANSITIONS):
@@ -147,7 +200,7 @@ class StrictFeatureScenarioRunLoop:
             outcome = advanced.result
             if outcome.status == "behavior_complete":
                 return outcome
-            if outcome.status in {"scenario_draft_blocked", "blocked", "replan_required", "attempts_exhausted"}:
+            if outcome.blocked_reason is not None:
                 return outcome
         return FeatureScenarioResult(
             request.behavior.ref,
@@ -161,10 +214,47 @@ class StrictFeatureScenarioRunLoop:
         )
 
 
+def _draft_outcome(
+    request: FeatureScenarioRequest,
+    scenario_id: str,
+    status: str,
+) -> FeatureScenarioResult:
+    return FeatureScenarioResult(
+        request.behavior.ref,
+        scenario_id,
+        status,
+        f"refs/heads/{request.project.default_ref}",
+        request.canonical_development_base,
+        None,
+        None,
+    )
+
+
+def _outcome(
+    request: FeatureScenarioRequest,
+    scenario_id: str,
+    status: str,
+    lifecycle: MicrocycleRevisionState,
+    evidence: tuple[str, ...] = (),
+    blocker: str | None = None,
+) -> FeatureScenarioResult:
+    return FeatureScenarioResult(
+        request.behavior.ref,
+        scenario_id,
+        status,
+        lifecycle.canonical_ref,
+        lifecycle.canonical_development_base,
+        lifecycle.working_ref if lifecycle.status != "behavior_complete" else None,
+        lifecycle.working_revision if lifecycle.status != "behavior_complete" else None,
+        evidence,
+        blocker,
+    )
+
+
 def _result(
     kind: ScenarioTransitionKind,
     request: FeatureScenarioRequest,
-    lifecycle: object,
+    lifecycle: MicrocycleRevisionState | None,
     outcome: FeatureScenarioResult,
     reasoning: bool = False,
     rack_ai: bool = False,
@@ -177,7 +267,7 @@ def _result(
         outcome.canonical_development_base,
         outcome.working_revision,
         (),
-        "microcycle_advance",
+        _next_action(kind, outcome),
     )
     return ScenarioAdvanceResult(
         kind,
@@ -199,37 +289,13 @@ def _result(
     )
 
 
-def _draft_result(
-    kind: ScenarioTransitionKind,
-    request: FeatureScenarioRequest,
-    outcome: FeatureScenarioResult,
-    rack_ai: bool,
-) -> ScenarioAdvanceResult:
-    fingerprint = TransitionFingerprint(
-        outcome.status,
-        request.behavior.ref,
-        outcome.scenario_id,
-        None,
-        outcome.canonical_development_base,
-        None,
-        (),
-        "revision_initialisation" if outcome.status == "intent_approved" else "scenario_draft",
-    )
-    return ScenarioAdvanceResult(
-        kind,
-        "drafting",
-        outcome.status,
-        request.behavior.ref,
-        outcome.scenario_id,
-        outcome.canonical_ref,
-        outcome.canonical_development_base,
-        None,
-        None,
-        (),
-        outcome.status == "intent_approved",
-        rack_ai,
-        outcome.blocked_reason is None,
-        outcome.blocked_reason,
-        fingerprint,
-        outcome,
-    )
+def _next_action(kind: ScenarioTransitionKind, outcome: FeatureScenarioResult) -> str:
+    if outcome.status == "behavior_complete":
+        return "complete"
+    if kind == ScenarioTransitionKind.DRAFT_CANDIDATE_SUBMITTED:
+        return "scenario_intent_review"
+    if kind == ScenarioTransitionKind.INTENT_APPROVED:
+        return "revision_initialisation"
+    if kind == ScenarioTransitionKind.PROJECT_SYNCHRONISED:
+        return "scenario_completion"
+    return "microcycle_advance"

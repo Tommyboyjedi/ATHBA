@@ -159,9 +159,21 @@ class BehaviorRepairService:
         self.factory = dependencies.factory
 
     async def repair(self, request: BehaviorRepairRequest) -> BehaviorRepairOutcome:
+        """Compatibility API that loops over the separate repair transitions."""
         review = request.state.behavior_review
         if review.verdict == BehaviorReviewVerdict.PENDING.value and review.repair.current_candidate_revision:
-            return self._regress(BehaviorRepairRegressionRequest(request, request.state))
+            outcome = self.run_regression(request)
+        else:
+            outcome = await self.submit(request)
+            if outcome.status == "behavior_repair_submitted":
+                outcome = self.run_regression(replace(request, state=outcome.state))
+        if outcome.status == "behavior_repair_regression_clear":
+            promoted = self.promote(replace(request, state=outcome.state))
+            return BehaviorRepairOutcome(promoted.state, outcome.status, outcome.developer_submissions)
+        return outcome
+
+    async def submit(self, request: BehaviorRepairRequest) -> BehaviorRepairOutcome:
+        review = request.state.behavior_review
         if review.verdict != REPAIR_REQUIRED:
             raise ValueError("behavior repair requires a persisted repair_required review")
         if review.repair.attempts >= 4:
@@ -207,7 +219,10 @@ class BehaviorRepairService:
             regression=RegressionState("pending", state.regression.command),
         )
         self.state_store.save(accepted)
-        return self._regress(BehaviorRepairRegressionRequest(request, accepted, 1))
+        return BehaviorRepairOutcome(accepted, "behavior_repair_submitted", 1)
+
+    def run_regression(self, request: BehaviorRepairRequest) -> BehaviorRepairOutcome:
+        return self._regress(BehaviorRepairRegressionRequest(request, request.state))
 
     def _regress(self, request: BehaviorRepairRegressionRequest) -> BehaviorRepairOutcome:
         repair, state = request.repair, request.state
@@ -243,12 +258,19 @@ class BehaviorRepairService:
             candidate_chain_revision=candidate.candidate_revision,
             regression=result.state(state.regression.command),
         )
-        if result.status == REGRESSION_CLEAR:
-            _promote_canonical_revision(repair, candidate.candidate_revision)
-            updated = replace(updated, development_base_revision=candidate.candidate_revision)
         self.state_store.save(updated)
         status = "behavior_repair_regression_clear" if result.status == REGRESSION_CLEAR else result.status
         return BehaviorRepairOutcome(updated, status, request.developer_submissions)
+
+    def promote(self, request: BehaviorRepairRequest) -> BehaviorRepairOutcome:
+        state = request.state
+        candidate = state.behavior_review.repair.current_candidate_revision
+        if candidate is None or state.regression.status != REGRESSION_CLEAR:
+            raise ValueError("behavior repair promotion requires a regression-clear candidate")
+        _promote_canonical_revision(request, candidate)
+        promoted = replace(state, development_base_revision=candidate, candidate_chain_revision=candidate)
+        self.state_store.save(promoted)
+        return BehaviorRepairOutcome(promoted, "behavior_repair_promoted")
 
 
 def _progress_after_submission(

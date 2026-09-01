@@ -41,6 +41,10 @@ class RevisionStateValidator:
             raise ValueError("managed working ref diverged from persisted revision state")
 
 
+class MicrocycleRevisionStateNotFound(Exception):
+    """Raised only when durable lifecycle state has not yet been initialised."""
+
+
 class RevisionStateInitialiser:
     """Creates one managed ref at a verified canonical base, then persists it."""
 
@@ -142,7 +146,7 @@ class RevisionRecoveryService:
     def recover(self, request: RevisionRecoveryRequest) -> MicrocycleRevisionState:
         state = self.repository.load(request.scenario_id)
         if state is None:
-            raise ValueError("unknown microcycle revision state")
+            raise MicrocycleRevisionStateNotFound("unknown microcycle revision state")
         if self.git.resolve(RevisionResolveRequest(state.canonical_ref)) != state.canonical_development_base:
             raise ValueError("canonical development base diverged outside ATHBA")
         if state.status == RevisionLifecycleStatus.BEHAVIOR_COMPLETE.value:

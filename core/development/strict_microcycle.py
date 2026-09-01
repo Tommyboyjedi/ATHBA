@@ -228,6 +228,17 @@ class RegressionRepairService:
         self.factory = dependencies.factory
 
     async def repair(self, context: RegressionRepairContext) -> tuple[MicrocycleState, StrictMicrocycleOutcome]:
+        """Compatibility API that loops over isolated repair transitions."""
+        submitted, outcome = await self.submit(context)
+        if outcome.status != "regression_repair_submitted":
+            return submitted, outcome
+        regressed, outcome = self.run_regression(RegressionRepairContext(context.request, submitted, context.adapter))
+        if outcome.status != "green":
+            return regressed, outcome
+        promoted = self.promote(context.request, regressed)
+        return promoted, StrictMicrocycleOutcome(promoted, "green", outcome.developer_submissions)
+
+    async def submit(self, context: RegressionRepairContext) -> tuple[MicrocycleState, StrictMicrocycleOutcome]:
         request, state, adapter = context.request, context.state, context.adapter
         failing = state.regression.failing_prior_test_nodes
         if not failing:
@@ -235,25 +246,80 @@ class RegressionRepairService:
         if state.retry_counts.regression >= MAX_MICROCYCLE_ATTEMPTS:
             return state, StrictMicrocycleOutcome(state, "regression_repair_attempts_exhausted")
         base = state.candidate_chain_revision or state.development_base_revision
-        artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, base))
-        packet = DeveloperFrontierRequest(request.project_id, request.production_path, artifact, state.boundary_evidence[-1], base, state.development_base_revision, state.retry_counts.regression + 1)
+        artifact = adapter.materialise_frontier(
+            FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, base)
+        )
+        packet = DeveloperFrontierRequest(
+            request.project_id,
+            request.production_path,
+            artifact,
+            state.boundary_evidence[-1],
+            base,
+            state.development_base_revision,
+            state.retry_counts.regression + 1,
+        )
         result = await self.gateway.execute(self.factory.build(packet, failing), _working_binding(request, base))
-        state = replace(state, retry_counts=replace(state.retry_counts, regression=state.retry_counts.regression + 1))
+        updated = replace(
+            state,
+            retry_counts=replace(state.retry_counts, regression=state.retry_counts.regression + 1),
+        )
         if not result.accepted or result.accepted_revision is None:
-            self.state_store.save(state)
-            return state, StrictMicrocycleOutcome(state, "regression_repair_rejected", 1)
-        _advance_working_revision(request, result.accepted_revision, RevisionTransitionKind.REGRESSION_REPAIR_ACCEPTED.value, result.evidence_location)
-        candidate = self.candidates.materialise(FrontierCandidateRequest(replace(artifact, base_revision=result.accepted_revision), request.repository_root, state.model.test_path))
+            self.state_store.save(updated)
+            return updated, StrictMicrocycleOutcome(updated, "regression_repair_rejected", 1)
+        _advance_working_revision(
+            request,
+            result.accepted_revision,
+            RevisionTransitionKind.REGRESSION_REPAIR_ACCEPTED.value,
+            result.evidence_location,
+        )
+        updated = replace(
+            updated,
+            candidate_chain_revision=result.accepted_revision,
+            regression=RegressionState("pending", state.regression.command),
+        )
+        self.state_store.save(updated)
+        return updated, StrictMicrocycleOutcome(updated, "regression_repair_submitted", 1)
+
+    def run_regression(self, context: RegressionRepairContext) -> tuple[MicrocycleState, StrictMicrocycleOutcome]:
+        request, state, adapter = context.request, context.state, context.adapter
+        revision = state.candidate_chain_revision
+        if revision is None:
+            raise ValueError("regression repair verification requires an accepted candidate")
+        artifact = adapter.materialise_frontier(
+            FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, revision)
+        )
+        candidate = self.candidates.materialise(
+            FrontierCandidateRequest(artifact, request.repository_root, state.model.test_path)
+        )
         try:
-            regression = self.regression.run(DeterministicRegressionRequest(candidate.project_root, state.regression.command, artifact.canonical_test_identity, request.prior_completed_test_nodes, request.include_accepted_regression_suite))
+            regression = self.regression.run(
+                DeterministicRegressionRequest(
+                    candidate.project_root,
+                    state.regression.command,
+                    artifact.canonical_test_identity,
+                    request.prior_completed_test_nodes,
+                    request.include_accepted_regression_suite,
+                )
+            )
         finally:
             self.candidates.cleanup(candidate)
-        state = replace(state, regression=regression.state(state.regression.command))
-        if regression.status == REGRESSION_CLEAR:
-            _promote_canonical_revision(request, candidate.candidate_revision, result.evidence_location)
-            state = replace(state, candidate_chain_revision=candidate.candidate_revision, development_base_revision=candidate.candidate_revision)
-        self.state_store.save(state)
-        return state, StrictMicrocycleOutcome(state, "green" if regression.status == REGRESSION_CLEAR else regression.status, 1)
+        updated = replace(
+            state,
+            candidate_chain_revision=candidate.candidate_revision,
+            regression=regression.state(state.regression.command),
+        )
+        self.state_store.save(updated)
+        status = "green" if regression.status == REGRESSION_CLEAR else regression.status
+        return updated, StrictMicrocycleOutcome(updated, status)
+
+    def promote(self, request: StrictMicrocycleRequest, state: MicrocycleState) -> MicrocycleState:
+        revision = state.candidate_chain_revision
+        if revision is None or state.regression.status != REGRESSION_CLEAR:
+            raise ValueError("regression repair promotion requires a regression-clear candidate")
+        _promote_canonical_revision(request, revision, None)
+        updated = replace(state, development_base_revision=revision)
+        self.state_store.save(updated)
+        return updated
 
 
 @dataclass(frozen=True)

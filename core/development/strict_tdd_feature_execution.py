@@ -23,6 +23,7 @@ from core.development.specification_reconciliation import (
     CompletedMicrocycleEvidenceCollector,
     GitAcceptedTestCatalog,
 )
+from core.development.microcycle_domain import MicrocycleState
 from core.development.strict_microcycle import StrictMicrocycleRequest, StrictMicrocycleService
 from core.development.strict_tdd_feature_application import (
     FeatureReconciliationRequest,
@@ -122,7 +123,7 @@ def _show(root: Path, revision: str, path: str) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
-def _evidence(state: object) -> tuple[str, ...]:
-    values = tuple(getattr(state, "regression").evidence_refs)
-    review = tuple(getattr(state, "behavior_review").evidence_refs)
-    return values + review or (f"microcycle:{getattr(state, 'scenario_draft').scenario_id}",)
+def _evidence(state: MicrocycleState) -> tuple[str, ...]:
+    values = tuple(state.regression.evidence_refs)
+    review = tuple(state.behavior_review.evidence_refs)
+    return values + review or (f"microcycle:{state.scenario_draft.scenario_id}",)

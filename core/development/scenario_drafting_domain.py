@@ -112,6 +112,7 @@ class ScenarioDraftRunState:
     attempts: tuple[ScenarioDraftAttempt, ...] = ()
     approved_microcycle: MicrocycleState | None = None
     status: str = ScenarioDraftStatus.DRAFTING.value
+    project_synchronised: bool = False
 
     def __post_init__(self) -> None:
         values = (
@@ -146,6 +147,7 @@ class ScenarioDraftRunState:
             "attempts": [item.to_dict() for item in self.attempts],
             "approved_microcycle": None if self.approved_microcycle is None else self.approved_microcycle.to_dict(),
             "status": self.status,
+            "project_synchronised": self.project_synchronised,
         }
 
     @classmethod
@@ -162,6 +164,7 @@ class ScenarioDraftRunState:
             attempts=tuple(ScenarioDraftAttempt.from_dict(dict(item)) for item in value.get("attempts", ())),
             approved_microcycle=None if approved is None else MicrocycleState.from_dict(dict(approved)),
             status=str(value.get("status", ScenarioDraftStatus.DRAFTING.value)),
+            project_synchronised=bool(value.get("project_synchronised", False)),
         )
 
 

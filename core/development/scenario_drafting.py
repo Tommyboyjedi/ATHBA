@@ -203,6 +203,28 @@ class ScenarioDraftingService:
         request: ScenarioDraftRequest,
         binding: RepositoryBinding,
     ) -> ScenarioDraftOutcome:
+        """Compatibility API that advances only through persisted draft transitions."""
+        for _ in range(MAX_TESTER_SCENARIO_ATTEMPTS * 2):
+            state = self.state_store.load(request.scenario_id)
+            if state is not None and state.approved_microcycle is not None:
+                return ScenarioDraftOutcome(state, False)
+            if state is not None and state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value:
+                return ScenarioDraftOutcome(state, False)
+            if state is not None and state.attempts and state.attempts[-1].candidate_revision and state.attempts[-1].intent is None:
+                outcome = await self.review_intent(request)
+            else:
+                outcome = await self.submit_candidate(request, binding)
+            if outcome.approved or outcome.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value:
+                return outcome
+            if outcome.state.attempts and outcome.state.attempts[-1].intent is not None:
+                return outcome
+        raise RuntimeError("scenario draft compatibility transition guard exhausted")
+
+    async def submit_candidate(
+        self,
+        request: ScenarioDraftRequest,
+        binding: RepositoryBinding,
+    ) -> ScenarioDraftOutcome:
         state = self.state_store.load(request.scenario_id) or _initial_state(request)
         _validate_resume(state, request)
         if state.approved_microcycle is not None:
@@ -214,31 +236,48 @@ class ScenarioDraftingService:
         attempt_number = len(state.attempts) + 1
         unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state)))
         result = await self.execution_gateway.execute(unit, binding.with_base_sha(request.development_base_revision))
-        outcome = await self._record_result(ScenarioDraftExecutionRecord(state, request, unit, result))
+        outcome = self._record_submission(ScenarioDraftExecutionRecord(state, request, unit, result))
         self.state_store.save(outcome.state)
         return outcome
 
-    async def _record_result(self, record: ScenarioDraftExecutionRecord) -> ScenarioDraftOutcome:
+    async def review_intent(self, request: ScenarioDraftRequest) -> ScenarioDraftOutcome:
+        state = self.state_store.load(request.scenario_id)
+        if state is None:
+            raise ValueError("scenario intent review requires a submitted draft")
+        _validate_resume(state, request)
+        if state.approved_microcycle is not None:
+            return ScenarioDraftOutcome(state, False)
+        if not state.attempts:
+            raise ValueError("scenario intent review requires a submitted draft attempt")
+        attempt = state.attempts[-1]
+        if attempt.candidate_revision is None or attempt.intent is not None:
+            raise ValueError("scenario intent review requires an unreviewed accepted draft")
+        try:
+            source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
+            draft = _draft_from_candidate(request, source)
+            intent = await self.intent_reviewer.review(_review_request(draft, request, self.adapter_catalog))
+            reviewed = replace(attempt, status=intent.status, feedback=intent.rationale, intent=intent)
+            updated = replace(state, attempts=(*state.attempts[:-1], reviewed))
+            if intent.status == "approved":
+                frozen = ScenarioFreezeFactory().freeze(
+                    ScenarioFreezeRequest(draft, intent, self.adapter_catalog, request.development_base_revision)
+                )
+                updated = replace(updated, approved_microcycle=frozen, status=ScenarioDraftStatus.APPROVED.value)
+            self.state_store.save(updated)
+            return ScenarioDraftOutcome(updated, False)
+        except ValueError as error:
+            invalid = replace(attempt, status="candidate_invalid", feedback=str(error))
+            updated = replace(state, attempts=(*state.attempts[:-1], invalid))
+            self.state_store.save(updated)
+            return ScenarioDraftOutcome(updated, False)
+
+    def _record_submission(self, record: ScenarioDraftExecutionRecord) -> ScenarioDraftOutcome:
         state = record.state
-        request = record.request
         unit = record.unit
         result = record.result
         if not result.accepted or result.accepted_revision is None:
             return _append_attempt(state, _attempt(unit, result, "candidate_rejected", result.error or result.status))
-        try:
-            source = self.source_reader.read(result.accepted_revision, request.allowed_test_path)
-            draft = _draft_from_candidate(request, source)
-            intent = await self.intent_reviewer.review(_review_request(draft, request, self.adapter_catalog))
-            attempt = _attempt(unit, result, intent.status, intent.rationale, intent)
-            if intent.status != "approved":
-                return _append_attempt(state, attempt)
-            frozen = ScenarioFreezeFactory().freeze(
-                ScenarioFreezeRequest(draft, intent, self.adapter_catalog, request.development_base_revision)
-            )
-            approved = replace(state, attempts=(*state.attempts, attempt), approved_microcycle=frozen, status="approved")
-            return ScenarioDraftOutcome(approved, True)
-        except ValueError as error:
-            return _append_attempt(state, _attempt(unit, result, "candidate_invalid", str(error)))
+        return _append_attempt(state, _attempt(unit, result, "candidate_submitted", None))
 
 
 def _initial_state(request: ScenarioDraftRequest) -> ScenarioDraftRunState:
