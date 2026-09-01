@@ -260,3 +260,16 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Lifecycle events now retain a candidate revision fact where available. Mypy scope includes all transition, provenance, and lifecycle modules.
 - Focused validation passed: 46 tests across provenance, feature application, and lifecycle evidence. Full required validation and publication evidence follow this implementation entry.
 - INCOMPLETE_ITEMS = PRESENT: outer controller/CLI, lifecycle emission wiring, live composition, tiny live proof, and ReservationBook proof remain deliberately unimplemented or unrun.
+
+## Session 8B3C1: durable outer run controller
+
+- Added typed strict-TDD run request, immutable request identity, run state/result, durable atomic run-state repository, typed persisted transition receipt, and in-flight recovery marker.
+- Added one-transition controller advance and bounded controller run loop. The controller delegates only to feature `advance`; it has no feature/microcycle routing, Git, Rack AI, pytest, or live-reasoning path.
+- Receipt persistence precedes typed lifecycle projection. Pending receipt delivery is replayable without another application transition; in-flight-without-receipt fails closed as `transition_receipt_recovery_required`.
+- Corrected the terminal policy: an unavailable non-terminal transition now produces typed blocked rather than `checkpoint=None`.
+- Corrected lifecycle ownership: application transitions use feature/transition-level block and completion events; controller alone emits run completion/block events.
+- Added typed project-created/load disposition propagation, deterministic lifecycle replay equivalence, persisted-evidence snapshot collection, and JSON/Markdown report writing.
+- Added focused controller tests covering start, exact event ordering, receipt replay, recovery-required, static controller boundaries, plus provenance/lifecycle policy regression coverage.
+- Validation: focused controller/provenance/lifecycle/composition suite PASS; coding-principles PASS; configured mypy (26 files) PASS; explicit controller/provenance/lifecycle mypy PASS; compileall PASS; git diff --check PASS; full required pytest PASS (430 passed). No executable CLI, live endpoint, Rack AI CLI, tiny live proof, ReservationBook proof, PR21 implementation, Rack AI modification, or merge was performed.
+- Implementation commit: `407b4121352487b89bfe03f3816a1cc7a0b543c7` (`development: add durable strict TDD run controller`).
+- INCOMPLETE_ITEMS = PRESENT: thin CLI and both authorized live proofs remain deferred.
