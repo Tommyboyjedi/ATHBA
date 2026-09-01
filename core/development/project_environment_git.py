@@ -41,6 +41,11 @@ class AncestryCheckRequest:
 
 
 @dataclass(frozen=True)
+class WorktreeSynchronisationRequest:
+    repository_root: Path
+    revision: str
+
+@dataclass(frozen=True)
 class RefPromotionRequest:
     repository_root: Path
     canonical_ref: str
@@ -88,6 +93,10 @@ class GitProjectClient:
             check=False,
         )
         return result.returncode == 0
+
+
+    def synchronise_worktree(self, request: WorktreeSynchronisationRequest) -> None:
+        self.run(request.repository_root, "read-tree", "--reset", "-u", request.revision)
 
     def promote(self, request: RefPromotionRequest) -> None:
         self.run(

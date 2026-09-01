@@ -68,6 +68,16 @@ class StrictTddRunController:
         self.projector = StrictTddTransitionEventProjector()
         self.terminals = StrictTddTerminalPolicy()
 
+    async def start(self, request: StrictTddRunRequest) -> StrictTddRunResult:
+        if request.mode != StrictTddRunMode.START:
+            raise ValueError("start requires a start request")
+        return await self.run(request)
+
+    async def resume(self, request: StrictTddRunRequest) -> StrictTddRunResult:
+        if request.mode != StrictTddRunMode.RESUME:
+            raise ValueError("resume requires a resume request")
+        return await self.run(request)
+
     async def advance(self, request: StrictTddRunRequest) -> StrictTddRunResult:
         return await self._advance(request, True)
 

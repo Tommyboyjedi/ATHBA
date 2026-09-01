@@ -58,6 +58,8 @@ files = [
   "core/development/strict_tdd_run_store.py",
   "core/development/strict_tdd_run_reporting.py",
   "core/development/strict_tdd_run_controller.py",
+  "core/development/strict_tdd_live_run_composition.py",
+  "scripts/run_pr23_strict_tdd_feature.py",
   "core/development/strict_microcycle_advance.py",
   "core/development/strict_tdd_feature_execution_advance.py",
   "core/development/strict_tdd_feature_application_advance.py",

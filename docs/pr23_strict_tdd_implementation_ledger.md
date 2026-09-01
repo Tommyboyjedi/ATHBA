@@ -1,3 +1,12 @@
+## Session 8B3C2A: deterministic executable happy path
+
+- Uncommitted scaffold classification: KEEP_AND_COMPLETE: `strict_tdd_run_controller.py` and `pyproject.toml`; REWORK: `strict_tdd_live_run_composition.py`, `scripts/run_pr23_strict_tdd_feature.py`, and `docs/pr23_live_runner.md`; REMOVE: none.
+- Added the thin executable runner, live-compatible composition root, typed start/resume controller entry points, deterministic CLI parser coverage, and a real-temporary-Git ToggleSwitch proof that fakes only reasoning and Rack AI execution.
+- The proof checkpoints at `FIRST_REGRESSION_CLEAR`, destroys process-local composition/fake objects, resumes from persisted ATHBA state, reaches behavior completion and final reconciliation, regenerates reports from disk, and replays a completed run without any new external work.
+- Corrected a generic owned-worktree reconciliation defect: canonical ref promotion moved the ref without updating the ATHBA-owned checkout. The synchronizer now materializes the accepted revision and a non-ToggleSwitch regression test proves that the worktree is clean and contains the accepted file.
+- Focused validation: runner proof 2 passed; generic worktree regression 1 passed; coding principles, mypy, compileall, and diff check passed. Required full suite: 433 passed.
+- No live reasoning, Rack AI execution, ReservationBook, live tiny proof, Rack AI source/configuration, merge, or receipt/in-flight recovery fault injection was run. INCOMPLETE_ITEMS = PRESENT: 8B3C2B remains deferred.
+
 # PR23 Strict TDD Implementation Ledger
 
 Date: 2026-08-31

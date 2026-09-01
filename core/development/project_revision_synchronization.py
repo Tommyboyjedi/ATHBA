@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
-from core.development.project_environment_git import AncestryCheckRequest, CanonicalRefRequest
+from core.development.project_environment_git import AncestryCheckRequest, CanonicalRefRequest, WorktreeSynchronisationRequest
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,7 @@ class TrustedProjectRevisionSynchronizer:
         if not git.is_ancestor(AncestryCheckRequest(root, project.trusted_base_sha, revision)):
             raise ValueError("trusted revision synchronization must be fast-forward")
         updated = replace(project, trusted_base_sha=revision)
+        git.synchronise_worktree(WorktreeSynchronisationRequest(root, revision))
         self.environment.repo.save(updated)
         return updated
 
