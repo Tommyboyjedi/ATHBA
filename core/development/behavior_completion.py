@@ -88,18 +88,28 @@ class BehaviorCompletionService:
         self.next_scenario_starter = dependencies.next_scenario_starter
 
     async def complete(self, command: BehaviorCompletionCommand) -> MicrocycleState:
+        reviewed = await self.review(command)
+        if reviewed.behavior_review.verdict == APPROVED:
+            return await self.complete_approved(replace(command, state=reviewed))
+        return reviewed
+
+    async def review(self, command: BehaviorCompletionCommand) -> MicrocycleState:
         state = command.state
         if state.completion.status != "scenario_complete":
             raise ValueError("behavior review requires a complete scenario")
         review = state.behavior_review
-        if review.verdict == APPROVED:
-            return await self._start_next(command, state)
-        if review.verdict in {REPAIR_REQUIRED, REPLAN_REQUIRED, BehaviorReviewVerdict.ATTEMPTS_EXHAUSTED.value}:
+        if review.verdict != BehaviorReviewVerdict.PENDING.value:
             return state
         result = await self.reviewer.review(self._request(command))
         reviewed = replace(state, behavior_review=self._state_after_review(BehaviorReviewTransitionRequest(state, result, command.production_diff)))
         self._persist(command, reviewed)
-        return reviewed if result.verdict != APPROVED else await self._start_next(command, reviewed)
+        return reviewed
+
+    async def complete_approved(self, command: BehaviorCompletionCommand) -> MicrocycleState:
+        state = command.state
+        if state.behavior_review.verdict != APPROVED:
+            raise ValueError("behavior completion requires a persisted approved review")
+        return await self._start_next(command, state)
 
     @staticmethod
     def _state_after_review(request: BehaviorReviewTransitionRequest) -> BehaviorReviewState:

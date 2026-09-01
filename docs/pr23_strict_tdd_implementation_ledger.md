@@ -215,3 +215,12 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - The original Session 8B3 event-domain/store attempt was incomplete and remains preserved in `pr23-session-8b3-incomplete-before-split-20260901`; it was not applied wholesale.
 - Added typed lifecycle events, a locked durable append-only JSON Lines store, no-op/persisting observer sinks, secret-like value rejection/redaction, and a passive deterministic proof-report projection.
 - Focused lifecycle validation passed. 8B3B CLI/controller composition, 8B3C live composition, the tiny live proof, and the fresh ReservationBook proof remain deliberately unimplemented/unrun.
+
+## Session 8B3B1: transition-driven application boundary
+
+- `daff53b5a95051484b2b4dc2ab3f0f071fa2335a` was intentionally reverted. Its wrapper controller observed long-running run-to-completion calls and could not truthfully checkpoint, resume, or emit one real transition at a time. It was not restored or cherry-picked.
+- Added typed immutable microcycle, scenario, and feature transition requests/results, stable transition kinds, and a deterministic fingerprint that excludes incidental evidence and timestamps.
+- `StrictMicrocycleService.advance`, `StrictFeatureScenarioExecutor.advance`, and `StrictTddFeatureApplicationService.advance` persist their owned state before returning a transition result. Existing compatibility `run()` and `execute()` entry points use bounded advance loops.
+- Passing frontiers, regression clearance, frontier advancement, scenario completion, behavior review, behavior completion, draft/revision initialization, feature planning, behavior selection, and final reconciliation are individually surfaced through typed results. Checkpoint selection uses transition kinds rather than evidence prose.
+- Source-packing policy now rejects executable semicolon packing and one-line compound bodies while allowing semicolons in comments/strings and Protocol ellipsis declarations. The previously packed lifecycle-evidence module was mechanically expanded into conventional readable code.
+- Remaining work: outer run controller, lifecycle-event emission from returned transitions, CLI, live composition, tiny live proof, and ReservationBook proof remain deliberately unimplemented/unrun.

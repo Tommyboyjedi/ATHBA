@@ -80,36 +80,12 @@ class StrictTddFeatureApplicationService:
         self.reconciler = dependencies.reconciler
 
     async def run(self, request: StrictTddFeatureRequest) -> StrictTddFeatureResult:
-        project = self.environment.create_or_load_python_project(request.project_id)
-        state = await self.plan(request, project)
-        contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
-        if state.status == StrictTddFeatureStatus.COMPLETED.value:
-            return _result(project, state)
-        for behavior in contract.observable_requirements:
-            if behavior.ref in {item.behavior_ref for item in state.completed_behaviors}:
-                continue
-            outcome = await self.scenarios.execute(
-                FeatureScenarioRequest(
-                    project, contract, behavior,
-                    state.canonical_development_base or project.trusted_base_sha,
-                )
-            )
-            state = self._after_scenario(state, outcome)
-            self.states.save(state)
-            if state.status == StrictTddFeatureStatus.BLOCKED.value:
-                return _result(project, state)
-        reconciliation = await self.reconciler.reconcile(
-            FeatureReconciliationRequest(
-                contract, state.completed_behaviors, dict(state.gatekeeper_payload or {}),
-                str(state.canonical_development_base),
-            )
-        )
-        completed = replace(
-            state, status=StrictTddFeatureStatus.COMPLETED.value, current_scenario_id=None,
-            working_ref=None, working_revision=None, final_reconciliation=reconciliation,
-        )
-        self.states.save(completed)
-        return _result(project, completed)
+        from core.development.strict_tdd_feature_application_advance import StrictTddFeatureRunLoop
+        return await StrictTddFeatureRunLoop(self).run(request)
+
+    async def advance(self, request: StrictTddFeatureRequest):
+        from core.development.strict_tdd_feature_application_advance import advance
+        return await advance(self, request)
 
     async def plan(
         self, request: StrictTddFeatureRequest, project: DevelopmentProject

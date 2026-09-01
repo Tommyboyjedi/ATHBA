@@ -297,6 +297,10 @@ class StrictMicrocycleService:
         from core.development.strict_microcycle_runner import StrictMicrocycleRunLoop
         return await StrictMicrocycleRunLoop(self).run(request)
 
+
+    async def advance(self, request: StrictMicrocycleRequest):
+        from core.development.strict_microcycle_advance import advance
+        return await advance(self, request)
     def _execute_frontier(self, context: FrontierExecutionContext) -> StrictMicrocycleOutcome:
         request, state, adapter = context.request, context.state, context.adapter
         base = state.candidate_chain_revision or state.development_base_revision

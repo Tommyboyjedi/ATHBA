@@ -51,51 +51,12 @@ class StrictFeatureScenarioExecutor:
         self.synchronizer = TrustedProjectRevisionSynchronizer(dependencies.environment)
 
     async def execute(self, request: FeatureScenarioRequest) -> FeatureScenarioResult:
-        ticket = _ticket_for(request)
-        scenario_id = f"{request.project.project_id}--{request.behavior.ref}"
-        draft = await self.drafting.draft(
-            ScenarioDraftRequest(
-                scenario_id, ticket, tuple(request.behavior.source_refs), "python", "pytest",
-                ticket.test_path, _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
-                request.canonical_development_base,
-            ),
-            request.project.binding().with_base_sha(request.canonical_development_base),
-        )
-        if not draft.approved or draft.state.approved_microcycle is None:
-            return FeatureScenarioResult(
-                request.behavior.ref, scenario_id, "scenario_draft_blocked",
-                f"refs/heads/{request.project.default_ref}", request.canonical_development_base,
-                None, None, blocked_reason=draft.state.status,
-            )
-        binding_request = RevisionBindingRequest(
-            scenario_id, request.project.project_id, request.project.repository_root,
-            tuple(request.project.runtime.resource_paths()),
-        )
-        self.revisions.initialise(
-            RevisionInitialisationRequest(
-                scenario_id, f"refs/heads/{request.project.default_ref}",
-                request.canonical_development_base, (f"scenario-draft:{scenario_id}",),
-            )
-        )
-        outcome = await self.microcycles.run(
-            StrictMicrocycleRequest(
-                request.project.project_id, ticket.production_path, Path(request.project.repository_root),
-                request.project.binding().with_base_sha(request.canonical_development_base),
-                draft.state.approved_microcycle, (), True, self.revisions, binding_request,
-            )
-        )
-        lifecycle = self.revisions.recover(RevisionRecoveryRequest(scenario_id))
-        if outcome.status != "behavior_complete":
-            return FeatureScenarioResult(
-                request.behavior.ref, scenario_id, outcome.status, lifecycle.canonical_ref,
-                lifecycle.canonical_development_base, lifecycle.working_ref,
-                lifecycle.working_revision, _evidence(outcome.state), outcome.status,
-            )
-        self.synchronizer.synchronize(request.project.project_id, lifecycle.canonical_development_base)
-        return FeatureScenarioResult(
-            request.behavior.ref, scenario_id, "behavior_complete", lifecycle.canonical_ref,
-            lifecycle.canonical_development_base, None, None, _evidence(outcome.state),
-        )
+        from core.development.strict_tdd_feature_execution_advance import StrictFeatureScenarioRunLoop
+        return await StrictFeatureScenarioRunLoop(self).execute(request)
+
+    async def advance(self, request: FeatureScenarioRequest):
+        from core.development.strict_tdd_feature_execution_advance import advance
+        return await advance(self, request)
 
 
 @dataclass(frozen=True)
