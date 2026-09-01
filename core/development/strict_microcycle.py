@@ -18,6 +18,14 @@ from core.development.deterministic_regression import (
     ACCUMULATED_REGRESSION,
     REGRESSION_CLEAR,
 )
+from core.development.microcycle_revision_service import MicrocycleRevisionLifecycle
+from core.development.microcycle_revision_state import (
+    RevisionBindingRequest,
+    RevisionCompletionRequest,
+    RevisionRecoveryRequest,
+    RevisionTransitionKind,
+    RevisionTransitionRequest,
+)
 from core.development.microcycle_domain import (
     MAX_MICROCYCLE_ATTEMPTS,
     BoundaryAssessment,
@@ -176,6 +184,8 @@ class StrictMicrocycleRequest:
     initial_state: MicrocycleState
     prior_completed_test_nodes: tuple[str, ...] = ()
     include_accepted_regression_suite: bool = True
+    revision_lifecycle: MicrocycleRevisionLifecycle | None = None
+    revision_binding_request: RevisionBindingRequest | None = None
 
 
 @dataclass(frozen=True)
@@ -227,11 +237,12 @@ class RegressionRepairService:
         base = state.candidate_chain_revision or state.development_base_revision
         artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, base))
         packet = DeveloperFrontierRequest(request.project_id, request.production_path, artifact, state.boundary_evidence[-1], base, state.development_base_revision, state.retry_counts.regression + 1)
-        result = await self.gateway.execute(self.factory.build(packet, failing), request.repository_binding.with_base_sha(base))
+        result = await self.gateway.execute(self.factory.build(packet, failing), _working_binding(request, base))
         state = replace(state, retry_counts=replace(state.retry_counts, regression=state.retry_counts.regression + 1))
         if not result.accepted or result.accepted_revision is None:
             self.state_store.save(state)
             return state, StrictMicrocycleOutcome(state, "regression_repair_rejected", 1)
+        _advance_working_revision(request, result.accepted_revision, RevisionTransitionKind.REGRESSION_REPAIR_ACCEPTED.value, result.evidence_location)
         candidate = self.candidates.materialise(FrontierCandidateRequest(replace(artifact, base_revision=result.accepted_revision), request.repository_root, state.model.test_path))
         try:
             regression = self.regression.run(DeterministicRegressionRequest(candidate.project_root, state.regression.command, artifact.canonical_test_identity, request.prior_completed_test_nodes, request.include_accepted_regression_suite))
@@ -239,6 +250,7 @@ class RegressionRepairService:
             self.candidates.cleanup(candidate)
         state = replace(state, regression=regression.state(state.regression.command))
         if regression.status == REGRESSION_CLEAR:
+            _promote_canonical_revision(request, candidate.candidate_revision, result.evidence_location)
             state = replace(state, candidate_chain_revision=candidate.candidate_revision, development_base_revision=candidate.candidate_revision)
         self.state_store.save(state)
         return state, StrictMicrocycleOutcome(state, "green" if regression.status == REGRESSION_CLEAR else regression.status, 1)
@@ -282,47 +294,8 @@ class StrictMicrocycleService:
         self.behavior_repair = dependencies.behavior_repair
 
     async def run(self, request: StrictMicrocycleRequest) -> StrictMicrocycleOutcome:
-        state = _load_state(self.state_store, self.adapters, request)
-        adapter = self.adapters.for_language(state.model.language_id)
-        submitted = 0
-        while True:
-            if state.completion.status == "behavior_complete":
-                return StrictMicrocycleOutcome(state, "behavior_complete", submitted)
-            if state.completion.status == "scenario_complete":
-                routed = await _route_completed_behavior(
-                    CompletedBehaviorRouteRequest(request, state, adapter, self.behavior_completion, self.behavior_repair, self.repair_service, self.state_store)
-                )
-                state, outcome = routed.state, routed.outcome
-                submitted += outcome.developer_submissions
-                if outcome.status == "continue":
-                    continue
-                return StrictMicrocycleOutcome(state, outcome.status, submitted)
-            if state.regression.status == REGRESSION_CLEAR:
-                if state.frontier.index == len(state.fragments) - 1:
-                    state = replace(state, completion=ScenarioCompletion("scenario_complete", state.development_base_revision))
-                    self.state_store.save(state)
-                    continue
-                state = _advance(state, state.development_base_revision)
-                self.state_store.save(state)
-                continue
-            if state.regression.status == ACCUMULATED_REGRESSION:
-                state, repair = await self.repair_service.repair(RegressionRepairContext(request, state, adapter))
-                submitted += repair.developer_submissions
-                if repair.status != "green":
-                    return StrictMicrocycleOutcome(state, repair.status, submitted)
-                continue
-            if state.current_accepted_red_revision is not None:
-                state, result = await self._developer(DeveloperExecutionContext(request, state))
-                submitted += result.developer_submissions
-                if result.status != "advanced":
-                    return StrictMicrocycleOutcome(state, result.status, submitted)
-                continue
-            outcome = self._execute_frontier(FrontierExecutionContext(request, state, adapter))
-            state = outcome.state
-            if state.current_accepted_red_revision is not None:
-                continue
-            if outcome.status != "green":
-                return StrictMicrocycleOutcome(state, outcome.status, submitted)
+        from core.development.strict_microcycle_runner import StrictMicrocycleRunLoop
+        return await StrictMicrocycleRunLoop(self).run(request)
 
     def _execute_frontier(self, context: FrontierExecutionContext) -> StrictMicrocycleOutcome:
         request, state, adapter = context.request, context.state, context.adapter
@@ -338,6 +311,7 @@ class StrictMicrocycleService:
             assessment = adapter.classify_boundary(BoundaryClassificationRequest(diagnostic, candidate.artifact, state.fragments[state.frontier.index], prior))
             state = _record_execution(state, base, assessment)
             if assessment.outcome == BoundaryOutcome.GREEN.value:
+                _advance_working_revision(request, candidate.candidate_revision, RevisionTransitionKind.FRONTIER_ACCEPTED.value, None)
                 regression = self.regression.run(
                     DeterministicRegressionRequest(
                         candidate.project_root,
@@ -349,6 +323,7 @@ class StrictMicrocycleService:
                 )
                 state = replace(state, regression=regression.state(state.regression.command))
                 if regression.status == REGRESSION_CLEAR:
+                    _promote_canonical_revision(request, candidate.candidate_revision, None)
                     state = replace(
                         state,
                         candidate_chain_revision=candidate.candidate_revision,
@@ -357,6 +332,7 @@ class StrictMicrocycleService:
                 self.state_store.save(state)
                 return StrictMicrocycleOutcome(state, "green" if regression.status == REGRESSION_CLEAR else regression.status)
             if assessment.outcome in _VALID_RED_OUTCOMES:
+                _advance_working_revision(request, candidate.candidate_revision, RevisionTransitionKind.FRONTIER_ACCEPTED.value, None)
                 state = replace(state, current_accepted_red_revision=candidate.candidate_revision)
             self.state_store.save(state)
             return StrictMicrocycleOutcome(state, assessment.outcome)
@@ -380,10 +356,12 @@ class StrictMicrocycleService:
             state.candidate_chain_revision or state.development_base_revision, counts.developer_attempts + 1,
         )
         work_unit = self.developer_factory.build(packet)
-        result = await self.gateway.execute(work_unit, request.repository_binding.with_base_sha(red))
+        result = await self.gateway.execute(work_unit, _working_binding(request, red))
         if result.work_unit_id != work_unit.id:
             raise ValueError("stale Rack AI packet does not match the active Developer frontier")
         state = _record_developer(state, red, result)
+        if result.accepted and result.accepted_revision is not None:
+            _advance_working_revision(request, result.accepted_revision, RevisionTransitionKind.DEVELOPER_CANDIDATE_ACCEPTED.value, result.evidence_location)
         if not result.accepted or result.accepted_revision is None:
             self.state_store.save(state)
             return state, StrictMicrocycleOutcome(state, "developer_candidate_rejected", 1)
@@ -455,6 +433,8 @@ def _behavior_repair_request(
         adapter,
         request.prior_completed_test_nodes,
         request.include_accepted_regression_suite,
+        request.revision_lifecycle,
+        request.revision_binding_request,
     )
 
 
@@ -573,3 +553,56 @@ def _advance(state: MicrocycleState, base: str) -> MicrocycleState:
         regression=RegressionState("pending", state.regression.command),
         candidate_chain_revision=base,
     )
+
+
+def _working_binding(request: StrictMicrocycleRequest, expected_revision: str) -> RepositoryBinding:
+    if request.revision_lifecycle is None or request.revision_binding_request is None:
+        return request.repository_binding.with_base_sha(expected_revision)
+    binding = request.revision_lifecycle.binding(request.revision_binding_request)
+    if binding.base_sha != expected_revision:
+        raise ValueError("managed working ref does not match the active strict-microcycle revision")
+    return binding
+
+
+def _advance_working_revision(
+    request: StrictMicrocycleRequest,
+    candidate_revision: str,
+    transition: str,
+    evidence_ref: str | None,
+) -> None:
+    if request.revision_lifecycle is None or request.revision_binding_request is None:
+        return
+    current = request.revision_lifecycle.recover(RevisionRecoveryRequest(request.revision_binding_request.scenario_id))
+    if current.working_revision == candidate_revision:
+        return
+    evidence = tuple(item for item in (evidence_ref,) if item)
+    request.revision_lifecycle.advance(
+        RevisionTransitionRequest(current, candidate_revision, transition, evidence)
+    )
+
+
+def _promote_canonical_revision(
+    request: StrictMicrocycleRequest,
+    candidate_revision: str,
+    evidence_ref: str | None,
+) -> None:
+    if request.revision_lifecycle is None or request.revision_binding_request is None:
+        return
+    current = request.revision_lifecycle.recover(RevisionRecoveryRequest(request.revision_binding_request.scenario_id))
+    if current.canonical_development_base == candidate_revision:
+        return
+    evidence = tuple(item for item in (evidence_ref,) if item)
+    request.revision_lifecycle.promote(
+        RevisionTransitionRequest(current, candidate_revision, RevisionTransitionKind.REGRESSION_CLEAR.value, evidence)
+    )
+
+
+def _complete_revision_lifecycle(request: StrictMicrocycleRequest, state: MicrocycleState) -> None:
+    if request.revision_lifecycle is None or request.revision_binding_request is None:
+        return
+    current = request.revision_lifecycle.recover(RevisionRecoveryRequest(request.revision_binding_request.scenario_id))
+    if current.status == "behavior_complete":
+        return
+    if current.canonical_development_base != state.development_base_revision:
+        raise ValueError("strict microcycle completion diverged from canonical revision lifecycle")
+    request.revision_lifecycle.complete(RevisionCompletionRequest(current, state.regression.evidence_refs))

@@ -1,0 +1,147 @@
+from dataclasses import replace
+
+import pytest
+
+from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
+from core.development.project_environment import ProjectEnvironmentService
+from core.development.specification_domain import (
+    SourceRequirementClause,
+    SpecificationChecklist,
+    SpecificationChecklistItem,
+    SpecificationGatekeeperRunState,
+)
+from core.development.strict_tdd_feature_application import (
+    FeatureScenarioResult,
+    StrictTddFeatureApplicationService,
+    StrictTddFeatureDependencies,
+)
+from core.development.strict_tdd_feature_domain import StrictTddFeatureRequest
+from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
+
+
+def request(project_id="feature"):
+    return StrictTddFeatureRequest(
+        project_id, "Widget grows.", "python", "pytest", ("widget.py",),
+        ("tests/test_widget.py",), "python-test", "resume", None, "evidence",
+    )
+
+
+def contract(project_id, count=1):
+    clauses = [SourceRequirementClause(f"SRC-{index}", f"behavior {index}", "behavior") for index in range(count)]
+    requirements = [
+        BehaviorContractRequirement(
+            f"B-{index}", [f"SRC-{index}"], f"behavior {index}", "observable result",
+            "test hint",
+        )
+        for index in range(count)
+    ]
+    return BehaviorContract(
+        f"contract-{project_id}", project_id, "Widget", "grow", "Widget grows.",
+        clauses, requirements, [], ["widget.py"], ["tests/test_widget.py"],
+    )
+
+
+class Planner:
+    def __init__(self, value):
+        self.value = value
+        self.requests = []
+
+    async def create_contract(self, value):
+        self.requests.append(value)
+        return self.value
+
+
+class Gatekeeper:
+    def __init__(self):
+        self.requests = []
+
+    async def ensure_state(self, value):
+        self.requests.append(value)
+        item = SpecificationChecklistItem("CHK-1", "Widget grows.", "behavior")
+        return SpecificationGatekeeperRunState(SpecificationChecklist(value.contract.project_id, value.contract.requirement_source, [item]))
+
+
+class Scenarios:
+    def __init__(self):
+        self.requests = []
+
+    async def execute(self, value):
+        self.requests.append(value)
+        return FeatureScenarioResult(
+            value.behavior.ref, f"scenario-{value.behavior.ref}", "behavior_complete",
+            "refs/heads/main", f"sha-{value.behavior.ref}", None, None,
+            ("review-approved",),
+        )
+
+
+class Reconciler:
+    def __init__(self):
+        self.calls = []
+
+    async def reconcile(self, request):
+        self.calls.append(request)
+        return ({"checklist_ref": "CHK-1", "answer": "YES"},)
+
+
+def service(tmp_path, planned):
+    environment = ProjectEnvironmentService(tmp_path / "projects", python_executable="/srv/ATHBA/.venv/bin/python")
+    planner, gatekeeper, scenarios, reconciler = Planner(planned), Gatekeeper(), Scenarios(), Reconciler()
+    application = StrictTddFeatureApplicationService(
+        StrictTddFeatureDependencies(
+            environment, StrictTddFeatureRepository(tmp_path / "features"),
+            planner, gatekeeper, scenarios, reconciler,
+        )
+    )
+    return application, planner, gatekeeper, scenarios, reconciler
+
+
+@pytest.mark.asyncio
+async def test_one_behavior_feature_completes_and_restart_uses_persisted_state(tmp_path):
+    application, planner, gatekeeper, scenarios, reconciler = service(tmp_path, contract("feature"))
+    first = await application.run(request())
+
+    assert first.current_status == "completed"
+    assert [item.behavior_ref for item in first.completed_behaviors] == ["B-0"]
+    assert len(planner.requests) == len(gatekeeper.requests) == len(scenarios.requests) == len(reconciler.calls) == 1
+    resumed = await application.run(request())
+    assert resumed == first
+    assert len(planner.requests) == len(gatekeeper.requests) == len(scenarios.requests) == len(reconciler.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_multi_behavior_starts_second_only_after_first_completed_base(tmp_path):
+    application, _planner, _gatekeeper, scenarios, reconciler = service(tmp_path, contract("feature", 2))
+    result = await application.run(request())
+
+    assert result.current_status == "completed"
+    assert [item.behavior.ref for item in scenarios.requests] == ["B-0", "B-1"]
+    assert scenarios.requests[1].canonical_development_base == "sha-B-0"
+    assert len(reconciler.calls[0].completed_behaviors) == 2
+    assert reconciler.calls[0].canonical_revision == "sha-B-1"
+
+
+@pytest.mark.asyncio
+async def test_rejected_or_unresolved_behavior_blocks_before_reconciliation(tmp_path):
+    application, _planner, _gatekeeper, scenarios, reconciler = service(tmp_path, contract("feature"))
+    original = scenarios.execute
+
+    async def blocked(value):
+        result = await original(value)
+        return replace(result, status="replan_required", blocked_reason="semantic replan")
+
+    scenarios.execute = blocked
+    result = await application.run(request())
+
+    assert result.current_status == "blocked"
+    assert result.blocked_reason == "semantic replan"
+    assert reconciler.calls == []
+
+
+@pytest.mark.asyncio
+async def test_same_requirement_is_independently_supplied_to_planner_and_gatekeeper(tmp_path):
+    application, planner, gatekeeper, _scenarios, _reconciler = service(tmp_path, contract("feature"))
+    await application.run(request())
+
+    assert planner.requests[0].requirement_text == "Widget grows."
+    assert gatekeeper.requests[0].contract.requirement_source == "Widget grows."
+    assert not hasattr(planner.requests[0], "checklist")

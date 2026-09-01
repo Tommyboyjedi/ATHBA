@@ -13,6 +13,13 @@ from core.development.deterministic_regression import (
     DeterministicRegressionService,
     REGRESSION_CLEAR,
 )
+from core.development.microcycle_revision_service import MicrocycleRevisionLifecycle
+from core.development.microcycle_revision_state import (
+    RevisionBindingRequest,
+    RevisionRecoveryRequest,
+    RevisionTransitionKind,
+    RevisionTransitionRequest,
+)
 from core.development.microcycle_domain import (
     BehaviorRepairExecution,
     BehaviorRepairProgress,
@@ -35,9 +42,17 @@ class BehaviorRepairCandidateRequest:
     test_path: str
 
 
+class BehaviorRepairCandidate(Protocol):
+    @property
+    def project_root(self) -> Path: ...
+
+    @property
+    def candidate_revision(self) -> str: ...
+
+
 class BehaviorRepairCandidateRepository(Protocol):
-    def materialise(self, request: BehaviorRepairCandidateRequest) -> object: ...
-    def cleanup(self, candidate: object) -> None: ...
+    def materialise(self, request: BehaviorRepairCandidateRequest) -> BehaviorRepairCandidate: ...
+    def cleanup(self, candidate: BehaviorRepairCandidate) -> None: ...
 
 
 class BehaviorRepairStateStore(Protocol):
@@ -54,6 +69,8 @@ class BehaviorRepairRequest:
     adapter: LanguageTestAdapter
     prior_completed_test_nodes: tuple[str, ...] = ()
     include_accepted_regression_suite: bool = True
+    revision_lifecycle: MicrocycleRevisionLifecycle | None = None
+    revision_binding_request: RevisionBindingRequest | None = None
 
 
 @dataclass(frozen=True)
@@ -169,9 +186,11 @@ class BehaviorRepairService:
                 review.findings, review.production_diff, base, review.repair.attempts + 1,
             )
         )
-        result = await self.gateway.execute(unit, request.repository_binding.with_base_sha(base))
+        result = await self.gateway.execute(unit, _working_binding(request, base))
         if result.work_unit_id != unit.id:
             raise ValueError("stale Rack AI packet does not match the active behavior repair")
+        if result.accepted and result.accepted_revision is not None:
+            _advance_working_revision(request, result.accepted_revision, result.evidence_location)
         progress = _progress_after_submission(review.repair, unit.id, result.accepted_revision, result.evidence_location, result.error)
         if not result.accepted or result.accepted_revision is None:
             rejected = replace(state, behavior_review=replace(review, repair=progress))
@@ -225,6 +244,7 @@ class BehaviorRepairService:
             regression=result.state(state.regression.command),
         )
         if result.status == REGRESSION_CLEAR:
+            _promote_canonical_revision(repair, candidate.candidate_revision)
             updated = replace(updated, development_base_revision=candidate.candidate_revision)
         self.state_store.save(updated)
         status = "behavior_repair_regression_clear" if result.status == REGRESSION_CLEAR else result.status
@@ -244,4 +264,44 @@ def _progress_after_submission(
         progress.current_candidate_revision,
         BehaviorRepairExecution(work_unit_id, revision, evidence),
         progress.regression,
+    )
+
+
+def _working_binding(request: BehaviorRepairRequest, expected_revision: str) -> RepositoryBinding:
+    if request.revision_lifecycle is None or request.revision_binding_request is None:
+        return request.repository_binding.with_base_sha(expected_revision)
+    binding = request.revision_lifecycle.binding(request.revision_binding_request)
+    if binding.base_sha != expected_revision:
+        raise ValueError("managed working ref does not match the active behavior-repair revision")
+    return binding
+
+
+def _advance_working_revision(
+    request: BehaviorRepairRequest,
+    candidate_revision: str,
+    evidence_ref: str | None,
+) -> None:
+    if request.revision_lifecycle is None or request.revision_binding_request is None:
+        return
+    current = request.revision_lifecycle.recover(RevisionRecoveryRequest(request.revision_binding_request.scenario_id))
+    if current.working_revision == candidate_revision:
+        return
+    evidence = tuple(item for item in (evidence_ref,) if item)
+    request.revision_lifecycle.advance(
+        RevisionTransitionRequest(
+            current, candidate_revision, RevisionTransitionKind.REGRESSION_REPAIR_ACCEPTED.value, evidence
+        )
+    )
+
+
+def _promote_canonical_revision(request: BehaviorRepairRequest, candidate_revision: str) -> None:
+    if request.revision_lifecycle is None or request.revision_binding_request is None:
+        return
+    current = request.revision_lifecycle.recover(RevisionRecoveryRequest(request.revision_binding_request.scenario_id))
+    if current.canonical_development_base == candidate_revision:
+        return
+    request.revision_lifecycle.promote(
+        RevisionTransitionRequest(
+            current, candidate_revision, RevisionTransitionKind.REGRESSION_CLEAR.value, ()
+        )
     )

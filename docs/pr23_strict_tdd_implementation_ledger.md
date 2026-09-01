@@ -200,3 +200,11 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - PR23 revision lifecycle: COMPLETE for this Session 8B1 scope.
 - Full strict-microcycle composition root wiring: DEFERRED to the explicitly excluded later session.
 - Phase 13 live proof order including fresh ReservationBook proof: INCOMPLETE; deliberately unrun.
+## Session 8B2: reusable strict-TDD feature composition
+
+- Added \`StrictTddFeatureCompositionFactory\` and a typed \`StrictTddFeatureApplicationService\`. The application flow creates/loads the project, independently invokes behavior-contract planning and Gatekeeper checklist atomization, drafts and intent-reviews one selected behavior at a time, then persists feature checkpoints.
+- Added a concrete scenario executor that initializes the Session 8B1 lifecycle, routes strict microcycle and post-review repair execution through its managed working-ref binding, synchronizes project metadata only after lifecycle canonical promotion, and deletes the managed ref on behavior completion.
+- Added final reconciliation over only \`CompletedMicrocycleEvidenceCollector\` evidence, verified against \`GitAcceptedTestCatalog\` at the final canonical SHA. Pending, blocked, repair, and incomplete state cannot contribute proof.
+- Added durable feature state, typed feature request/result contracts, scenario selection, restart handling, composition documentation, and a bounded strict run-loop seam preserving existing strict behavior.
+- Acceptance proof uses a real temporary Git repository plus real project/scenario/microcycle/revision/feature state stores, deterministic fake reasoning, and deterministic fake Rack execution. It proves a managed working-ref binding, strict RED/Developer path, canonical promotion, behavior-completion ref deletion, final reconciliation, and restart without replay.
+- Validation intentionally uses no live model endpoint, tiny feature, or ReservationBook. Rack AI code and configuration remain untouched. INCOMPLETE_ITEMS = PRESENT because the separately required live proof remains deliberately unrun.
