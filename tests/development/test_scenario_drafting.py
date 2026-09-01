@@ -331,3 +331,24 @@ async def test_stale_draft_state_is_not_reused_when_the_development_base_changes
         await value.draft(request("catalog", "b" * 40), binding("b" * 40))
 
     assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_candidate_submission_and_intent_review_have_isolated_effects():
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "f" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"f" * 40: candidate("catalog")},
+    )
+
+    submitted = await service.submit_candidate(request("catalog"), binding())
+
+    assert submitted.submitted_attempt
+    assert len(gateway.calls) == 1
+    assert reasoning.requests == []
+
+    reviewed = await service.review_intent(request("catalog"))
+
+    assert reviewed.approved
+    assert len(gateway.calls) == 1
+    assert len(reasoning.requests) == 1

@@ -177,3 +177,31 @@ async def test_resume_after_accepted_candidate_regresses_without_a_second_develo
     assert outcome.status == "behavior_repair_regression_clear"
     assert gateway.units == []
     assert outcome.state.behavior_review.repair.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_behavior_repair_submission_regression_and_promotion_are_isolated(tmp_path):
+    store, gateway, runtime = Store(), Gateway(), Runtime()
+    candidates = CandidateRepository(tmp_path, {"repair": "class Widget:\n    pass\n"})
+    service = BehaviorRepairService(
+        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(runtime))
+    )
+
+    submitted = await service.submit(request(tmp_path, reviewed_state()))
+
+    assert submitted.status == "behavior_repair_submitted"
+    assert len(gateway.units) == 1
+    assert runtime.requests == []
+
+    regressed = service.run_regression(request(tmp_path, submitted.state))
+
+    assert regressed.status == "behavior_repair_regression_clear"
+    assert len(gateway.units) == 1
+    assert runtime.requests
+    runtime_count = len(runtime.requests)
+
+    promoted = service.promote(request(tmp_path, regressed.state))
+
+    assert promoted.status == "behavior_repair_promoted"
+    assert len(gateway.units) == 1
+    assert len(runtime.requests) == runtime_count

@@ -176,3 +176,18 @@ async def test_same_requirement_is_independently_supplied_to_planner_and_gatekee
     assert planner.requests[0].requirement_text == "Widget grows."
     assert gatekeeper.requests[0].contract.requirement_source == "Widget grows."
     assert not hasattr(planner.requests[0], "checklist")
+
+
+@pytest.mark.asyncio
+async def test_scenario_completion_and_behavior_recording_are_separate_advances(tmp_path):
+    application, _planner, _gatekeeper, scenarios, _reconciler = service(tmp_path, contract("feature"))
+    transitions = []
+
+    for _ in range(6):
+        transitions.append(await application.advance(request()))
+
+    scenario = next(item for item in transitions if item.kind.value == "scenario_advanced")
+    recorded = next(item for item in transitions if item.kind.value == "behavior_recorded")
+    assert scenario.result.completed_behaviors == ()
+    assert len(recorded.result.completed_behaviors) == 1
+    assert len(scenarios.requests) == 1

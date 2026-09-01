@@ -17,6 +17,7 @@ from core.development.microcycle_domain import (
     TestScenarioDraft,
 )
 from core.development.python_pytest_adapter import PythonPytestAdapter
+from core.development.strict_tdd_transitions import MicrocycleTransitionKind
 from core.development.strict_microcycle import (
     FrontierCandidate,
     RegressionRepairContext,
@@ -449,3 +450,53 @@ async def test_replan_is_durable_and_never_submits_a_developer_repair(tmp_path):
     assert first.state.completion.status == "scenario_complete"
     assert gateway.units == []
     assert len(reviewer.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_manual_advances_isolate_normal_microcycle_effects(tmp_path):
+    store = MemoryStore()
+    candidates = CandidateRepository(
+        tmp_path,
+        {
+            "base": "",
+            "type": "class Widget:\n    def __init__(self):\n        self.count = 0\n",
+            "frontier-1-type": "class Widget:\n    def __init__(self):\n        self.count = 0\n",
+            "frontier-2-type": "class Widget:\n    def __init__(self):\n        self.count = 0\n",
+            "method": "class Widget:\n    def __init__(self):\n        self.count = 0\n\n    def grow(self):\n        pass\n",
+            "frontier-4-method": "class Widget:\n    def __init__(self):\n        self.count = 0\n\n    def grow(self):\n        pass\n",
+            "green": "class Widget:\n    def __init__(self):\n        self.count = 0\n\n    def grow(self):\n        self.count += 1\n",
+        },
+    )
+    runtime = PassingRuntime()
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(
+            store,
+            candidates,
+            Gateway(["type", "method", "green"]),
+            type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
+            DeterministicRegressionService(runtime),
+        )
+    )
+    results = []
+    value = request(tmp_path, initial_state())
+
+    for _ in range(60):
+        advanced = await service.advance(value)
+        results.append(advanced)
+        if advanced.kind == MicrocycleTransitionKind.SCENARIO_COMPLETED:
+            break
+
+    assert results[-1].kind == MicrocycleTransitionKind.SCENARIO_COMPLETED
+    assert all(not (item.rack_ai_invoked and item.deterministic_regression_invoked) for item in results)
+    assert all(not (item.external_reasoning_invoked and item.rack_ai_invoked) for item in results)
+    developer = next(item for item in results if item.kind == MicrocycleTransitionKind.DEVELOPER_CANDIDATE_ACCEPTED)
+    green = next(item for item in results if item.kind == MicrocycleTransitionKind.GREEN_VERIFIED)
+    regression_result = next(item for item in results if item.kind == MicrocycleTransitionKind.REGRESSION_CLEAR)
+    promotion = next(item for item in results if item.kind == MicrocycleTransitionKind.CANONICAL_BASE_PROMOTED)
+    frontier = next(item for item in results if item.kind == MicrocycleTransitionKind.FRONTIER_ADVANCED)
+    assert developer.rack_ai_invoked and not developer.deterministic_regression_invoked
+    assert not green.rack_ai_invoked and not green.deterministic_regression_invoked
+    assert regression_result.deterministic_regression_invoked and not regression_result.rack_ai_invoked
+    assert not promotion.deterministic_regression_invoked and not promotion.rack_ai_invoked
+    assert not frontier.deterministic_regression_invoked and not frontier.rack_ai_invoked
+    assert runtime.requests
