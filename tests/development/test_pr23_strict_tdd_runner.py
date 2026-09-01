@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 import json
+import socket
+import pytest
 from pathlib import Path
 import shutil
 import subprocess
@@ -20,12 +22,14 @@ from core.execution.reasoning_gateway import ReasoningResult
 from core.execution.work_unit_gateway import ExecutionPolicyEvidence, WorkUnitExecutionResult
 from scripts.run_pr23_strict_tdd_feature import main, parse
 
+from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
 REQUIREMENT = "Build a small in-memory ToggleSwitch. It can be instantiated, begins in the off state, and calling toggle changes it to the on state."
 
 class Reasoning:
     def __init__(self, log): self.log, self.call_count = log, 0
     async def reason(self, request):
         self.call_count += 1; self.log.append(request)
+
         values = {
             "athba_source_requirement_clauses": {"clauses":[{"ref":"SRC-1","text":"Instantiate ToggleSwitch.","kind":"behavior"},{"ref":"SRC-2","text":"New switch is off.","kind":"behavior"},{"ref":"SRC-3","text":"toggle makes switch on.","kind":"behavior"}]},
             "athba_behavior_contract": contract(),
@@ -145,4 +149,17 @@ def git(root, *arguments):
     value = subprocess.run(["git",*arguments],cwd=root,capture_output=True,text=True,check=False)
     if value.returncode: raise AssertionError(value.stderr or value.stdout)
     return value.stdout.strip()
+
+
+@pytest.fixture(autouse=True)
+def prevent_live_boundaries(monkeypatch):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("deterministic runner proof must not contact a live boundary")
+
+    async def forbidden_execution(*_args, **_kwargs):
+        raise AssertionError("deterministic runner proof must not invoke Rack AI")
+
+    monkeypatch.setattr(socket, "create_connection", forbidden)
+    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(RackAiCliExecutionGateway, "execute", forbidden_execution)
 

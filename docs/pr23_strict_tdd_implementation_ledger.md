@@ -282,3 +282,13 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Validation: focused controller/provenance/lifecycle/composition suite PASS; coding-principles PASS; configured mypy (26 files) PASS; explicit controller/provenance/lifecycle mypy PASS; compileall PASS; git diff --check PASS; full required pytest PASS (430 passed). No executable CLI, live endpoint, Rack AI CLI, tiny live proof, ReservationBook proof, PR21 implementation, Rack AI modification, or merge was performed.
 - Implementation commit: `407b4121352487b89bfe03f3816a1cc7a0b543c7` (`development: add durable strict TDD run controller`).
 - INCOMPLETE_ITEMS = PRESENT: thin CLI and both authorized live proofs remain deferred.
+
+## Session 8B3C2A and 8B3C2B: deterministic thin executable runner
+
+- 8B3C2A commit: `f289222ab25c18f7c9f61c9f0f7350ca799f1511` (`development: add deterministic strict TDD runner proof`). It added the typed composition root and executable start/checkpoint/resume/completed-replay proof; its required full validation passed with 433 tests.
+- 8B3C2B adds executable receipt replay after delivery failure, f801909 deterministic event-id/sequence reuse, in-flight-without-receipt fail-closed recovery, non-mutating invalid CLI coverage, terminal failure-report coverage, static runner boundaries, and focused no-live-boundary guards.
+- Receipt delivery failure is a controlled exit 7 with report generation and a durable pending receipt. Resume delivers that receipt before application advancement. An in-flight marker without a receipt is exit 5 and is never auto-retried.
+- Final runner validation is recorded only after the focused runner proofs, coding principles, configured and explicit mypy, full pytest, compileall, and diff check complete.
+- Remaining gates exactly: 1. live tiny proof; 2. ReservationBook proof.
+
+- 8B3C2B final validation: focused executable runner proofs 15 passed; coding-principles PASS; configured mypy 28 files PASS; explicit runner/composition/controller mypy PASS; compileall PASS; git diff --check PASS; full required pytest PASS (446 passed). No live reasoning, Rack AI CLI, live tiny proof, ReservationBook proof, Rack AI modification, or merge was performed.

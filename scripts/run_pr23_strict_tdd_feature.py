@@ -18,6 +18,7 @@ from core.development.strict_tdd_live_run_composition import (
     StrictTddLiveRunCompositionRequest,
     StrictTddLiveRunConfiguration,
 )
+from core.development.strict_tdd_run_controller import StrictTddReceiptDeliveryError
 from core.development.strict_tdd_run_domain import (
     StrictTddRunControllerConfig,
     StrictTddRunMode,
@@ -35,6 +36,7 @@ class StrictTddRunnerExitCode(IntEnum):
     TRANSITION_LIMIT_REACHED = 4
     RECOVERY_REQUIRED = 5
     INVALID_INPUT = 6
+    RECEIPT_DELIVERY_FAILED = 7
 
 
 @dataclass(frozen=True)
@@ -184,6 +186,9 @@ def main(
         result = asyncio.run(
             execute(parse(arguments), factory or StrictTddLiveRunCompositionFactory())
         )
+    except StrictTddReceiptDeliveryError as error:
+        print(json.dumps({"status": "receipt_delivery_failed", "error": str(error)}, sort_keys=True))
+        return int(StrictTddRunnerExitCode.RECEIPT_DELIVERY_FAILED)
     except (OSError, ValueError) as error:
         print(json.dumps({"status": "invalid_input", "error": str(error)}, sort_keys=True))
         return int(StrictTddRunnerExitCode.INVALID_INPUT)

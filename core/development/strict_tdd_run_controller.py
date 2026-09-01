@@ -156,6 +156,7 @@ def _deliver(self, request: StrictTddRunRequest, state: StrictTddRunState, conte
     try:
         event = _append_application_event(self, context, receipt)
     except Exception as error:
+        _report_result(self, context, state, None)
         raise StrictTddReceiptDeliveryError("transition receipt delivery failed") from error
     delivered = _delivered_state(self, state, receipt, event)
     self.states.save(delivered)
