@@ -103,6 +103,7 @@ async def advance(
 def _intent_review_is_pending(state: ScenarioDraftRunState) -> bool:
     return bool(
         state.attempts
+        and state.attempts[-1].status == "candidate_submitted"
         and state.attempts[-1].candidate_revision is not None
         and state.attempts[-1].intent is None
     )
