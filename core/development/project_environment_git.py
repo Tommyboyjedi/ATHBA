@@ -5,11 +5,14 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
+
+from core.filesystem_policy import resolve_relative_path
 
 
 SEED_BRANCH = "main"
 SEED_GITIGNORE = "__pycache__/\n.pytest_cache/\n"
+EMPTY_PYTHON_MODULE = '"""ATHBA initial production module."""\n'
 SEED_COMMIT_MESSAGE = "ATHBA project seed"
 SEED_USER_NAME = "ATHBA"
 SEED_USER_EMAIL = "athba@example.test"
@@ -57,11 +60,17 @@ class GitProjectClient:
     def __init__(self, runner: Callable[..., str]):
         self.runner = runner
 
-    def initialize(self, paths: ProjectWorkspacePaths) -> str:
+    def initialize(
+        self,
+        paths: ProjectWorkspacePaths,
+        initial_production_paths: Sequence[str] = (),
+    ) -> str:
         paths.repository_root.mkdir(parents=True)
         self.run(paths.repository_root, "init", "-q", "-b", SEED_BRANCH)
         (paths.repository_root / ".gitignore").write_text(SEED_GITIGNORE, encoding="utf-8")
-        self.run(paths.repository_root, "add", ".gitignore")
+        seeded_paths = tuple(initial_production_paths)
+        self._seed_production_modules(paths.repository_root, seeded_paths)
+        self.run(paths.repository_root, "add", ".gitignore", *seeded_paths)
         self.run(
             paths.repository_root,
             "-c",
@@ -73,6 +82,15 @@ class GitProjectClient:
             SEED_COMMIT_MESSAGE,
         )
         return self.run(paths.repository_root, "rev-parse", "HEAD").strip()
+
+    @staticmethod
+    def _seed_production_modules(repository_root: Path, paths: Sequence[str]) -> None:
+        for relative_path in paths:
+            target = resolve_relative_path(repository_root, relative_path, "production path")
+            if target.exists():
+                raise ValueError("initial production path already exists")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(EMPTY_PYTHON_MODULE, encoding="utf-8")
 
     def commit_exists(self, request: CommitLookupRequest) -> bool:
         try:

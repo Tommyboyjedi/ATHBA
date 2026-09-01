@@ -48,6 +48,25 @@ def test_project_persists_reloads_and_reuses_runtime(tmp_path):
     assert (tmp_path / "projects" / "proof-one" / "repository" / ".git").exists()
 
 
+def test_declared_production_paths_are_seeded_as_comment_only_modules(tmp_path):
+    project = service(tmp_path).create_or_load_python_project(
+        "seeded-module",
+        ("toggle_switch.py",),
+    )
+    root = Path(project.repository_root)
+
+    assert (root / "toggle_switch.py").read_text(encoding="utf-8") == (
+        '"""ATHBA initial production module."""\n'
+    )
+    assert subprocess.run(
+        ["git", "show", f"{project.trusted_base_sha}:toggle_switch.py"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == '"""ATHBA initial production module."""\n'
+
+
 def test_legacy_project_state_without_environment_resources_remains_readable(tmp_path):
     environment = service(tmp_path)
     created = environment.create_or_load_python_project("legacy-runtime")

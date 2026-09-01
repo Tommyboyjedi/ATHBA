@@ -36,6 +36,7 @@ class ProjectBootstrapRequest:
     runtime_factory: "ProjectRuntimeFactory"
     readiness_verifier: "ProjectReadinessVerifier"
     git: GitProjectClient
+    initial_production_paths: tuple[str, ...] = ()
 
 @dataclass(frozen=True)
 class ProjectLoadDisposition:
@@ -109,7 +110,7 @@ class ProjectBootstrapper:
         paths = _project_paths(self.root, request.project_id)
         if paths.repository_root.exists():
             raise ValueError("project root exists without persisted ATHBA project state")
-        revision = request.git.initialize(paths)
+        revision = request.git.initialize(paths, request.initial_production_paths)
         project = DevelopmentProject(
             project_id=request.project_id,
             repository_root=str(paths.repository_root),
@@ -191,12 +192,29 @@ class ProjectEnvironmentService:
         self.repo = ProjectEnvironmentRepo(self.root)
         self.python_executable = python_executable
 
-    def create_or_load_python_project(self, project_id: str) -> DevelopmentProject:
-        return self.create_or_load_python_project_with_disposition(project_id).project
+    def create_or_load_python_project(
+        self,
+        project_id: str,
+        production_paths: tuple[str, ...] = (),
+    ) -> DevelopmentProject:
+        return self.create_or_load_python_project_with_disposition(
+            project_id,
+            production_paths,
+        ).project
 
-    def create_or_load_python_project_with_disposition(self, project_id: str) -> ProjectLoadDisposition:
+    def create_or_load_python_project_with_disposition(
+        self,
+        project_id: str,
+        production_paths: tuple[str, ...] = (),
+    ) -> ProjectLoadDisposition:
         existing = self.repo.load(project_id)
-        request = ProjectBootstrapRequest(project_id, ProjectRuntimeFactory(self.python_executable), ProjectReadinessVerifier(self._git_client()), self._git_client())
+        request = ProjectBootstrapRequest(
+            project_id,
+            ProjectRuntimeFactory(self.python_executable),
+            ProjectReadinessVerifier(self._git_client()),
+            self._git_client(),
+            production_paths,
+        )
         project = ProjectBootstrapper(self.root, self.repo).create_or_load(request)
         return ProjectLoadDisposition(project, existing is None)
 

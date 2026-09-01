@@ -35,7 +35,10 @@ async def advance(
     service: StrictTddFeatureApplicationService,
     request: StrictTddFeatureRequest,
 ) -> FeatureAdvanceResult:
-    project_load = service.environment.create_or_load_python_project_with_disposition(request.project_id)
+    project_load = service.environment.create_or_load_python_project_with_disposition(
+        request.project_id,
+        tuple(request.production_paths),
+    )
     project = project_load.project
     state = service.states.load(request.project_id)
     if state is None:
