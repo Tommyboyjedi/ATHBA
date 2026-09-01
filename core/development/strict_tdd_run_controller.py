@@ -206,7 +206,8 @@ def _append_controller_event(self, context: StrictTddLifecycleRunContext, state:
     return _append(self, context, draft)
 
 def _append(self, context: StrictTddLifecycleRunContext, draft: LifecycleEventDraft) -> StrictTddLifecycleEvent:
-    sequence = self.lifecycle.next_sequence(context)
+    existing = next((item for item in self.lifecycle.events(context) if item.event_id == draft.event_id), None)
+    sequence = self.lifecycle.next_sequence(context) if existing is None else existing.sequence_number
     event = draft.materialise(context, sequence)
     return self.lifecycle.append(LifecycleEventAppendRequest(context, event))
 
