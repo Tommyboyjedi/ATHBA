@@ -500,3 +500,64 @@ async def test_manual_advances_isolate_normal_microcycle_effects(tmp_path):
     assert not promotion.deterministic_regression_invoked and not promotion.rack_ai_invoked
     assert not frontier.deterministic_regression_invoked and not frontier.rack_ai_invoked
     assert runtime.requests
+
+
+@pytest.mark.asyncio
+async def test_regression_repair_submission_regression_and_promotion_are_isolated(tmp_path):
+    from core.development.deterministic_regression import ACCUMULATED_REGRESSION
+    from core.development.microcycle_domain import BoundaryAssessment, BoundaryDiagnostic
+
+    store = MemoryStore()
+    candidates = CandidateRepository(
+        tmp_path,
+        {"type": "class Widget:\n    def __init__(self):\n        self.count = 0\n"},
+    )
+    gateway = Gateway(["repair"])
+    runtime = PassingRuntime()
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(
+            store,
+            candidates,
+            gateway,
+            type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
+            DeterministicRegressionService(runtime),
+        )
+    )
+    state = replace(
+        initial_state(),
+        candidate_chain_revision="type",
+        boundary_evidence=(
+            BoundaryAssessment(
+                BoundaryOutcome.GREEN.value,
+                initial_state().frontier.active_fragment_id,
+                BoundaryDiagnostic("green", "passed"),
+            ),
+        ),
+        regression=RegressionState(
+            ACCUMULATED_REGRESSION,
+            ("pytest", "-q"),
+            failing_prior_test_nodes=("tests/test_prior.py::test_prior",),
+        ),
+    )
+    context = RegressionRepairContext(request(tmp_path, state), state, PythonPytestAdapter())
+
+    submitted, submission = await service.repair_service.submit(context)
+
+    assert submission.status == "regression_repair_submitted"
+    assert len(gateway.units) == 1
+    assert runtime.requests == []
+
+    regressed, verification = service.repair_service.run_regression(
+        RegressionRepairContext(request(tmp_path, submitted), submitted, PythonPytestAdapter())
+    )
+
+    assert verification.status == "green"
+    assert len(gateway.units) == 1
+    assert runtime.requests
+    runtime_count = len(runtime.requests)
+
+    promoted = service.repair_service.promote(request(tmp_path, regressed), regressed)
+
+    assert promoted.development_base_revision == regressed.candidate_chain_revision
+    assert len(gateway.units) == 1
+    assert len(runtime.requests) == runtime_count
