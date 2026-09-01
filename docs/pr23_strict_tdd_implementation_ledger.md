@@ -208,3 +208,10 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Added durable feature state, typed feature request/result contracts, scenario selection, restart handling, composition documentation, and a bounded strict run-loop seam preserving existing strict behavior.
 - Acceptance proof uses a real temporary Git repository plus real project/scenario/microcycle/revision/feature state stores, deterministic fake reasoning, and deterministic fake Rack execution. It proves a managed working-ref binding, strict RED/Developer path, canonical promotion, behavior-completion ref deletion, final reconciliation, and restart without replay.
 - Validation intentionally uses no live model endpoint, tiny feature, or ReservationBook. Rack AI code and configuration remain untouched. INCOMPLETE_ITEMS = PRESENT because the separately required live proof remains deliberately unrun.
+
+## Session 8B3A: typed lifecycle evidence and proof report foundation
+
+- Administrative clarification: Session 8B1 was functionally successful. Its detailed lifecycle markers and full validation passed, the work was pushed, and Session 8B2 subsequently integrated the lifecycle; the earlier terminal `PR23_REVISION_LIFECYCLE = FAIL` marker was a reporting error.
+- The original Session 8B3 event-domain/store attempt was incomplete and remains preserved in `pr23-session-8b3-incomplete-before-split-20260901`; it was not applied wholesale.
+- Added typed lifecycle events, a locked durable append-only JSON Lines store, no-op/persisting observer sinks, secret-like value rejection/redaction, and a passive deterministic proof-report projection.
+- Focused lifecycle validation passed. 8B3B CLI/controller composition, 8B3C live composition, the tiny live proof, and the fresh ReservationBook proof remain deliberately unimplemented/unrun.
