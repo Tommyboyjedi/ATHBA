@@ -61,6 +61,10 @@ class FeatureTransitionKind(str, Enum):
     FEATURE_COMPLETED = "feature_completed"
     BLOCKED = "blocked"
 
+class ProjectTransitionDisposition(str, Enum):
+    CREATED = "project_created"
+    LOADED = "project_loaded"
+
 
 @dataclass(frozen=True)
 class StrictTddTransitionPath:
@@ -196,6 +200,7 @@ class FeatureAdvanceResult:
     result: StrictTddFeatureResult
     candidate_revision: str | None = None
     transition_path: StrictTddTransitionPath | None = None
+    project_disposition: ProjectTransitionDisposition | None = None
 
     def __post_init__(self) -> None:
         if self.transition_path is not None and self.transition_path.feature_kind != self.kind:

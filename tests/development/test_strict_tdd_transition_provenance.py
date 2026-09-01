@@ -96,7 +96,7 @@ def test_checkpoint_policy_uses_typed_microcycle_kinds(microcycle, previous, exp
         (_transition(StrictTddTransitionPath(FeatureTransitionKind.FEATURE_COMPLETED), available=False), None, StrictTddTerminalDisposition.COMPLETED),
         (_transition(StrictTddTransitionPath(FeatureTransitionKind.SCENARIO_ADVANCED, ScenarioTransitionKind.MICROCYCLE_ADVANCED, MicrocycleTransitionKind.FRONTIER_RED_ACCEPTED)), StrictTddCheckpoint.RED_FRONTIER_ACCEPTED, StrictTddTerminalDisposition.CHECKPOINT),
         (_transition(StrictTddTransitionPath(FeatureTransitionKind.SCENARIO_ADVANCED), available=True), None, StrictTddTerminalDisposition.CONTINUE),
-        (_transition(StrictTddTransitionPath(FeatureTransitionKind.SCENARIO_ADVANCED), available=False), None, StrictTddTerminalDisposition.CHECKPOINT),
+        (_transition(StrictTddTransitionPath(FeatureTransitionKind.SCENARIO_ADVANCED), available=False), None, StrictTddTerminalDisposition.BLOCKED),
     ],
 )
 def test_terminal_policy_uses_typed_availability_and_checkpoints(transition, requested, expected):
@@ -116,7 +116,7 @@ def test_terminal_policy_uses_typed_availability_and_checkpoints(transition, req
         (MicrocycleTransitionKind.BEHAVIOR_REVIEW_APPROVED, StrictTddLifecycleEventKind.BEHAVIOR_REVIEW_COMPLETED),
         (MicrocycleTransitionKind.BEHAVIOR_REPAIR_VERIFIED, StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_COMPLETED),
         (MicrocycleTransitionKind.BEHAVIOR_COMPLETED, StrictTddLifecycleEventKind.BEHAVIOR_COMPLETED),
-        (MicrocycleTransitionKind.BLOCKED, StrictTddLifecycleEventKind.RUN_BLOCKED),
+        (MicrocycleTransitionKind.BLOCKED, StrictTddLifecycleEventKind.TRANSITION_BLOCKED),
     ],
 )
 def test_projector_maps_exact_microcycle_kind(microcycle, expected):

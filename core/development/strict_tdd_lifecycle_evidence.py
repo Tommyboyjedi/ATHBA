@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator, Protocol
 from core.atomic_json_file import read_json_file, write_json_atomically
 from core.development.microcycle_revision_state import MicrocycleRevisionState
+from core.development.microcycle_domain import MicrocycleState
 from core.development.scenario_drafting_domain import ScenarioDraftRunState
 from core.development.strict_tdd_feature_domain import StrictTddFeatureState
 _SECRET = re.compile('(?i)(?:api[_-]?key|password|authorization|bearer|token)\\s*[:=]\\s*\\S+|sk-[A-Za-z0-9_-]+')
@@ -45,6 +46,9 @@ class StrictTddLifecycleEventKind(str, Enum):
     BEHAVIOR_COMPLETED = 'behavior_completed'
     RECONCILIATION_STARTED = 'reconciliation_started'
     RECONCILIATION_COMPLETED = 'reconciliation_completed'
+    FEATURE_COMPLETED = 'feature_completed'
+    FEATURE_BLOCKED = 'feature_blocked'
+    TRANSITION_BLOCKED = 'transition_blocked'
     CONTROLLED_CHECKPOINT_STOP = 'controlled_checkpoint_stop'
     RUN_BLOCKED = 'run_blocked'
     RUN_COMPLETED = 'run_completed'
@@ -227,12 +231,20 @@ def _locked(path: Path) -> Iterator[None]:
 def _duplicate(events: tuple[StrictTddLifecycleEvent, ...], event: StrictTddLifecycleEvent) -> StrictTddLifecycleEvent | None:
     same = next((item for item in events if item.event_id == event.event_id), None)
     if same is not None:
-        if same.to_dict() != event.to_dict():
+        if not _equivalent_duplicate(same, event):
             raise ValueError('duplicate lifecycle event id conflicts')
         return same
     if any((item.sequence_number == event.sequence_number for item in events)):
         raise ValueError('duplicate lifecycle event sequence conflicts')
     return None
+
+def _equivalent_duplicate(left: StrictTddLifecycleEvent, right: StrictTddLifecycleEvent) -> bool:
+    left_value = left.to_dict()
+    right_value = right.to_dict()
+    left_value.pop("occurred_at_utc")
+    right_value.pop("occurred_at_utc")
+    return left_value == right_value
+
 
 def _write(path: Path, events: tuple[StrictTddLifecycleEvent, ...]) -> None:
     descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=f'.{path.name}.', suffix='.tmp')
@@ -278,6 +290,7 @@ class StrictTddProofReportInput:
     scenario_states: tuple[ScenarioDraftRunState, ...]
     revision_states: tuple[MicrocycleRevisionState, ...]
     events: tuple[StrictTddLifecycleEvent, ...]
+    microcycle_states: tuple[MicrocycleState, ...] = ()
 
 @dataclass(frozen=True)
 class StrictTddProofReport:
@@ -292,7 +305,7 @@ class StrictTddProofReportBuilder:
         status = 'completed' if feature and feature['status'] == 'completed' else 'incomplete'
         if any((item['event_kind'] == 'run_blocked' for item in events)):
             status = 'blocked'
-        sections = {'run': {'available': True, **input.context.to_dict(), 'final_status': status}, 'feature_application': _available(feature), 'scenario_and_microcycle_state': _available([item.to_dict() for item in input.scenario_states]), 'revision_lifecycle': _available([item.to_dict() for item in input.revision_states]), 'lifecycle_events': _available(events), 'final_reconciliation': _available(None if feature is None else feature['final_reconciliation']), 'attempt_counts': {'available': bool(input.scenario_states), 'scenario_drafting_attempts': [len(item.attempts) for item in input.scenario_states]}}
+        sections = {'run': {'available': True, **input.context.to_dict(), 'final_status': status}, 'feature_application': _available(feature), 'scenario_draft_state': _available([item.to_dict() for item in input.scenario_states]), 'microcycle_state': _available([item.to_dict() for item in input.microcycle_states]), 'revision_lifecycle': _available([item.to_dict() for item in input.revision_states]), 'lifecycle_events': _available(events), 'final_reconciliation': _available(None if feature is None else feature['final_reconciliation']), 'attempt_counts': {'available': bool(input.scenario_states), 'scenario_drafting_attempts': [len(item.attempts) for item in input.scenario_states]}}
         redacted = _redact({'schema': 'pr23-lifecycle-evidence-v1', 'sections': sections})
         assert isinstance(redacted, dict)
         structured = redacted

@@ -15,6 +15,7 @@ from core.development.strict_tdd_lifecycle_evidence import (
 from core.development.strict_tdd_transitions import (
     FeatureAdvanceResult,
     FeatureTransitionKind,
+    ProjectTransitionDisposition,
     MicrocycleTransitionKind,
     ScenarioTransitionKind,
     StrictTddTransitionPath,
@@ -89,7 +90,7 @@ class StrictTddTerminalPolicy:
             return StrictTddTerminalDecision(StrictTddTerminalDisposition.CHECKPOINT, reached)
         if transition.another_transition_available:
             return StrictTddTerminalDecision(StrictTddTerminalDisposition.CONTINUE)
-        return StrictTddTerminalDecision(StrictTddTerminalDisposition.CHECKPOINT, reached)
+        return StrictTddTerminalDecision(StrictTddTerminalDisposition.BLOCKED)
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,7 @@ class StrictTddTransitionEventProjector:
         status = _event_status(path)
         draft = LifecycleEventDraft(
             identity,
-            _event_kind(path),
+            _event_kind(path, transition.project_disposition),
             status,
             evidence,
             scenario_id=transition.scenario_id,
@@ -163,7 +164,9 @@ def _event_identity(
     return f"transition-{sha256(payload.encode()).hexdigest()}"
 
 
-def _event_kind(path: StrictTddTransitionPath) -> StrictTddLifecycleEventKind:
+def _event_kind(path: StrictTddTransitionPath, project_disposition: ProjectTransitionDisposition | None) -> StrictTddLifecycleEventKind:
+    if path.feature_kind == FeatureTransitionKind.PROJECT_LOADED and project_disposition == ProjectTransitionDisposition.CREATED:
+        return StrictTddLifecycleEventKind.PROJECT_CREATED
     if path.microcycle_kind is not None:
         return _MICROCYCLE_EVENTS[path.microcycle_kind]
     if path.scenario_kind is not None:
@@ -200,8 +203,8 @@ _FEATURE_EVENTS = {
     FeatureTransitionKind.SCENARIO_ADVANCED: StrictTddLifecycleEventKind.SCENARIO_DRAFTING_COMPLETED,
     FeatureTransitionKind.BEHAVIOR_RECORDED: StrictTddLifecycleEventKind.BEHAVIOR_COMPLETED,
     FeatureTransitionKind.RECONCILIATION_COMPLETED: StrictTddLifecycleEventKind.RECONCILIATION_COMPLETED,
-    FeatureTransitionKind.FEATURE_COMPLETED: StrictTddLifecycleEventKind.RUN_COMPLETED,
-    FeatureTransitionKind.BLOCKED: StrictTddLifecycleEventKind.RUN_BLOCKED,
+    FeatureTransitionKind.FEATURE_COMPLETED: StrictTddLifecycleEventKind.FEATURE_COMPLETED,
+    FeatureTransitionKind.BLOCKED: StrictTddLifecycleEventKind.FEATURE_BLOCKED,
 }
 
 _SCENARIO_EVENTS = {
@@ -212,7 +215,7 @@ _SCENARIO_EVENTS = {
     ScenarioTransitionKind.MICROCYCLE_ADVANCED: StrictTddLifecycleEventKind.FRONTIER_MATERIALISED,
     ScenarioTransitionKind.PROJECT_SYNCHRONISED: StrictTddLifecycleEventKind.SCENARIO_COMPLETED,
     ScenarioTransitionKind.SCENARIO_COMPLETED: StrictTddLifecycleEventKind.SCENARIO_COMPLETED,
-    ScenarioTransitionKind.BLOCKED: StrictTddLifecycleEventKind.RUN_BLOCKED,
+    ScenarioTransitionKind.BLOCKED: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
 }
 
 _MICROCYCLE_EVENTS = {
@@ -225,7 +228,7 @@ _MICROCYCLE_EVENTS = {
     MicrocycleTransitionKind.REGRESSION_CLEAR: StrictTddLifecycleEventKind.REGRESSION_COMPLETED,
     MicrocycleTransitionKind.CANONICAL_BASE_PROMOTED: StrictTddLifecycleEventKind.CANONICAL_BASE_PROMOTED,
     MicrocycleTransitionKind.ACCUMULATED_REGRESSION: StrictTddLifecycleEventKind.REGRESSION_COMPLETED,
-    MicrocycleTransitionKind.REGRESSION_INFRASTRUCTURE_FAILURE: StrictTddLifecycleEventKind.RUN_BLOCKED,
+    MicrocycleTransitionKind.REGRESSION_INFRASTRUCTURE_FAILURE: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
     MicrocycleTransitionKind.REGRESSION_REPAIR_SUBMITTED: StrictTddLifecycleEventKind.DEVELOPER_STARTED,
     MicrocycleTransitionKind.REGRESSION_REPAIR_VERIFIED: StrictTddLifecycleEventKind.DEVELOPER_COMPLETED,
     MicrocycleTransitionKind.REGRESSION_REPAIR_CLEARED: StrictTddLifecycleEventKind.REGRESSION_COMPLETED,
@@ -236,8 +239,8 @@ _MICROCYCLE_EVENTS = {
     MicrocycleTransitionKind.BEHAVIOR_REPAIR_SUBMITTED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_STARTED,
     MicrocycleTransitionKind.BEHAVIOR_REPAIR_VERIFIED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_COMPLETED,
     MicrocycleTransitionKind.BEHAVIOR_REPAIR_REGRESSION_CLEAR: StrictTddLifecycleEventKind.REGRESSION_COMPLETED,
-    MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED: StrictTddLifecycleEventKind.RUN_BLOCKED,
+    MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
     MicrocycleTransitionKind.BEHAVIOR_COMPLETED: StrictTddLifecycleEventKind.BEHAVIOR_COMPLETED,
-    MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED: StrictTddLifecycleEventKind.RUN_BLOCKED,
-    MicrocycleTransitionKind.BLOCKED: StrictTddLifecycleEventKind.RUN_BLOCKED,
+    MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
+    MicrocycleTransitionKind.BLOCKED: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
 }

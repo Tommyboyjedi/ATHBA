@@ -22,6 +22,7 @@ from core.development.strict_tdd_feature_domain import (
 from core.development.strict_tdd_transitions import (
     FeatureAdvanceResult,
     FeatureTransitionKind,
+    ProjectTransitionDisposition,
     ScenarioAdvanceResult,
     StrictTddTransitionPath,
     TransitionFingerprint,
@@ -34,7 +35,8 @@ async def advance(
     service: StrictTddFeatureApplicationService,
     request: StrictTddFeatureRequest,
 ) -> FeatureAdvanceResult:
-    project = service.environment.create_or_load_python_project(request.project_id)
+    project_load = service.environment.create_or_load_python_project_with_disposition(request.project_id)
+    project = project_load.project
     state = service.states.load(request.project_id)
     if state is None:
         state = StrictTddFeatureState(
@@ -45,7 +47,8 @@ async def advance(
             canonical_development_base=project.trusted_base_sha,
         )
         service.states.save(state)
-        return _result_for(FeatureTransitionKind.PROJECT_LOADED, state, project)
+        disposition = ProjectTransitionDisposition.CREATED if project_load.created else ProjectTransitionDisposition.LOADED
+        return _result_for(FeatureTransitionKind.PROJECT_LOADED, state, project, project_disposition=disposition)
     if state.status == StrictTddFeatureStatus.PLANNING.value and state.contract_payload is None:
         return await _persist_contract(service, request, project)
     if state.status == StrictTddFeatureStatus.PLANNING.value:
@@ -269,6 +272,7 @@ def _result_for(
     behavior_ref: str | None = None,
     reasoning: bool = False,
     scenario_transition: ScenarioAdvanceResult | None = None,
+    project_disposition: ProjectTransitionDisposition | None = None,
 ) -> FeatureAdvanceResult:
     fingerprint = TransitionFingerprint(
         state.status,
@@ -306,6 +310,7 @@ def _result_for(
         _result(project, state),
         scenario_transition.candidate_revision if scenario_transition is not None else None,
         path,
+        project_disposition,
     )
 
 

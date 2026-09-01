@@ -37,6 +37,11 @@ class ProjectBootstrapRequest:
     readiness_verifier: "ProjectReadinessVerifier"
     git: GitProjectClient
 
+@dataclass(frozen=True)
+class ProjectLoadDisposition:
+    project: DevelopmentProject
+    created: bool
+
 
 @dataclass(frozen=True)
 class TrustedRevisionPromotionRequest:
@@ -187,8 +192,13 @@ class ProjectEnvironmentService:
         self.python_executable = python_executable
 
     def create_or_load_python_project(self, project_id: str) -> DevelopmentProject:
+        return self.create_or_load_python_project_with_disposition(project_id).project
+
+    def create_or_load_python_project_with_disposition(self, project_id: str) -> ProjectLoadDisposition:
+        existing = self.repo.load(project_id)
         request = ProjectBootstrapRequest(project_id, ProjectRuntimeFactory(self.python_executable), ProjectReadinessVerifier(self._git_client()), self._git_client())
-        return ProjectBootstrapper(self.root, self.repo).create_or_load(request)
+        project = ProjectBootstrapper(self.root, self.repo).create_or_load(request)
+        return ProjectLoadDisposition(project, existing is None)
 
     def record_trusted_revision(self, project_id: str, revision: str) -> DevelopmentProject:
         return TrustedRevisionPromoter(self.repo, self._git_client()).record(TrustedRevisionPromotionRequest(project_id, revision))
