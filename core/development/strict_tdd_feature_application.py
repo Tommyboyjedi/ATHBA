@@ -49,6 +49,8 @@ class FeatureReconciliationRequest:
 
 
 class FeatureScenarioExecutor(Protocol):
+    async def advance(self, request: FeatureScenarioRequest): ...
+
     async def execute(self, request: FeatureScenarioRequest) -> FeatureScenarioResult: ...
 
 

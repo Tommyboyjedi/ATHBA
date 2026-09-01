@@ -16,6 +16,7 @@ from core.development.strict_tdd_feature_application import (
     StrictTddFeatureDependencies,
 )
 from core.development.strict_tdd_feature_domain import StrictTddFeatureRequest
+from core.development.strict_tdd_transitions import ScenarioAdvanceResult, ScenarioTransitionKind, TransitionFingerprint
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
 
 
@@ -71,6 +72,36 @@ class Scenarios:
             value.behavior.ref, f"scenario-{value.behavior.ref}", "behavior_complete",
             "refs/heads/main", f"sha-{value.behavior.ref}", None, None,
             ("review-approved",),
+        )
+
+    async def advance(self, value):
+        outcome = await self.execute(value)
+        return ScenarioAdvanceResult(
+            ScenarioTransitionKind.SCENARIO_COMPLETED,
+            "scenario_complete",
+            "behavior_complete",
+            outcome.behavior_ref,
+            outcome.scenario_id,
+            outcome.canonical_ref,
+            outcome.canonical_development_base,
+            outcome.working_ref,
+            outcome.working_revision,
+            outcome.evidence_refs,
+            False,
+            False,
+            False,
+            None,
+            TransitionFingerprint(
+                "behavior_complete",
+                outcome.behavior_ref,
+                outcome.scenario_id,
+                None,
+                outcome.canonical_development_base,
+                None,
+                (),
+                "complete",
+            ),
+            outcome,
         )
 
 

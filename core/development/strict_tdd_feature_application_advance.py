@@ -168,7 +168,8 @@ async def _advance_scenario(
         behavior,
         state.canonical_development_base or project.trusted_base_sha,
     )
-    outcome = await service.scenarios.execute(request)
+    advanced = await service.scenarios.advance(request)
+    outcome = advanced.result
     if outcome.status == "behavior_complete":
         pending = CompletedBehaviorReference(
             outcome.behavior_ref,
