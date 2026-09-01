@@ -64,21 +64,23 @@ class GitGateway:
             subprocess.run(["git","worktree","remove","--force",str(worktree)], cwd=self.root, capture_output=True, text=True, check=False); shutil.rmtree(worktree, ignore_errors=True)
 
 class ObservedApplication:
-    def __init__(self, app, reasoning, counts): self.app, self.reasoning, self.counts = app, reasoning, counts
+    def __init__(self, app, reasoning, counts): self.app, self.reasoning, self.counts, self.transitions = app, reasoning, counts, []
     def __getattr__(self, name): return getattr(self.app, name)
     async def advance(self, request):
-        before = self.reasoning.call_count; result = await self.app.advance(request); after = self.reasoning.call_count
+        before = self.reasoning.call_count; result = await self.app.advance(request); self.transitions.append(result); after = self.reasoning.call_count
         if getattr(result, "deterministic_regression_invoked", False): self.counts.append((before, after))
         return result
 
 class Factory:
-    def __init__(self, log, counts): self.log, self.counts, self.reasoners, self.gateways = log, counts, [], []
+    def __init__(self, log, counts): self.log, self.counts, self.reasoners, self.gateways, self.applications = log, counts, [], [], []
     def build(self, request):
         config = request.configuration
         reasoning = Reasoning(self.log); gateway = GitGateway(config.state_root / "projects" / config.workload_id / "repository", self.gateways)
         self.reasoners.append(reasoning); self.gateways.append(gateway)
         composition = StrictTddLiveRunCompositionFactory().build(replace(request, configuration=replace(config, athba_revision="athba-deterministic", rack_ai_revision="rack-deterministic"), reasoning_gateway=reasoning, execution_gateway=gateway))
-        composition.controller.application = ObservedApplication(composition.controller.application, reasoning, self.counts)
+        application = ObservedApplication(composition.controller.application, reasoning, self.counts)
+        composition.controller.application = application
+        self.applications.append(application)
         return composition
 
 def test_parser_accepts_start_and_resume():
@@ -92,12 +94,56 @@ def test_cli_happy_path_checkpoints_restarts_completes_and_replays(tmp_path, cap
     assert json.loads(capsys.readouterr().out)["checkpoint_reached"] == "first_regression_clear"
     assert StrictTddRunStateRepository(state/"runs").load("toggle-run").reached_checkpoints
     repository = state/"projects/toggle-project/repository"
+    scenario_id = next(item.scenario_id for item in first.applications[0].transitions if item.scenario_id)
+    microcycles = MicrocycleStateRepo(state / "microcycles")
+    checkpoint_state = microcycles.load(scenario_id)
+    assert checkpoint_state is not None
+    checkpoint_frontier_index = checkpoint_state.frontier.index
+    checkpoint_developer_attempts = tuple(
+        item for item in checkpoint_state.developer_attempts
+        if item.frontier_index == checkpoint_frontier_index
+    )
+    checkpoint_frontier_counts = tuple(
+        item for item in checkpoint_state.frontier_attempt_counts
+        if item.frontier_index == checkpoint_frontier_index
+    )
+    assert checkpoint_developer_attempts and checkpoint_frontier_counts
+    checkpoint_work_units = tuple(item for item in log if isinstance(item, tuple))
+    context = StrictTddLifecycleRunContext("toggle-run","toggle-project",REQUIREMENT,"athba-deterministic","rack-deterministic")
+    checkpoint_events = StrictTddLifecycleEventRepository(state/"lifecycle-events").events(context)
+    checkpoint_event_facts = {
+        (item.event_kind, item.candidate_revision)
+        for item in checkpoint_events
+        if item.event_kind in {
+            StrictTddLifecycleEventKind.DEVELOPER_COMPLETED,
+            StrictTddLifecycleEventKind.REGRESSION_COMPLETED,
+            StrictTddLifecycleEventKind.CANONICAL_BASE_PROMOTED,
+        }
+    }
     assert "toggle_switch.py" in git(repository, "show", "--name-only", "--format=", git(repository, "rev-parse", "refs/heads/main"))
     del first
     resumed = Factory(log, counts)
     assert main(args("resume", state, evidence), resumed) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "completed"
     assert subprocess.run(["/srv/ATHBA/.venv/bin/python","-m","pytest","-q"], cwd=repository, capture_output=True, text=True, timeout=15).returncode == 0
+    resumed_state = microcycles.load(scenario_id)
+    assert resumed_state is not None
+    assert tuple(
+        item for item in resumed_state.developer_attempts
+        if item.frontier_index == checkpoint_frontier_index
+    ) == checkpoint_developer_attempts
+    assert tuple(
+        item for item in resumed_state.frontier_attempt_counts
+        if item.frontier_index == checkpoint_frontier_index
+    ) == checkpoint_frontier_counts
+    resumed_work_units = tuple(item for item in log if isinstance(item, tuple))[len(checkpoint_work_units):]
+    assert not ({item[1] for item in checkpoint_work_units} & {item[1] for item in resumed_work_units})
+    resumed_events = StrictTddLifecycleEventRepository(state/"lifecycle-events").events(context)[len(checkpoint_events):]
+    overlap = (
+        checkpoint_event_facts
+        & {(item.event_kind, item.candidate_revision) for item in resumed_events}
+    )
+    assert not overlap, overlap
     planner = next(x for x in log if getattr(x, "purpose", None) == "athba_behavior_contract")
     gatekeeper = next(x for x in log if getattr(x, "purpose", None) == "athba_specification_checklist")
     assert REQUIREMENT in planner.prompt and '"items"' not in planner.prompt and REQUIREMENT in gatekeeper.prompt

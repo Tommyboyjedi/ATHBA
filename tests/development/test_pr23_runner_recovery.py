@@ -88,7 +88,8 @@ def test_receipt_replay_uses_existing_event_id_and_sequence_before_new_applicati
     after = StrictTddLifecycleEventRepository(state / "lifecycle-events").events(context)
     replayed = [event for event in after if event.event_id == application_event.event_id]
     assert len(replayed) == 1 and replayed[0].sequence_number == application_event.sequence_number
-    assert resumed.applications[0].calls == 1
+    assert resumed.applications[0].calls == 1  # The post-delivery completed transition, never the failed receipt's transition.
+    assert first.applications[0].calls == 1
 
 def test_inflight_without_receipt_is_recovery_required_without_application_advance(tmp_path, capsys):
     state, evidence = tmp_path / "state", tmp_path / "evidence"

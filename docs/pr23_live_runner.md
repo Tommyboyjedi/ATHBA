@@ -39,3 +39,20 @@ blocked and invocation-limit outcomes also write reports. Focused proof guards
 fail immediately if a real Rack AI CLI gateway, local-primary HTTP path, or
 network socket is contacted. The runner itself has no direct subprocess, Git,
 regression, microcycle, scenario, behavior-repair, or Rack AI work-unit logic.
+
+
+## Checkpoint/resume non-repetition correction
+
+A checkpoint after canonical promotion persists the microcycle's next action. Resume
+continues from that durable state; it does not repeat the completed frontier's
+Developer attempt, deterministic regression, canonical promotion, or Rack AI
+work-unit identity. The executable proof compares the checkpoint frontier's
+persisted developer attempts and frontier attempt counts with the resumed
+state, and rejects repeat work-unit IDs or matching lifecycle
+kind/candidate-revision facts.
+
+Receipt redelivery is deliberately different: it may rematerialise the one
+pending lifecycle event with the same deterministic event ID and sequence
+before any application advance. It never reruns the application transition
+that produced the receipt. Subsequent application work, if required, is a
+new frontier transition.

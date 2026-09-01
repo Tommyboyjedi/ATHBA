@@ -292,3 +292,12 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Remaining gates exactly: 1. live tiny proof; 2. ReservationBook proof.
 
 - 8B3C2B final validation: focused executable runner proofs 15 passed; coding-principles PASS; configured mypy 28 files PASS; explicit runner/composition/controller mypy PASS; compileall PASS; git diff --check PASS; full required pytest PASS (446 passed). No live reasoning, Rack AI CLI, live tiny proof, ReservationBook proof, Rack AI modification, or merge was performed.
+
+
+## Checkpoint/resume non-repetition audit
+
+- The prior terminal marker COMPLETED_FRONTIER_REPEATED = YES was inverted. The implementation did not repeat the checkpointed frontier; the earlier executable test lacked an assertion at that boundary.
+- The strengthened executable proof snapshots the checkpoint frontier's persisted Developer attempts and frontier attempt counts, then requires exact equality after fresh-process resume. It also rejects reused Rack AI work-unit identities and repeated lifecycle kind/candidate-revision facts for the completed Developer/regression/promotion path.
+- A comparison against the outer feature transition's canonical-revision field was rejected as a false observation: that projection is feature-level while the scenario is in progress and is not the frontier identity. The durable microcycle state and candidate revision are the authoritative proof sources.
+- Receipt redelivery remains separately permitted: it reuses the prior event ID and sequence before application advance. Its recovery test proves the original application call remains one and that resumed application work is only the distinct subsequent completion transition.
+- COMPLETED_FRONTIER_REPEATED = NO; INCOMPLETE_ITEMS = PRESENT: remaining gates are exactly live tiny proof and ReservationBook proof.
