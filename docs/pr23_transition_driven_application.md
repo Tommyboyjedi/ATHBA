@@ -44,3 +44,5 @@ Transition result flags describe only the current action. In particular,
 scenario candidate submission sets only `rack_ai_invoked`; intent review sets
 only `external_reasoning_invoked`; regression execution sets only
 `deterministic_regression_invoked`; canonical promotion sets none of them.
+
+Repair candidate acceptance is now consumed by a separate verification transition before deterministic accumulated regression.

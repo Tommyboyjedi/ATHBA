@@ -81,6 +81,8 @@ async def advance(
         return _promote_canonical_base(service, request, state, prior_status)
     if action == MicrocyclePendingAction.SUBMIT_REGRESSION_REPAIR:
         return await _submit_regression_repair(service, request, state, adapter, prior_status)
+    if action == MicrocyclePendingAction.VERIFY_REGRESSION_REPAIR:
+        return _verify_regression_repair(service, request, state, prior_status)
     if action == MicrocyclePendingAction.RUN_REPAIR_REGRESSION:
         return _run_repair_regression(service, request, state, adapter, prior_status)
     if action == MicrocyclePendingAction.PROMOTE_REGRESSION_REPAIR:
@@ -91,6 +93,8 @@ async def advance(
         return await _review_behavior(service, request, state, prior_status)
     if action == MicrocyclePendingAction.SUBMIT_BEHAVIOR_REPAIR:
         return await _submit_behavior_repair(service, request, state, adapter, prior_status)
+    if action == MicrocyclePendingAction.VERIFY_BEHAVIOR_REPAIR:
+        return _verify_behavior_repair(service, request, state, prior_status)
     if action == MicrocyclePendingAction.RUN_BEHAVIOR_REPAIR_REGRESSION:
         return _run_behavior_repair_regression(service, request, state, adapter, prior_status)
     if action == MicrocyclePendingAction.PROMOTE_BEHAVIOR_REPAIR:
@@ -298,7 +302,7 @@ async def _submit_regression_repair(
         RegressionRepairContext(request, state, adapter)
     )
     if outcome.status == "regression_repair_submitted":
-        updated = replace(updated, pending_action=MicrocyclePendingAction.RUN_REPAIR_REGRESSION.value)
+        updated = replace(updated, pending_action=MicrocyclePendingAction.VERIFY_REGRESSION_REPAIR.value)
         kind = MicrocycleTransitionKind.REGRESSION_REPAIR_SUBMITTED
         blocker = None
     elif outcome.status.endswith("exhausted"):
@@ -311,6 +315,19 @@ async def _submit_regression_repair(
         blocker = outcome.status
     service.state_store.save(updated)
     return _result(kind, prior_status, updated, request, rack_ai=outcome.developer_submissions == 1, blocker=blocker)
+
+
+def _verify_regression_repair(
+    service: StrictMicrocycleService,
+    request: StrictMicrocycleRequest,
+    state: MicrocycleState,
+    prior_status: str,
+) -> MicrocycleAdvanceResult:
+    if state.candidate_chain_revision is None:
+        return _result(MicrocycleTransitionKind.BLOCKED, prior_status, state, request, blocker="missing_regression_repair_candidate")
+    updated = replace(state, pending_action=MicrocyclePendingAction.RUN_REPAIR_REGRESSION.value)
+    service.state_store.save(updated)
+    return _result(MicrocycleTransitionKind.REGRESSION_REPAIR_VERIFIED, prior_status, updated, request)
 
 
 def _run_repair_regression(
@@ -451,7 +468,7 @@ async def _submit_behavior_repair(
     if outcome.status == "behavior_repair_submitted":
         updated = replace(
             outcome.state,
-            pending_action=MicrocyclePendingAction.RUN_BEHAVIOR_REPAIR_REGRESSION.value,
+            pending_action=MicrocyclePendingAction.VERIFY_BEHAVIOR_REPAIR.value,
         )
         kind = MicrocycleTransitionKind.BEHAVIOR_REPAIR_SUBMITTED
         blocker = None
@@ -465,6 +482,20 @@ async def _submit_behavior_repair(
         blocker = outcome.status
     service.state_store.save(updated)
     return _result(kind, prior_status, updated, request, rack_ai=outcome.developer_submissions == 1, blocker=blocker)
+
+
+def _verify_behavior_repair(
+    service: StrictMicrocycleService,
+    request: StrictMicrocycleRequest,
+    state: MicrocycleState,
+    prior_status: str,
+) -> MicrocycleAdvanceResult:
+    repair = state.behavior_review.repair
+    if repair.execution is None or repair.current_candidate_revision is None:
+        return _result(MicrocycleTransitionKind.BLOCKED, prior_status, state, request, blocker="missing_behavior_repair_candidate")
+    updated = replace(state, pending_action=MicrocyclePendingAction.RUN_BEHAVIOR_REPAIR_REGRESSION.value)
+    service.state_store.save(updated)
+    return _result(MicrocycleTransitionKind.BEHAVIOR_REPAIR_VERIFIED, prior_status, updated, request)
 
 
 def _run_behavior_repair_regression(

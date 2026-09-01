@@ -44,6 +44,7 @@ class MicrocyclePendingAction(str, Enum):
     ADVANCE_FRONTIER = "advance_frontier"
     REVIEW_BEHAVIOR = "review_behavior"
     SUBMIT_REGRESSION_REPAIR = "submit_regression_repair"
+    VERIFY_REGRESSION_REPAIR = "verify_regression_repair"
     RUN_REPAIR_REGRESSION = "run_repair_regression"
     PROMOTE_REGRESSION_REPAIR = "promote_regression_repair"
     SUBMIT_BEHAVIOR_REPAIR = "submit_behavior_repair"

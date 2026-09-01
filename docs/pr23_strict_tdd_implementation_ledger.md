@@ -249,3 +249,4 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Corrective commits: `ed805d5c083acfbd278cd9d638f4a335a5682912` (atomic transition hardening) and `d627692d724f0e50dc5c76cb613da912d5bfd94b` (feature application consumes typed scenario advances).
 - Added isolated-effect proof for Tester submission versus intent review, each normal microcycle boundary, behavior-repair submission/regression/promotion, and feature scenario completion versus behavior recording.
 - Added direct regression-repair submission, regression, and promotion isolation proof.
+- Added persisted, separately observable verification transitions between repair submission and deterministic regression for both regression and behavior repair.
