@@ -164,3 +164,16 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Phase 10 Scenario completion and review: COMPLETE for the generic persistence/restart orchestration proof; live proof remains.
 - Phase 12 Persistence and resume proof: COMPLETE for all required persisted orchestration boundaries.
 - Phase 13 Proof order including fresh ReservationBook proof: INCOMPLETE; deliberately deferred live proof.
+
+
+## Session 8A: post-scenario behavior-review repair and replan route
+
+- Session 6's incomplete item was the persisted-only `repair_required` review outcome. This session adds a separate behavior-repair route; it is not the pre-existing accumulated-regression repair route.
+- Typed persistent state now retains the Senior verdict, rationale, descriptive findings, evidence refs, reviewed candidate revision, behavior-repair execution evidence, separate repair attempt count, repair candidate revision, deterministic repair regression result, and typed terminal replan outcome. Older Session 6/7 review state loads with the new fields at safe defaults.
+- A `repair_required` result creates one production-only Developer work unit. It contains the completed canonical scenario, behavior ticket, descriptive findings, production evidence, allowed production path, and reviewed revision. It explicitly forbids test edits, feature broadening, replacement-source instructions, and PR21 work.
+- Accepted behavior-repair candidates persist before deterministic execution, then run the canonical scenario, prior completed scenarios, and accepted suite with no LLM. Clear regression returns to Senior Review. Accumulated regression uses the existing bounded regression-repair route and then returns to Senior Review. Infrastructure failure remains closed.
+- Behavior-repair attempts are separately capped at four and persist across restart. A fifth submission is impossible. Review replan persists the candidate, rationale, findings, and evidence; it creates no Developer work and does not start a next behavior.
+- The inherited `docs/pr23_live_tiny_microcycle_proof.md` was accurate evidence of a failed pre-composition infrastructure attempt. It was preserved as `docs/pr23_live_tiny_microcycle_proof_attempt_1.md`; it is not a completed proof and no live proof was run in this session.
+- Focused validation: 21 passed across behavior completion, provider review, behavior repair, strict microcycle, and deterministic regression tests. Coding-principles and compileall gates passed before full validation.
+- Implementation commit: `90f3196` development: complete behavior review repair route.
+- INCOMPLETE_ITEMS = PRESENT because the requested live proof remains deliberately unrun.
