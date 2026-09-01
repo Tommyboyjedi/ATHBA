@@ -15,7 +15,11 @@ from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRep
 from core.development.microcycle_revision_store import MicrocycleRevisionRepository
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
 from core.development.strict_tdd_lifecycle_evidence import StrictTddLifecycleEventKind, StrictTddLifecycleEventRepository, StrictTddLifecycleRunContext
-from core.development.strict_tdd_live_run_composition import StrictTddLiveRunCompositionFactory
+from core.development.strict_tdd_live_run_composition import (
+    StrictTddLiveRunCompositionFactory,
+    StrictTddLiveRunCompositionRequest,
+    StrictTddLiveRunConfiguration,
+)
 from core.development.strict_tdd_run_reporting import StrictTddEvidenceRepositories, StrictTddRunEvidenceSnapshotCollector, StrictTddRunReportWriter
 from core.development.strict_tdd_run_store import StrictTddRunStateRepository
 from core.execution.reasoning_gateway import ReasoningResult
@@ -82,6 +86,37 @@ class Factory:
         composition.controller.application = application
         self.applications.append(application)
         return composition
+
+class VersionSource:
+    def __init__(self):
+        self.roots = []
+
+    def resolve(self, root):
+        self.roots.append(root)
+        return root.name
+
+
+def test_live_composition_reads_athba_version_from_configured_source(tmp_path):
+    versions = VersionSource()
+    athba_root = tmp_path / "athba-source"
+    configuration = StrictTddLiveRunConfiguration(
+        tmp_path / "state",
+        tmp_path / "evidence",
+        tmp_path / "state" / "projects" / "new-project" / "repository",
+        "new-project",
+        athba_repository_root=athba_root,
+    )
+    composition = StrictTddLiveRunCompositionFactory(versions).build(
+        StrictTddLiveRunCompositionRequest(
+            configuration,
+            Reasoning([]),
+            GitGateway(configuration.repository_root, []),
+        )
+    )
+
+    assert composition.athba_revision == "athba-source"
+    assert versions.roots[0] == athba_root
+
 
 def test_parser_accepts_start_and_resume():
     for mode in ("start", "resume"):

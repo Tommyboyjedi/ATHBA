@@ -40,6 +40,7 @@ class StrictTddLiveRunConfiguration:
     reasoning_model: str = "local-primary"
     athba_revision: str | None = None
     rack_ai_revision: str | None = None
+    athba_repository_root: Path = Path("/srv/ATHBA")
 
 
 @dataclass(frozen=True)
@@ -106,7 +107,7 @@ class StrictTddLiveRunCompositionFactory:
         )
         return StrictTddLiveRunComposition(
             controller,
-            config.athba_revision or self.versions.resolve(config.repository_root),
+            config.athba_revision or self.versions.resolve(config.athba_repository_root),
             config.rack_ai_revision or self.versions.resolve(Path("/srv/rack-ai")),
         )
 

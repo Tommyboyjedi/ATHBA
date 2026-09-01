@@ -115,6 +115,7 @@ async def execute(
                 input_value.evidence_root,
                 input_value.state_root / "projects" / input_value.project_id / "repository",
                 input_value.project_id,
+                athba_repository_root=Path(__file__).resolve().parents[1],
             )
         )
     )
