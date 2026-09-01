@@ -184,3 +184,19 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Full required pytest suite passed with the mandated Django test environment.
 - Required gates passed: coding-principles, mypy, compileall, git diff --check, clean pushed PR23 status, and immutable legacy verification.
 - Pushed commits: `90f3196` implementation and `52b9760` Session 8A ledger.
+
+## Session 8B1: Git revision/ref lifecycle
+
+- Added a focused typed MicrocycleRevisionState with independent canonical development base and managed microcycle working ref.
+- Added direct-argv Git ref effects behind MicrocycleGitClient; no coordinator or script mutates managed refs directly.
+- Managed refs use a deterministic ATHBA namespace keyed from a validated scenario id. State persists the concrete working ref and transition evidence.
+- Valid RED, Developer, and regression-repair candidates CAS-advance only the working ref. Only a regression-clear candidate equal to the working revision CAS-promotes the canonical ref.
+- RackAiRevisionBindingFactory builds a locally validated working-ref/base-SHA RepositoryBinding from persisted state. No Rack AI request fields, executor selection, source, or configuration changed.
+- Recovery validates persisted Git state, recreates only a missing safe active ref, and fails closed on canonical/working divergence. Behavior completion deletes the aligned managed ref; restart cannot recreate it.
+- Focused real-temporary-Git suite: 16 passed. No live model, tiny-feature proof, ReservationBook proof, or Rack AI process was run.
+
+## Remaining implementation phases
+
+- PR23 revision lifecycle: COMPLETE for this Session 8B1 scope.
+- Full strict-microcycle composition root wiring: DEFERRED to the explicitly excluded later session.
+- Phase 13 live proof order including fresh ReservationBook proof: INCOMPLETE; deliberately unrun.
