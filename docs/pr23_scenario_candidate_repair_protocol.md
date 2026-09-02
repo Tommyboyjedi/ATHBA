@@ -6,9 +6,9 @@ Attempt one is a `fresh_draft` from the canonical development base. Attempts two
 
 ## Typed contract and assessment
 
-The Python/pytest adapter receives one typed authoring contract both when ATHBA constructs the Tester objective and when it validates a returned candidate. The contract permits imports, module data, and exactly one ordinary test. It rejects module docstrings, helpers, fixtures, classes, async/parameterized/dynamic tests, unsupported nodes, substitute implementations, behavior mocks, skips/xfails, and missing-capability evasion. Adapter-owned canonicalisation renames the accepted ordinary test; the original identity is retained as evidence.
+The Python/pytest adapter receives one typed authoring contract both when ATHBA constructs the Tester objective and when it validates a returned candidate. The contract permits imports, module data, and exactly one ordinary test. It rejects module docstrings, test-function docstrings, standalone string-expression statements, helpers, fixtures, classes, async/parameterized/dynamic tests, unsupported nodes, substitute implementations, behavior mocks, skips/xfails, and missing-capability evasion. Adapter-owned canonicalisation renames the accepted ordinary test; the original identity is retained as evidence.
 
-Each attempt persists bounded source, candidate ref/SHA, parent attempt, repair mode/base, Rack evidence and worker identity. Its typed assessment records syntax, identities, structural facts, production references, substitutions, mocks, evasion markers, issue codes/spans, and actionable repair instructions. Older persisted attempts load without the new optional fields.
+Each attempt persists bounded source, candidate ref/SHA, parent attempt, repair mode/base, Rack evidence and typed worker provenance. A repair with an unchanged revision or unchanged source is typed as a consumed no-op attempt, with both source digests and its exact unchanged disposition retained. Its typed assessment records syntax, identities, structural facts, production references, substitutions, mocks, evasion markers, issue codes/spans, and actionable repair instructions. Older persisted attempts load without the new optional fields.
 
 ## Semantic review and cap
 

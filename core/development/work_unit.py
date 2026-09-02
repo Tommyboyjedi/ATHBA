@@ -99,6 +99,19 @@ class DevelopmentWorkUnit:
 
 
 @dataclass(frozen=True)
+class WorkerExecutionProvenance:
+    """Durable worker identity reported by one Rack AI packet."""
+    worker_id: str
+    worker_role: str
+    worker_kind: str
+    model_id: str
+    provider_profile: str
+    resource_id: str
+    backend: str
+    tool_profile: str | None = None
+
+
+@dataclass(frozen=True)
 class ExecutionAttempt:
     work_unit_id: str
     accepted: bool
@@ -111,6 +124,7 @@ class ExecutionAttempt:
     packet_path: str | None = None
     worktree_path: str | None = None
     error: str | None = None
+    worker_provenance: WorkerExecutionProvenance | None = None
 
 
 def _require_text(value: str, label: str) -> None:

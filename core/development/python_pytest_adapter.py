@@ -200,8 +200,22 @@ def _decorator_name(node: ast.expr) -> str:
 
 
 @dataclass(frozen=True)
+class _TestFunctionDocstring:
+    function_name: str
+    node: ast.Expr
+
+
+@dataclass(frozen=True)
+class _StandaloneStringExpression:
+    function_name: str
+    node: ast.Expr
+
+
+@dataclass(frozen=True)
 class _CandidateAssessmentFacts:
     module_docstring_node: ast.stmt | None
+    test_function_docstrings: tuple[_TestFunctionDocstring, ...]
+    standalone_string_expressions: tuple[_StandaloneStringExpression, ...]
     tests: tuple[ast.FunctionDef, ...]
     helpers: tuple[ast.FunctionDef, ...]
     fixtures: tuple[ast.FunctionDef, ...]
@@ -254,8 +268,27 @@ def _candidate_facts(request: ScenarioCandidateAssessmentRequest, module: ast.Mo
     substitutes = PythonCandidateAnalyzer._substitutes(module, production_name)
     mocked = PythonCandidateAnalyzer._mocked_targets(_MockAnalysisRequest(module, production_name, production_module))
     evasions = PythonCandidateAnalyzer._evasions(module)
+    test_function_docstrings = tuple(
+        _TestFunctionDocstring(test.name, test.body[0])
+        for test in tests
+        if ast.get_docstring(test) is not None and isinstance(test.body[0], ast.Expr)
+    )
+    docstring_nodes = {id(item.node) for item in test_function_docstrings}
+    standalone_string_expressions = tuple(
+        _StandaloneStringExpression(test.name, node)
+        for test in tests
+        for node in ast.walk(test)
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+        and id(node) not in docstring_nodes
+    )
     identities = tuple(f"{request.candidate.test_path}::{node.name}" for node in tests)
-    return _CandidateAssessmentFacts(doc_node, tests, helpers, fixtures, classes, async_functions, parameterized, unsupported_top, nested, references, substitutes, mocked, evasions, identities)
+    return _CandidateAssessmentFacts(
+        doc_node, test_function_docstrings, standalone_string_expressions, tests,
+        helpers, fixtures, classes, async_functions, parameterized, unsupported_top,
+        nested, references, substitutes, mocked, evasions, identities,
+    )
 
 
 def _assessment_from_facts(facts: _CandidateAssessmentFacts) -> ScenarioCandidateAssessment:
@@ -273,6 +306,23 @@ def _candidate_issues(facts: _CandidateAssessmentFacts) -> list[ScenarioCandidat
     issues: list[ScenarioCandidateIssue] = []
     if facts.module_docstring_node is not None:
         issues.append(_issue(ScenarioCandidateIssueCode.MODULE_DOCSTRING, "Remove the module docstring; the contract permits imports, module data, and one ordinary top-level test only.", facts.module_docstring_node))
+    for docstring in facts.test_function_docstrings:
+        span = _span(docstring.node)
+        detail = (
+            f"Remove the standalone string literal at the start of test function "
+            f"{docstring.function_name} at lines {span.start_line}-{span.end_line}. "
+            "Test-function docstrings are not permitted by the strict one-scenario "
+            "grammar. Preserve the remaining import, setup, operation and assertions."
+        )
+        issues.append(_issue(ScenarioCandidateIssueCode.TEST_FUNCTION_DOCSTRING, detail, docstring.node))
+    for expression in facts.standalone_string_expressions:
+        span = _span(expression.node)
+        detail = (
+            f"Remove the standalone string-expression statement at lines "
+            f"{span.start_line}-{span.end_line} in test function {expression.function_name}; "
+            "standalone string-expression statements are not permitted by the strict one-scenario grammar."
+        )
+        issues.append(_issue(ScenarioCandidateIssueCode.STANDALONE_STRING_EXPRESSION, detail, expression.node))
     if not facts.tests:
         issues.append(_issue(ScenarioCandidateIssueCode.NO_TEST, "Define exactly one supported pytest test: one ordinary top-level function named test_* ."))
     if len(facts.tests) > 1:

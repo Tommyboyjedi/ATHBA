@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from core.development.work_unit import ExecutionAttempt
+from core.development.work_unit import ExecutionAttempt, WorkerExecutionProvenance
 
 
 SUPPORTED_ACCEPTANCE_VERDICTS = {"approved", "rejected"}
@@ -65,6 +65,8 @@ class RackAiResultParser:
         if verdict not in SUPPORTED_ACCEPTANCE_VERDICTS:
             raise ValueError(f"unsupported Rack AI acceptance verdict: {verdict}")
         accepted = verdict == "approved"
+        provenance = _worker_provenance(payload)
+        selected_worker_id = _selected_worker_id(payload, provenance)
         accepted_revision = None
         if accepted:
             accepted_revision = _optional_string(payload, "accepted_head_sha") or _optional_string(payload, "accepted_revision") or _optional_string(payload, "head_sha")
@@ -73,7 +75,8 @@ class RackAiResultParser:
             accepted=accepted,
             status=status,
             change_id=change_id,
-            selected_worker_id=_optional_string(payload, "selected_worker_id"),
+            selected_worker_id=selected_worker_id,
+            worker_provenance=provenance,
             placement=_optional_mapping(payload.get("placement"), "placement"),
             branch=_optional_string(payload, "branch"),
             accepted_revision=accepted_revision,
@@ -141,6 +144,40 @@ class RackAiExecutionResultMapper:
             policy_evidence=_policy_evidence(result.packet_payload, ExecutionPolicyEvidence),
         )
 
+
+
+def _selected_worker_id(payload: Mapping[str, Any], provenance: WorkerExecutionProvenance | None) -> str | None:
+    selected = _optional_string(payload, "selected_worker_id")
+    if provenance is None:
+        return selected
+    if selected is not None and selected != provenance.worker_id:
+        raise ValueError("Rack AI selected worker contradicted worker provenance")
+    return provenance.worker_id
+
+
+def _worker_provenance(payload: Mapping[str, Any]) -> WorkerExecutionProvenance | None:
+    raw = payload.get("worker_provenance")
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError("Rack AI worker provenance must be an object")
+    return WorkerExecutionProvenance(
+        worker_id=_required_provenance_string(raw, "worker_id"),
+        worker_role=_required_provenance_string(raw, "worker_role"),
+        worker_kind=_required_provenance_string(raw, "worker_kind"),
+        model_id=_required_provenance_string(raw, "model_id"),
+        provider_profile=_required_provenance_string(raw, "provider_profile"),
+        resource_id=_required_provenance_string(raw, "resource_id"),
+        backend=_required_provenance_string(raw, "backend"),
+        tool_profile=_optional_string(raw, "tool_profile"),
+    )
+
+
+def _required_provenance_string(payload: Mapping[str, Any], field_name: str) -> str:
+    value = _optional_string(payload, field_name)
+    if value is None:
+        raise ValueError(f"Rack AI worker provenance missing field: {field_name}")
+    return value
 
 def _policy_evidence(payload: Mapping[str, Any], evidence_type: type):
     allowed_paths = _optional_string_list(payload.get("allowed_paths"), "allowed_paths")

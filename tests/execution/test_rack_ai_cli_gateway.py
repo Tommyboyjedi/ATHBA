@@ -511,3 +511,29 @@ async def test_gateway_rejects_non_ready_units_before_subprocess(monkeypatch, tm
     with pytest.raises(ValueError, match="marked ready for execution"):
         await gateway.execute(sample_unit(status=WorkUnitStatus.PLANNED), sample_binding())
     assert called is False
+
+
+
+def test_result_parser_reads_worker_provenance_and_routing_proof_fails_closed_when_absent():
+    from core.execution.rack_ai_result import parse_rack_ai_result
+    from core.execution.work_unit_gateway import WorkerRoutingExpectation, WorkUnitExecutionResult
+
+    payload = {
+        "work_unit_id": "wu-1", "change_id": "change-1", "status": "checks_passed",
+        "acceptance_verdict": "approved", "accepted_head_sha": "b" * 40,
+        "worker_provenance": {"worker_id": "local-coder", "worker_role": "implementer-tester", "worker_kind": "jcode", "model_id": "eqaq-v2-local-coder", "provider_profile": "local-coder", "resource_id": "gpu-2060", "backend": "jcode", "tool_profile": "direct"},
+    }
+    attempt = parse_rack_ai_result(payload)
+    assert attempt.selected_worker_id == "local-coder"
+    assert attempt.worker_provenance is not None
+    expectation = WorkerRoutingExpectation("local-coder", "implementer-tester", "eqaq-v2-local-coder", "local-coder", "gpu-2060")
+    expectation.verify(WorkUnitExecutionResult("wu-1", True, "checks_passed", worker_provenance=attempt.worker_provenance))
+    with pytest.raises(ValueError, match="requires worker provenance"):
+        expectation.verify(WorkUnitExecutionResult("wu-2", True, "checks_passed"))
+
+
+def test_old_packet_without_worker_provenance_remains_readable():
+    from core.execution.rack_ai_result import parse_rack_ai_result
+
+    attempt = parse_rack_ai_result({"work_unit_id": "wu-1", "change_id": "change-1", "status": "checks_failed", "acceptance_verdict": "rejected"})
+    assert attempt.worker_provenance is None

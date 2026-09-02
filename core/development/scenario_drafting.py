@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -28,6 +29,10 @@ from core.development.scenario_drafting_domain import (
     ScenarioAuthoringContract,
     ScenarioCandidateAssessment,
     ScenarioCandidateAssessmentRequest,
+    ScenarioCandidateIssue,
+    ScenarioCandidateIssueCode,
+    ScenarioCandidateUnchangedDisposition,
+    ScenarioCandidateUnchangedEvidence,
     ScenarioDraftAttempt,
     ScenarioDraftOutcome,
     ScenarioDraftRequest,
@@ -239,7 +244,7 @@ class ScenarioDraftingService:
                 return ScenarioDraftOutcome(state, False)
             if state is not None and state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value:
                 return ScenarioDraftOutcome(state, False)
-            if state is not None and state.attempts and state.attempts[-1].candidate_revision and state.attempts[-1].intent is None:
+            if state is not None and state.attempts and state.attempts[-1].status == "candidate_submitted":
                 outcome = await self.review_intent(request)
             else:
                 outcome = await self.submit_candidate(request, binding)
@@ -343,10 +348,32 @@ class ScenarioDraftingService:
             "accepted candidate is missing a durable candidate branch/ref" if result.accepted else result.status
         )
         attempt = _attempt(unit, result, status, feedback)
-        if state.attempts:
-            parent = state.attempts[-1]
-            attempt = replace(attempt, repair_base_ref=parent.candidate_branch or parent.candidate_revision, repair_base_sha=parent.candidate_revision)
-        return _append_attempt(state, attempt)
+        if state.attempts and attempt.candidate_revision is not None:
+            try:
+                returned_source = self.source_reader.read(attempt.candidate_revision, record.request.allowed_test_path)
+            except ValueError:
+                returned_source = None
+            attempt = replace(attempt, candidate_source=returned_source)
+        if not state.attempts:
+            return _append_attempt(state, attempt)
+        parent = state.attempts[-1]
+        attempt = replace(
+            attempt,
+            repair_base_ref=parent.candidate_branch or parent.candidate_revision,
+            repair_base_sha=parent.candidate_revision,
+        )
+        unchanged = _unchanged_evidence(parent, attempt)
+        if unchanged is None:
+            return _append_attempt(state, attempt)
+        feedback = _unchanged_feedback(parent.feedback)
+        assessment = _unchanged_assessment(parent.candidate_assessment, feedback)
+        rejected = replace(
+            attempt, status="candidate_unchanged", feedback=feedback,
+            candidate=parent.candidate, static_analysis=parent.static_analysis,
+            candidate_assessment=assessment, candidate_source=parent.candidate_source,
+            unchanged_evidence=unchanged,
+        )
+        return _append_attempt(state, rejected)
 
 
 def _initial_state(request: ScenarioDraftRequest) -> ScenarioDraftRunState:
@@ -395,6 +422,39 @@ def _attempt(
         repair_mode="fresh_draft" if unit.id.endswith("-1") else "repair_previous_candidate",
         selected_worker_id=result.selected_worker_id,
     )
+
+
+
+def _unchanged_evidence(previous: ScenarioDraftAttempt, returned: ScenarioDraftAttempt) -> ScenarioCandidateUnchangedEvidence | None:
+    if previous.candidate_revision is None or returned.candidate_revision is None:
+        return None
+    previous_digest = _source_digest(previous.candidate_source)
+    returned_digest = _source_digest(returned.candidate_source)
+    same_revision = previous.candidate_revision == returned.candidate_revision
+    same_source = previous_digest is not None and returned_digest is not None and previous_digest == returned_digest
+    if not same_revision and not same_source:
+        return None
+    if same_revision and same_source:
+        disposition = ScenarioCandidateUnchangedDisposition.SAME_REVISION_AND_SOURCE
+    elif same_revision:
+        disposition = ScenarioCandidateUnchangedDisposition.SAME_REVISION
+    else:
+        disposition = ScenarioCandidateUnchangedDisposition.SAME_SOURCE
+    return ScenarioCandidateUnchangedEvidence(previous.candidate_revision, returned.candidate_revision, previous_digest, returned_digest, disposition.value)
+
+
+def _source_digest(source: str | None) -> str | None:
+    return None if source is None else sha256(source.encode("utf-8")).hexdigest()
+
+
+def _unchanged_feedback(previous_feedback: str | None) -> str:
+    prefix = "The repair produced no test-source change. The previous violations remain. Edit the existing candidate and resolve the listed issues."
+    return prefix if previous_feedback is None else f"{prefix} {previous_feedback}"
+
+
+def _unchanged_assessment(previous: ScenarioCandidateAssessment | None, feedback: str) -> ScenarioCandidateAssessment:
+    issue = ScenarioCandidateIssue(ScenarioCandidateIssueCode.CANDIDATE_UNCHANGED.value, feedback)
+    return ScenarioCandidateAssessment(False, (), issues=(issue,)) if previous is None else replace(previous, issues=(issue, *previous.issues))
 
 
 def _append_attempt(
@@ -501,8 +561,8 @@ def _authoring_contract(request: ScenarioDraftRequest) -> ScenarioAuthoringContr
     return ScenarioAuthoringContract(
         request.language_id, request.test_framework, 1,
         ("imports", "module data assignments", "one ordinary test function"),
-        ("module docstrings", "helper functions", "fixtures", "classes", "async tests"),
-        ("parameterization", "nested functions/classes", "dynamic generation", "skip/xfail"),
+        ("module docstrings", "test-function docstrings", "standalone string-expression statements", "helper functions", "fixtures", "classes", "async tests"),
+        ("test-function docstrings", "standalone string-expression statements", "parameterization", "nested functions/classes", "dynamic generation", "skip/xfail"),
         True, True, True, True, "adapter_normalises one submitted ordinary test",
     )
 
@@ -535,6 +595,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "edit only the allowed test path",
             "do not edit production code",
             "write one complete syntactically valid scenario",
+            "do not include a module docstring, test-function docstring, or standalone string-expression statement",
             "exercise the declared production path without a substitute implementation or behavior mock",
             "do not skip, xfail, or evade a missing production capability",
             "do not materialise a frontier or start implementation",

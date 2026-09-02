@@ -13,6 +13,7 @@ from core.development.microcycle_domain import (
     SourceSpan,
 )
 from core.development.tdd_progression import TddStepProposal
+from core.development.work_unit import WorkerExecutionProvenance
 
 MAX_TESTER_SCENARIO_ATTEMPTS = 4
 MAX_SCENARIO_CANDIDATE_SOURCE_CHARACTERS = 65536
@@ -35,6 +36,30 @@ class ScenarioCandidateIssueCode(str, Enum):
     MOCKED_BEHAVIOR = "mocked_behavior"
     SKIP_OR_XFAIL = "skip_or_xfail"
     MISSING_CAPABILITY_EVASION = "missing_capability_evasion"
+    TEST_FUNCTION_DOCSTRING = "test_function_docstring"
+    STANDALONE_STRING_EXPRESSION = "standalone_string_expression"
+    CANDIDATE_UNCHANGED = "candidate_unchanged"
+
+
+class ScenarioCandidateUnchangedDisposition(str, Enum):
+    SAME_REVISION = "same_revision"
+    SAME_SOURCE = "same_source"
+    SAME_REVISION_AND_SOURCE = "same_revision_and_source"
+
+
+@dataclass(frozen=True)
+class ScenarioCandidateUnchangedEvidence:
+    """Persisted comparison proving a repair did not change the candidate."""
+    previous_revision: str
+    returned_revision: str
+    previous_source_digest: str | None
+    returned_source_digest: str | None
+    disposition: str
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioCandidateUnchangedEvidence":
+        return cls(str(value["previous_revision"]), str(value["returned_revision"]), value.get("previous_source_digest"), value.get("returned_source_digest"), str(value["disposition"]))
 
 
 @dataclass(frozen=True)
@@ -205,6 +230,8 @@ class ScenarioDraftAttempt:
     repair_base_sha: str | None = None
     repair_mode: str = "fresh_draft"
     selected_worker_id: str | None = None
+    worker_provenance: WorkerExecutionProvenance | None = None
+    unchanged_evidence: ScenarioCandidateUnchangedEvidence | None = None
 
     def __post_init__(self) -> None:
         if self.attempt_number < 1:
@@ -223,6 +250,8 @@ class ScenarioDraftAttempt:
             "candidate": None if self.candidate is None else self.candidate.to_dict(),
             "static_analysis": None if self.static_analysis is None else asdict(self.static_analysis),
             "candidate_assessment": None if self.candidate_assessment is None else self.candidate_assessment.to_dict(),
+            "worker_provenance": None if self.worker_provenance is None else asdict(self.worker_provenance),
+            "unchanged_evidence": None if self.unchanged_evidence is None else self.unchanged_evidence.to_dict(),
         }
 
     @classmethod
@@ -231,6 +260,8 @@ class ScenarioDraftAttempt:
         candidate = value.get("candidate")
         static_analysis = value.get("static_analysis")
         candidate_assessment = value.get("candidate_assessment")
+        worker_provenance = value.get("worker_provenance")
+        unchanged_evidence = value.get("unchanged_evidence")
         return cls(
             attempt_number=int(value["attempt_number"]),
             work_unit_id=str(value["work_unit_id"]),
@@ -249,6 +280,8 @@ class ScenarioDraftAttempt:
             repair_base_sha=value.get("repair_base_sha"),
             repair_mode=str(value.get("repair_mode", "fresh_draft")),
             selected_worker_id=value.get("selected_worker_id"),
+            worker_provenance=None if worker_provenance is None else WorkerExecutionProvenance(**dict(worker_provenance)),
+            unchanged_evidence=None if unchanged_evidence is None else ScenarioCandidateUnchangedEvidence.from_dict(dict(unchanged_evidence)),
             static_analysis=None if static_analysis is None else ScenarioStaticAnalysis(
                 actual_test_identity=str(static_analysis["actual_test_identity"]),
                 production_reference_paths=tuple(static_analysis.get("production_reference_paths", ())),

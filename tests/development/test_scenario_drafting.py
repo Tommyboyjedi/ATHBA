@@ -234,7 +234,7 @@ async def test_descriptive_repair_uses_a_new_attempt_scoped_change_id():
             }),
             approval("SRC-CATALOG"),
         ],
-        {"d" * 40: candidate("catalog"), "e" * 40: candidate("catalog")},
+        {"d" * 40: candidate("catalog"), "e" * 40: candidate("catalog", rationale="The repair now proves the lookup.")},
     )
 
     first = await value.draft(request("catalog"), binding())
@@ -254,7 +254,7 @@ async def test_tester_scenario_attempts_stop_at_four():
         accepted(f"catalog-ticket--scenario-draft-{number}", chr(100 + number) * 40, f"draft-{number}")
         for number in range(1, MAX_TESTER_SCENARIO_ATTEMPTS + 1)
     ]
-    sources = {result.accepted_revision: candidate("catalog") for result in results}
+    sources = {result.accepted_revision: candidate("catalog", rationale=f"Attempt {index} is independently stated.") for index, result in enumerate(results, 1)}
     responses = [
         json.dumps({
             "disposition": "insufficient_evidence",
@@ -560,7 +560,7 @@ async def test_repair_preserves_source_after_candidate_parse_rejection():
     objective = json.loads(unit.objective)
     assert attempt.status == "candidate_invalid"
     assert attempt.candidate_source == invalid
-    assert "unsupported Python statement form" in attempt.feedback
+    assert "Test-function docstrings are not permitted" in attempt.feedback
     assert second.submitted_attempt
     assert repair_binding.base_ref == "u" * 40
     assert repair_binding.base_sha == "u" * 40
@@ -606,3 +606,92 @@ def test_adapter_assessment_reports_typed_strict_grammar_violations(source, code
     assessment = PythonPytestAdapter().assess_candidate(ScenarioCandidateAssessmentRequest(candidate_value, proposal.ticket.production_path, _authoring_contract(proposal)))
 
     assert code in {item.code for item in assessment.issues}
+
+
+
+def test_test_function_docstring_has_typed_span_and_feedback():
+    from core.development.microcycle_domain import ScenarioSourceCandidate
+    from core.development.scenario_drafting import _authoring_contract
+    from core.development.scenario_drafting_domain import ScenarioCandidateAssessmentRequest
+
+    proposal = request("catalog")
+    source = "from catalog import Catalog\n\ndef test_catalog():\n    \"documented\"\n    assert Catalog\n"
+    candidate_value = ScenarioSourceCandidate(proposal.scenario_id, proposal.ticket.step_id, proposal.language_id, proposal.allowed_test_path, source, proposal.ticket.test_name, "r" * 40, "evidence/r.json")
+    assessment = PythonPytestAdapter().assess_candidate(ScenarioCandidateAssessmentRequest(candidate_value, proposal.ticket.production_path, _authoring_contract(proposal)))
+    issue = next(item for item in assessment.issues if item.code == "test_function_docstring")
+    assert issue.source_span is not None and issue.source_span.start_line == 4
+    assert "test_catalog" in issue.detail and "Remove the standalone string literal" in issue.detail
+
+
+@pytest.mark.asyncio
+async def test_unchanged_repair_consumes_attempt_and_preserves_diagnostics():
+    invalid = plain_catalog_candidate(body='    "docstring"\n    assert Catalog\n')
+    service, gateway, _reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "u" * 40, "draft-1"), accepted("catalog-ticket--scenario-draft-2", "u" * 40, "draft-2")],
+        [], {"u" * 40: invalid},
+    )
+    first = await service.draft(request("catalog"), binding())
+    second = await service.submit_candidate(request("catalog"), binding())
+    attempt = second.state.attempts[-1]
+    assert first.state.attempts[0].status == "candidate_invalid"
+    assert attempt.status == "candidate_unchanged"
+    assert attempt.unchanged_evidence is not None
+    assert attempt.unchanged_evidence.disposition == "same_revision_and_source"
+    assert {item.code for item in attempt.candidate_assessment.issues} >= {"candidate_unchanged", "test_function_docstring"}
+    assert "The repair produced no test-source change." in attempt.feedback
+    assert len(gateway.calls) == 2
+
+
+def test_scenario_attempt_persists_worker_provenance():
+    from core.development.scenario_drafting_domain import ScenarioDraftAttempt
+    from core.development.work_unit import WorkerExecutionProvenance
+
+    provenance = WorkerExecutionProvenance("local-coder", "implementer-tester", "jcode", "eqaq-v2-local-coder", "local-coder", "gpu-2060", "jcode", "direct")
+    attempt = ScenarioDraftAttempt(1, "draft-1", "change-1", "a" * 40, "evidence/1", "candidate_submitted", worker_provenance=provenance)
+    assert ScenarioDraftAttempt.from_dict(attempt.to_dict()).worker_provenance == provenance
+
+
+
+def test_contract_explicitly_prohibits_all_docstring_and_string_expression_forms():
+    contract = __import__("core.development.scenario_drafting", fromlist=["_authoring_contract"])._authoring_contract(request("catalog"))
+    prohibited = set(contract.prohibited_top_level_forms) | set(contract.prohibited_test_forms)
+    assert {"module docstrings", "test-function docstrings", "standalone string-expression statements"} <= prohibited
+
+
+def test_standalone_string_expression_is_precisely_diagnosed():
+    from core.development.microcycle_domain import ScenarioSourceCandidate
+    from core.development.scenario_drafting import _authoring_contract
+    from core.development.scenario_drafting_domain import ScenarioCandidateAssessmentRequest
+
+    proposal = request("catalog")
+    source = "from catalog import Catalog\n\ndef test_catalog():\n    value = Catalog()\n    \"not a docstring\"\n    assert value\n"
+    candidate_value = ScenarioSourceCandidate(proposal.scenario_id, proposal.ticket.step_id, proposal.language_id, proposal.allowed_test_path, source, proposal.ticket.test_name, "s" * 40, "evidence/s.json")
+    assessment = PythonPytestAdapter().assess_candidate(ScenarioCandidateAssessmentRequest(candidate_value, proposal.ticket.production_path, _authoring_contract(proposal)))
+    issue = next(item for item in assessment.issues if item.code == "standalone_string_expression")
+    assert issue.source_span is not None and issue.source_span.start_line == 5
+    assert "test_catalog" in issue.detail
+
+
+@pytest.mark.asyncio
+async def test_different_revision_with_identical_source_is_a_consumed_noop():
+    invalid = plain_catalog_candidate(body='    "docstring"\n    assert Catalog\n')
+    service, _gateway, _reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "u" * 40, "draft-1"), accepted("catalog-ticket--scenario-draft-2", "v" * 40, "draft-2")],
+        [], {"u" * 40: invalid, "v" * 40: invalid},
+    )
+    await service.draft(request("catalog"), binding())
+    outcome = await service.submit_candidate(request("catalog"), binding())
+    evidence = outcome.state.attempts[-1].unchanged_evidence
+    assert evidence is not None and evidence.disposition == "same_source"
+
+
+@pytest.mark.asyncio
+async def test_noop_repairs_cannot_create_a_fifth_tester_attempt():
+    invalid = plain_catalog_candidate(body='    "docstring"\n    assert Catalog\n')
+    results = [accepted(f"catalog-ticket--scenario-draft-{number}", "u" * 40, f"draft-{number}") for number in range(1, 5)]
+    service, gateway, _reasoning, _reader = components(results, [], {"u" * 40: invalid})
+    for _ in range(4):
+        await service.draft(request("catalog"), binding())
+    terminal = await service.draft(request("catalog"), binding())
+    assert terminal.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+    assert len(gateway.calls) == 4
