@@ -358,3 +358,19 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Four real local-coder Tester packets used the typed 300-second scenario budgets and terminalized in 70.478, 48.289, 24.551, and 127.430 seconds. The fourth was assessed as unchanged; no fifth attempt or canonical promotion occurred.
 - The proof did not reach a Developer frontier, checkpoint/resume, review, reconciliation, or final target pytest. This is fair local-coder candidate failure, not an ATHBA or Rack AI terminalization defect.
 - Full packet/tmux/forensic evidence is in `docs/pr23_live_latch_execution_budget_proof.md`.
+
+
+## Intent-review boundary correction and terminal Latch proof
+
+- `10ae488` separates structural candidate validation, semantic repair, typed
+  intent-review protocol failure, and scenario harness failure; malformed
+  reviewer output no longer consumes Tester attempts.
+- `ce8b9a8` adds the non-Latch empty-candidate regression after the first fresh
+  proof exposed a constructor-boundary defect; the contaminated project is
+  retained rather than reused.
+- The replacement fresh Latch proof terminalized at Rack AI's immutable minimal
+  tool profile (`grep` disallowed) before any candidate or intent review. This
+  is a Rack AI execution-policy blocker, not fair local-coder exhaustion.
+- `INCOMPLETE_ITEMS = PRESENT`: complete live progression remains unavailable
+  pending an external Rack AI policy change; no Rack AI source/configuration or
+  merge was performed.
