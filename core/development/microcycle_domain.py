@@ -151,7 +151,6 @@ class ScenarioSourceCandidate:
                 self.behavior_ref,
                 self.language_id,
                 self.test_path,
-                self.source,
                 self.actual_test_identity,
                 self.candidate_revision,
                 self.evidence_location,

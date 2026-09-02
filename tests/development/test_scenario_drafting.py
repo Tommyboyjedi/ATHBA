@@ -776,3 +776,19 @@ async def test_invalid_intent_schema_is_a_typed_protocol_failure(invalid):
     assert outcome.state.attempts[0].candidate_assessment.accepted
     assert outcome.state.attempts[0].intent_protocol_failure is not None
     assert len(gateway.calls) == 1 and len(reasoning.requests) == 2
+
+@pytest.mark.asyncio
+async def test_empty_non_latch_candidate_is_typed_as_structural_no_test_and_can_be_repaired():
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "q" * 40, "draft-1")],
+        [], {"q" * 40: ""},
+    )
+
+    outcome = await service.draft(request("catalog"), binding())
+    attempt = outcome.state.attempts[0]
+
+    assert attempt.status == "candidate_invalid"
+    assert attempt.candidate_assessment is not None
+    assert "no_test" in {issue.code for issue in attempt.candidate_assessment.issues}
+    assert attempt.candidate_source == ""
+    assert gateway.calls and reasoning.requests == []
