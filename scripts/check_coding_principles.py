@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import ast
+import io
+import tokenize
 from pathlib import Path
 
 LIMIT = 100
@@ -74,6 +76,23 @@ def scan_exception_markers(path: Path, failures: list[str]) -> None:
                 failures.append(f"{path}:{line_number} contains unapproved exception marker {marker}")
 
 
+def scan_source_packing(path: Path, source: str, tree: ast.AST, failures: list[str]) -> None:
+    for token in tokenize.generate_tokens(io.StringIO(source).readline):
+        if token.type == tokenize.OP and token.string == ";":
+            failures.append(f"{path}:{token.start[0]} contains packed executable statements")
+    for node in ast.walk(tree):
+        compound = isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        protocol_stub = (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and len(node.body) == 1
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Constant)
+            and node.body[0].value.value is Ellipsis
+        )
+        if compound and not protocol_stub and node.lineno == node.end_lineno:
+            failures.append(f"{path}:{node.lineno} contains a one-line compound body")
+
+
 def scan_class(path: Path, node: ast.ClassDef, failures: list[str]) -> None:
     lines = executable_line_count(node)
     if lines > LIMIT:
@@ -98,6 +117,7 @@ def main() -> int:
         source = path.read_text(encoding="utf-8")
         scan_exception_markers(path, failures)
         tree = ast.parse(source)
+        scan_source_packing(path, source, tree, failures)
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 scan_class(path, node, failures)

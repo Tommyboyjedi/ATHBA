@@ -51,6 +51,22 @@ files = [
   "core/llm/contracts/provider.py",
   "core/llm/providers/openai_provider.py",
   "core/llm/providers/anthropic_provider.py",
+  "core/development/strict_tdd_transitions.py",
+  "core/development/strict_tdd_transition_provenance.py",
+  "core/development/strict_tdd_lifecycle_evidence.py",
+  "core/development/strict_tdd_run_domain.py",
+  "core/development/strict_tdd_run_store.py",
+  "core/development/strict_tdd_run_reporting.py",
+  "core/development/strict_tdd_run_controller.py",
+  "core/development/strict_tdd_live_run_composition.py",
+  "scripts/run_pr23_strict_tdd_feature.py",
+  "core/development/strict_microcycle_advance.py",
+  "core/development/strict_tdd_feature_execution_advance.py",
+  "core/development/strict_tdd_feature_application_advance.py",
+  "core/development/strict_microcycle.py",
+  "core/development/behavior_repair.py",
+  "core/development/scenario_intent_review.py",
+  "core/development/scenario_drafting.py",
 ]
 check_untyped_defs = true
 no_implicit_optional = true

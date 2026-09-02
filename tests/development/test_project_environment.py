@@ -7,6 +7,7 @@ import pytest
 
 from core.development.project_environment import ProjectEnvironmentService
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
+from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
 from core.execution.rack_ai_contract import find_forbidden_resource_selection_keys, to_rack_ai_request
 
 
@@ -45,6 +46,25 @@ def test_project_persists_reloads_and_reuses_runtime(tmp_path):
     assert first.workspace_lifetime == "disposable"
     assert (tmp_path / "projects" / "proof-one" / "project.json").exists()
     assert (tmp_path / "projects" / "proof-one" / "repository" / ".git").exists()
+
+
+def test_declared_production_paths_are_seeded_as_comment_only_modules(tmp_path):
+    project = service(tmp_path).create_or_load_python_project(
+        "seeded-module",
+        ("toggle_switch.py",),
+    )
+    root = Path(project.repository_root)
+
+    assert (root / "toggle_switch.py").read_text(encoding="utf-8") == (
+        '"""ATHBA initial production module."""\n'
+    )
+    assert subprocess.run(
+        ["git", "show", f"{project.trusted_base_sha}:toggle_switch.py"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == '"""ATHBA initial production module."""\n'
 
 
 def test_legacy_project_state_without_environment_resources_remains_readable(tmp_path):
@@ -180,3 +200,16 @@ def test_generic_execution_request_has_no_runtime_or_framework_fields(tmp_path):
     assert request["environment_resources"] == [str(Path(sys.executable).parent.parent)]
     assert find_forbidden_resource_selection_keys(request) == []
     assert "python" not in json.dumps(request).lower()
+
+def test_synchronization_materializes_the_lifecycle_promoted_revision_in_the_owned_worktree(tmp_path):
+    environment = service(tmp_path)
+    project = environment.create_or_load_python_project("synchronize-worktree")
+    root = Path(project.repository_root)
+    candidate = commit_on_branch(root, "candidate", "candidate.txt", "accepted\n", "candidate")
+    subprocess.run(["git", "update-ref", "refs/heads/main", candidate, project.trusted_base_sha], cwd=root, check=True)
+
+    synchronized = TrustedProjectRevisionSynchronizer(environment).synchronize(project.project_id, candidate)
+
+    assert synchronized.trusted_base_sha == candidate
+    assert (root / "candidate.txt").read_text(encoding="utf-8") == "accepted\n"
+    assert subprocess.run(["git", "status", "--porcelain"], cwd=root, check=True, capture_output=True, text=True).stdout == ""

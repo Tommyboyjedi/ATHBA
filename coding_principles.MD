@@ -222,3 +222,7 @@ Unapproved or undocumented architectural exceptions are not accepted.
 Prefer **small objects, explicit domain concepts, composition, constrained interfaces, typed state, database work in the database, configuration instead of hidden policy, and understandable state transitions**.
 
 Apply SOLID and object-oriented design principles pragmatically. Avoid both monolithic procedural code and needless abstraction. The desired outcome is boring, explicit, maintainable code whose responsibilities and state transitions can be understood without reconstructing the entire application in the reader's head.
+
+## Source readability and packing
+
+Use one executable statement per physical line and conventional readable class and method formatting. Do not pack statements with semicolons or use one-line compound class/function bodies to evade architectural limits. Semicolons inside strings and comments are permitted; application code must not use source packing as an architectural workaround.

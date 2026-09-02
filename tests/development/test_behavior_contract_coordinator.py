@@ -58,7 +58,6 @@ from core.development.tdd_progression import (
     TddSnapshot,
     TddStepProposal,
 )
-from core.development.semantic_progression_domain import SemanticProgressLedger
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_contract import RepositoryBinding, find_forbidden_resource_selection_keys, to_rack_ai_request
 from core.execution.reasoning_gateway import ReasoningRequest, ReasoningResult
@@ -87,12 +86,8 @@ class FakeExecutionGateway:
         self.calls = []
 
     async def execute(self, work_unit, repository_binding):
-        self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective, work_unit.change_key, work_unit.acceptance.commands))
-        result = self.results.get(work_unit.id)
-        if result is None and work_unit.id.endswith("--regression"):
-            return accepted(work_unit.id, repository_binding.base_sha or "d" * 40)
-        if result is None:
-            raise KeyError(work_unit.id)
+        self.calls.append((work_unit.id, repository_binding.base_sha, work_unit.objective, work_unit.change_key))
+        result = self.results[work_unit.id]
         if isinstance(result, list):
             if not result:
                 raise AssertionError(f"no more results configured for {work_unit.id}")
@@ -263,7 +258,7 @@ async def test_tdd_planner_rejects_a_requirement_before_its_prerequisite_is_appr
         "completed_requirement_refs": [],
     }])
 
-    with pytest.raises(ValueError, match="currently actionable"):
+    with pytest.raises(ValueError, match="prerequisites"):
         await DynamicTddPlanner(gateway).decide_next_step(dependency_contract, run_state())
 
 
@@ -354,7 +349,7 @@ def _write_red_probe_packet(path: str, *, outcome: str = "failed", collection_su
     return path
 
 
-def accepted(work_unit_id: str, revision: str, *, stdout: str | None = None, stderr: str | None = None):
+def accepted(work_unit_id: str, revision: str):
     evidence_location = _write_red_probe_packet(f"/tmp/{work_unit_id}.json")
     return WorkUnitExecutionResult(
         work_unit_id=work_unit_id,
@@ -363,8 +358,6 @@ def accepted(work_unit_id: str, revision: str, *, stdout: str | None = None, std
         accepted_revision=revision,
         change_id=f"change-{work_unit_id}",
         evidence_location=evidence_location,
-        stdout=stdout,
-        stderr=stderr,
     )
 
 
@@ -375,8 +368,6 @@ def rejected(
     status="checks_failed",
     allowed_paths: list[str] | None = None,
     changed_paths: list[str] | None = None,
-    stdout: str | None = None,
-    stderr: str | None = None,
 ):
     policy_evidence = None
     if allowed_paths is not None or changed_paths is not None:
@@ -391,8 +382,6 @@ def rejected(
         change_id=f"change-{work_unit_id}",
         evidence_location=f"/tmp/{work_unit_id}.json",
         error=error,
-        stdout=stdout,
-        stderr=stderr,
         policy_evidence=policy_evidence,
     )
 
@@ -400,34 +389,23 @@ def rejected(
 def run_state(
     current_pool="tdd_ready",
     completed_requirement_refs=None,
-    accepted_green_test_names=None,
     cycles=None,
     semantic_base_revision="a" * 40,
-    development_base_revision=None,
     contract_state=None,
     registered_root=None,
     failure_progress=None,
     blocked_reason=None,
-    semantic_progress=None,
-    targeted_requirement_ref=None,
-    targeted_checklist_ref=None,
 ):
     active_contract = contract_state or contract()
-    development_base_revision = development_base_revision or semantic_base_revision
     return BehaviorContractRunState(
         contract=active_contract,
-        repository_binding=binding(development_base_revision, registered_root=registered_root),
+        repository_binding=binding(semantic_base_revision, registered_root=registered_root),
         semantic_base_revision=semantic_base_revision,
-        development_base_revision=development_base_revision,
         current_pool=current_pool,
         completed_requirement_refs=completed_requirement_refs or [],
-        accepted_green_test_names=accepted_green_test_names or [],
         cycles=cycles or [],
         failure_progress=failure_progress or FailureProgressState(),
         blocked_reason=blocked_reason,
-        semantic_progress=semantic_progress or SemanticProgressLedger(),
-        targeted_requirement_ref=targeted_requirement_ref,
-        targeted_checklist_ref=targeted_checklist_ref,
     )
 
 
@@ -1312,7 +1290,7 @@ async def test_next_tdd_cycle_cannot_start_before_semantic_approval():
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
     ).run_contract(contract_state)
 
-    assert [call[0] for call in gateway.calls] == [step.step_id + "--regression"]
+    assert gateway.calls == []
     assert reasoner.requests[0].purpose == "athba_senior_review"
 
 
@@ -1653,7 +1631,7 @@ async def test_resume_can_continue_from_review_ready_without_rerunning_green():
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
     ).run_contract(contract_state)
 
-    assert [call[0] for call in gateway.calls] == [step.step_id + "--regression"]
+    assert gateway.calls == []
 
 
 @pytest.mark.asyncio
@@ -1800,8 +1778,8 @@ def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     assert repair.allowed_paths == ["reservation_book.py"]
     assert red.acceptance.commands == [["python3", "-B", "scripts/assert_test_fails.py", step.test_name]]
     expected_pytest = ["python3", "-B", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
-    assert green.acceptance.commands == [expected_pytest + [step.test_name]]
-    assert repair.acceptance.commands == [expected_pytest + [step.test_name]]
+    assert green.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
+    assert repair.acceptance.commands == [expected_pytest + [step.test_name], expected_pytest + [step.test_path]]
     assert "Act in ATHBA's Tester role during RED" in red.objective
     assert "Do not edit tests" in green.objective
     assert "Reviewer instructions" in repair.objective
@@ -2170,25 +2148,28 @@ async def test_rejected_red_is_persisted_and_cannot_become_green_base():
 
 
 @pytest.mark.asyncio
-async def test_targeted_requirement_prioritizes_planner_and_persists_across_resume():
-    target_state = run_state(
+async def test_targeted_requirement_limits_planner_and_persists_across_resume():
+    target_state = replace(
+        run_state(),
         targeted_requirement_ref="RB-2",
         targeted_checklist_ref="SPEC-2",
     )
+    invalid = proposal("RB-1").to_dict()
+    repaired = proposal("RB-2").to_dict()
     gateway = FakeReasoningGateway([
-        {"status": "propose", "rationale": "choose another actionable item", "proposal": proposal("RB-1").to_dict(), "completed_requirement_refs": []},
+        {"status": "propose", "rationale": "wrong target", "proposal": invalid, "completed_requirement_refs": []},
+        {"status": "propose", "rationale": "targeted repair", "proposal": repaired, "completed_requirement_refs": []},
     ])
 
     decision = await DynamicTddPlanner(gateway).decide_next_step(contract(), target_state)
     restored = BehaviorContractRunState.from_dict(target_state.to_dict())
-    allowed = json.loads(gateway.requests[0].prompt)["allowed_requirement_refs"]
 
-    assert decision.proposal == proposal("RB-1")
-    assert allowed[0] == "RB-2"
-    assert set(allowed) == {"RB-1", "RB-2"}
+    assert decision.proposal == proposal("RB-2")
+    assert json.loads(gateway.requests[0].prompt)["allowed_requirement_refs"] == ["RB-2"]
+    assert gateway.requests[1].purpose == "athba_tdd_step_selection_repair"
     assert restored.targeted_requirement_ref == "RB-2"
     assert restored.targeted_checklist_ref == "SPEC-2"
-    assert restored.active_requirement_refs() == ["RB-2", "RB-1"]
+    assert restored.active_requirement_refs() == ["RB-2"]
 
 
 def test_targeted_gap_selection_skips_untraceable_checklist_item():
@@ -2444,10 +2425,8 @@ async def test_resource_limit_failure_splits_into_persisted_children_and_updates
         ("parent-step--green", "b" * 40),
         ("child-a--red", "b" * 40),
         ("child-a--green", "c" * 40),
-        ("child-a--regression", "d" * 40),
         ("child-b--red", "d" * 40),
         ("child-b--green", "e" * 40),
-        ("child-b--regression", "f" * 40),
     ]
     assert [request.purpose for request in gateway.requests].count("athba_resource_limit_split") == 1
     assert split_states[-1].failure_progress.splits[-1] == WorkPacketSplit(
@@ -2525,10 +2504,8 @@ async def test_resume_split_uses_persisted_children_without_replanning():
     assert [call[:2] for call in execution.calls] == [
         ("child-a--red", "b" * 40),
         ("child-a--green", "c" * 40),
-        ("child-a--regression", "d" * 40),
         ("child-b--red", "d" * 40),
         ("child-b--green", "e" * 40),
-        ("child-b--regression", "f" * 40),
     ]
     assert [request.purpose for request in gateway.requests].count("athba_resource_limit_split") == 0
 
@@ -3123,10 +3100,8 @@ async def test_syntax_failure_already_planned_dependency_defers_and_parent_resum
     assert [call[0] for call in second_gateway.calls] == [
         prereq.step_id + "--red",
         prereq.step_id + "--green",
-        prereq.step_id + "--regression",
         parent.step_id + "--red",
         parent.step_id + "--green",
-        parent.step_id + "--regression",
     ]
 
 
@@ -3188,10 +3163,8 @@ async def test_syntax_failure_add_prerequisite_synthesizes_requirement_and_paren
     assert [call[0] for call in second_gateway.calls] == [
         prerequisite.step_id + "--red",
         prerequisite.step_id + "--green",
-        prerequisite.step_id + "--regression",
         parent.step_id + "--red",
         parent.step_id + "--green",
-        parent.step_id + "--regression",
     ]
 
 
@@ -3262,55 +3235,6 @@ async def test_candidate_repair_uses_attempt_scoped_change_key_for_live_retries(
     assert result.current_pool == "completed"
     assert gateway.calls[0][3] is None
     assert gateway.calls[1][3] == step.step_id + "--red--retry-1"
-
-
-@pytest.mark.asyncio
-async def test_resume_replanned_red_uses_attempt_scoped_change_key_to_avoid_workspace_collision():
-    contract_state = single_requirement_contract()
-    step = proposal()
-    prior_cycle = replace(
-        ContractCycleRecord.from_step(step, base_revision="a" * 40),
-        pool="replan_ready",
-        red_phase=TddPhaseState(
-            phase=TddPhase.RED.value,
-            work_unit_id=step.step_id + "--red",
-            status="checks_passed",
-            accepted_revision="b" * 40,
-            change_id="first-red",
-        ),
-    )
-    resumed_cycle = ContractCycleRecord.from_step(step, base_revision="a" * 40)
-    snapshot = TddSnapshot(
-        project_id="reservation-book",
-        repository_binding=binding("a" * 40),
-        current_trusted_revision="a" * 40,
-        contract_runs={
-            contract_state.id: run_state(
-                current_pool="cycle_active",
-                cycles=[prior_cycle, resumed_cycle],
-                contract_state=contract_state,
-                semantic_base_revision="a" * 40,
-            )
-        },
-    )
-    gateway = FakeExecutionGateway({
-        step.step_id + "--red": accepted(step.step_id + "--red", "c" * 40),
-        step.step_id + "--green": accepted(step.step_id + "--green", "d" * 40),
-    })
-    result = await BehaviorContractCoordinator(
-        execution_gateway=gateway,
-        reasoning_gateway=FakeReasoningGateway([
-            review_approved(step.step_id, "d" * 40),
-            {"status": "complete", "rationale": "Done.", "proposal": None, "completed_requirement_refs": ["RB-1"]},
-        ]),
-        repository_binding=binding(),
-        state_repo=MemoryStateRepo(snapshot),
-        review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
-
-    assert result.current_pool == "completed"
-    assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
-    assert gateway.calls[0][3] == step.step_id + "--red--replan-1"
 
 
 @pytest.mark.asyncio
