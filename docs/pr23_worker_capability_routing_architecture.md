@@ -1,40 +1,43 @@
-# PR23 Worker-Capability Routing Architecture
+# PR23 ATHBA Routing and Generic Rack AI Connector Architecture
 
 ## Status
 
-**Documentation-only proposed architecture.** No runtime, configuration, test, Rack AI, JCode, or model-service code is changed by this document.
+**Documentation-only revised proposal.** No runtime, test, configuration, Rack AI, JCode, model-service, or generated-state code is changed by this document.
 
 This proposal is stacked on the implemented PR23 strict-TDD microcycle foundation at `624c666467b48fcfad72d5f0b5bfdaff6558bd97`.
 
-PR23 remains open and incomplete because no real feature has yet completed the full path from scenario authoring through deterministic frontier progression, Developer GREEN, regression, restart, behavior review, and final Specification Gatekeeper reconciliation.
+PR23 remains open and incomplete because no real feature has yet completed the full route through scenario authoring, deterministic frontier progression, Developer GREEN, regression, restart, behavior review, and final Specification Gatekeeper reconciliation.
 
-## Executive decision
+## Correction to the first PR27 draft
 
-The strict-TDD microcycle design is retained and frozen. The next problem is not another test-harness accommodation. It is assigning each kind of work to a worker that has been qualified for that kind of work.
+The first PR27 draft allowed software-development terms such as `scenario_authoring`, `frontier_implementation`, required semantic capabilities, and escalation tier to cross into Rack AI.
 
-The target route is:
+That boundary was too broad.
+
+The revised decision is:
+
+> ATHBA owns every software-engineering concept. Rack AI receives only a generic executable AI job described through model-oriented capabilities and generic scheduling constraints.
+
+Rack AI must not understand scenarios, RED, GREEN, frontiers, Tester, Developer, behavior review, regression repair, or Gatekeeper reconciliation.
+
+ATHBA may use those concepts internally, but an ATHBA-owned connector translates them into the smaller generic Rack AI contract.
+
+## Core architecture
 
 ```text
-component behavior requirement
-  -> Behavior Planner
-  -> complete behavioral scenario authoring
-       required capability: high reasoning + behavioral test design
-       current preferred mapping: local-primary
-  -> independent scenario-intent review
-  -> deterministic language-adapter decomposition
-  -> smallest syntactically complete frontier
-  -> narrow production implementation
-       required capability: bounded code edit + compiler/test repair
-       current preferred mapping: local-coder
-       bounded fallback mapping: local-primary
-  -> deterministic focused GREEN and accumulated regression
-  -> canonical promotion
-  -> next frontier
-  -> behavior-level review
-  -> final Specification Gatekeeper reconciliation
+ATHBA software-development state
+  -> ATHBA internal work classification
+  -> ATHBA execution-profile resolver
+  -> polymorphic AI execution port
+  -> Rack AI connector
+  -> generic Rack AI job
+  -> Rack AI selects model/worker/resource
+  -> generic terminal result and evidence
+  -> connector maps evidence back
+  -> ATHBA interprets it using software-development semantics
 ```
 
-The complete scenario is a semantic design artifact. It is larger and more demanding than a narrow frontier implementation task. The stronger local worker should therefore author and repair it first. The smaller coder should normally receive the decomposed, immutable active frontier and make the minimum production change required to pass it.
+The connector is an anti-corruption layer. A future alternative rack backend can replace Rack AI by implementing the same ATHBA execution port without changing ATHBA's TDD domain.
 
 ## Change-control invariant
 
@@ -44,479 +47,500 @@ Model output that violates an existing documented contract is not, by itself, ev
 
 From this point:
 
-- the strict scenario grammar is frozen;
-- deterministic frontier decomposition is frozen;
-- the four-submission limit within a model tier is frozen;
-- typed execution budgets are frozen unless independent operational evidence justifies a generic policy revision;
+- strict scenario grammar remains frozen;
+- deterministic frontier decomposition remains frozen;
+- the four-submission limit within a model tier remains frozen;
+- typed execution budgets remain frozen unless independent operational evidence justifies a generic revision;
 - no tool is added merely because a model attempted to call it;
 - no unsupported test form is accepted merely because a model generated it;
-- bounded worker escalation replaces further small-model accommodation.
+- bounded worker routing replaces further fixture-specific accommodation.
 
-## Work taxonomy
-
-ATHBA describes the software-development meaning of work through a small typed taxonomy. The work kind describes **what the task is**. Required capabilities describe **what a selected worker must be able to do**.
-
-### Semantic and high-reasoning work
-
-- `behavior_planning`
-- `scenario_authoring`
-- `scenario_repair`
-- `scenario_intent_review`
-- `senior_behavior_review`
-- `final_gatekeeper_reconciliation`
-- `semantic_behavior_repair`
-
-Typical capabilities:
-
-- `high_reasoning`
-- `behavioral_test_design`
-- `semantic_review`
-- `code_artifact_authoring`
-
-### Deterministic work
-
-- scenario parsing and structural validation;
-- frontier decomposition and materialisation;
-- RED boundary analysis;
-- focused test execution;
-- accumulated regression execution;
-- revision comparison and compare-and-swap promotion;
-- evidence reconciliation where no semantic judgment is required.
-
-No model is selected for deterministic work.
-
-### Narrow model-executed work
-
-- `frontier_implementation`
-- `mechanical_implementation_repair`
-- `narrow_regression_repair`
-
-Typical capabilities:
-
-- `bounded_code_edit`
-- `repository_navigation`
-- `compiler_test_repair`
-- `exact_path_compliance`
-- `structured_tool_use`
-
-### Higher-complexity implementation work
-
-- escalation of a narrow work item after local-coder exhaustion;
-- semantic implementation repair;
-- integration repair that exceeds the qualified narrow-worker envelope.
-
-These require `high_reasoning` plus the relevant coding capabilities.
-
-## Complete scenario authoring
-
-A complete scenario must understand the full behavior ticket and express one coherent final observable behavior. It is not the active RED test and is not promoted into the project repository as trusted development state.
-
-Required capabilities:
-
-```text
-high_reasoning
-behavioral_test_design
-code_artifact_authoring
-```
-
-Current deployment mapping:
-
-```text
-preferred worker: local-primary
-local-coder preferred: no
-```
-
-The scenario-authoring worker operates through Rack AI because it creates a bounded candidate artifact in a trusted worktree. ATHBA requests capabilities; Rack AI chooses the concrete worker.
-
-Scenario submissions remain bounded:
-
-- attempt 1 is a fresh scenario draft;
-- attempts 2–4 repair the immediately preceding candidate when candidate lineage exists;
-- no-candidate outcomes use the existing fresh-retry semantics;
-- model-originated failure consumes the selected tier's submission budget;
-- executor/infrastructure failure does not;
-- attempt 5 is impossible;
-- after four primary scenario-authoring failures, the work enters an explicit capability-blocked state for later human/external handling.
-
-The language adapter still validates the source. The independent intent reviewer still judges whether the scenario expresses the behavior. A scenario is never trusted merely because the stronger worker authored it.
-
-The current deployment may use the same `local-primary` model for authoring and intent review, but the calls must be stateless and independently prompted. This gives contextual independence, not model diversity, and the evidence must say so.
-
-## Deterministic frontier ownership
-
-The approved complete scenario is frozen. The language adapter derives an ordered sequence of syntactically complete frontiers. No model invents replacement microtests.
-
-A frontier is the smallest complete language/test-framework artifact that can expose the next missing capability. It is not necessarily one physical line.
-
-### Python example
-
-An `if` header cannot be emitted without a valid indented body. A `with pytest.raises(...)` block is materialised as a complete AST construct. The adapter may expose the import/type reference first, then constructor/setup, then operation, then final assertion or expected-exception block.
-
-### C# example
-
-A declaration or control-flow block must contain balanced braces and required terminators. The frontier can introduce a type reference or method call while retaining a compilable test method and class shell.
-
-### VBA example
-
-`If ... Then` is not a complete fragment without the matching `End If`; `For` requires `Next`; a test procedure retains its complete `Sub ... End Sub` envelope.
-
-This is how the architecture enforces the second law of TDD without raw line slicing:
-
-1. stop at the smallest syntactically complete fragment sufficient to fail;
-2. ask Developer for only enough production code to make that frontier pass;
-3. run deterministic regression;
-4. expose the next fragment of the same canonical test.
-
-## Narrow frontier implementation
-
-Required capabilities:
-
-```text
-bounded_code_edit
-repository_navigation
-compiler_test_repair
-exact_path_compliance
-```
-
-Current deployment mapping:
-
-```text
-preferred worker: local-coder
-fallback worker: local-primary
-```
-
-The ordinary narrow work contract remains:
-
-- Developer sees only the active frontier;
-- future scenario fragments remain hidden;
-- tests are immutable;
-- only allowed production paths may change;
-- the objective is only to make the active frontier pass;
-- speculative future implementation is prohibited;
-- focused GREEN and accumulated regression are deterministic and independent of the worker's claim;
-- canonical promotion occurs only after those gates clear.
-
-The current `300`-second frontier budget remains the version-1 default.
-
-## Bounded tier escalation
-
-One immutable narrow work item has two explicit capability tiers.
-
-```text
-Tier 1: narrow-worker tier
-  preferred current mapping: local-coder
-  maximum submissions: 4
-
-Tier 2: stronger-worker fallback tier
-  current mapping: local-primary
-  maximum submissions: 4
-```
-
-These are not eight anonymous retries. The work identity remains stable while the tier and submission identity change.
-
-Escalation occurs only after four genuine model-originated failures within the narrow tier. It does not occur for:
-
-- executor unavailable;
-- transport failure before worker invocation;
-- malformed packet;
-- missing required provenance;
-- stale base;
-- no eligible worker;
-- an established harness/tool-policy contract violation.
-
-When escalation occurs, ATHBA preserves:
-
-- immutable objective and acceptance contract;
-- active frontier and accepted tests;
-- base ref and SHA;
-- allowed paths;
-- all candidate and no-candidate evidence;
-- exact diagnostics;
-- last safe repair candidate, if one exists;
-- the exhausted tier's attempt history.
-
-Rack AI then selects an eligible stronger worker. The fallback candidate still passes all normal structural, path, focused GREEN, regression, review, and promotion gates.
-
-There is no automatic return from the primary tier to the coder tier. After four primary fallback submissions, the work enters `capability_blocked` with full evidence. Later human or separately approved external escalation may act on that state; PR23 does not invent another automatic tier.
-
-## ATHBA and Rack AI ownership
+## Responsibility boundary
 
 ### ATHBA owns
 
-- component and behavior meaning;
-- TDD phase and semantic readiness;
-- work kind;
-- required and preferred capabilities;
-- immutable work identity and acceptance contract;
-- per-tier model-attempt accounting;
-- candidate interpretation;
-- scenario/frontier progression;
+- requirements, behaviors, and acceptance meaning;
+- internal development stages and work kinds;
+- semantic readiness and dependency progression;
+- TDD phase and strict frontier progression;
+- whether work is deterministic or model-executed;
+- internal mapping from a development stage to a generic execution profile;
+- model-attempt accounting at the development level;
+- candidate interpretation and repair evidence;
 - escalation authorization;
-- project revision trust and canonical promotion;
+- trusted revision progression;
 - final Specification Gatekeeper reconciliation.
-
-ATHBA must not normally request a GPU, endpoint, concrete worker ID, model ID, or JCode profile.
 
 ### Rack AI owns
 
-- registered workers, models, resources, and qualification metadata;
-- concrete worker eligibility and selection;
-- resource availability and leases;
-- queueing of already-ready executable work;
-- GPU/model placement;
-- harness and tool profile;
-- trusted worktrees and isolation;
-- execution timeouts;
-- worker selection evidence;
-- worker execution provenance;
+- generic model capability registration;
+- model/worker/runtime/resource availability;
+- concrete worker and GPU selection;
+- resource leases and generic queue scheduling;
+- harness and model-runtime configuration;
+- trusted workspace execution;
+- generic path, network, process, timeout, and resource enforcement;
+- selection evidence and execution provenance;
 - terminal execution packets.
 
-Current names such as `local-primary`, `local-coder`, `gpu-4060ti`, and `gpu-2060` are deployment mappings, not ATHBA semantic code.
+### Rack AI explicitly does not own
 
-## Cross-repository work contract
+- scenario authoring semantics;
+- scenario repair semantics;
+- Tester or Developer roles;
+- RED/GREEN meaning;
+- frontier ordering;
+- behavior readiness;
+- project dependency graphs;
+- semantic repair decisions;
+- Specification Gatekeeper meaning.
 
-ATHBA submits an immutable descriptor conceptually equivalent to:
+## ATHBA internal work model
+
+ATHBA retains an internal typed taxonomy because it must know what stage of software development it is performing.
+
+Examples include:
+
+- behavior planning;
+- Gatekeeper atomization;
+- complete scenario authoring;
+- scenario intent review;
+- scenario repair;
+- deterministic frontier decomposition;
+- RED validation;
+- narrow frontier implementation;
+- mechanical implementation repair;
+- deterministic focused GREEN;
+- deterministic accumulated regression;
+- regression repair;
+- senior behavior review;
+- semantic behavior repair;
+- final Gatekeeper reconciliation.
+
+These names remain entirely inside ATHBA.
+
+An ATHBA execution-profile resolver maps each model-executed stage to generic model and scheduling requirements. Deterministic stages do not leave ATHBA.
+
+## Generic Rack AI routing contract
+
+Rack AI receives a deliberately small routing header.
+
+### Generic model capabilities
+
+The version-1 capability vocabulary is aligned with broad classes of model:
+
+- `reasoning`
+- `coding`
+- `visual`
+- `audio`
+
+A job may require one or more capabilities.
+
+Examples:
 
 ```text
-DevelopmentWorkDescriptor
+[reasoning]
+[coding]
+[reasoning, coding]
+[visual]
+[audio]
+```
+
+Unknown required capabilities fail closed under a versioned contract. New broad model classes may be added later without teaching Rack AI software-engineering terminology.
+
+### Complexity
+
+```text
+small
+medium
+large
+```
+
+Complexity describes the size/difficulty envelope of the generic model job. It is not a TDD phase and does not determine semantic readiness.
+
+### Context requirement
+
+```text
+requires_large_context = true | false
+```
+
+This remains a generic routing constraint. Rack AI knows the context capacity of registered model profiles and filters accordingly.
+
+### Priority
+
+```text
+low
+medium
+high
+paramount
+```
+
+Priority determines queue ordering, not intelligence or semantic state.
+
+- `low`: background or non-blocking work;
+- `medium`: normal ready work;
+- `high`: work currently blocking an approved critical path;
+- `paramount`: rare operator- or safety-authorized work that must outrank ordinary jobs.
+
+Routine ATHBA stages must not all default to `paramount`.
+
+### Generic execution form
+
+Rack AI may also need a generic execution form so it knows how to run the job, for example:
+
+- `structured_response`
+- `workspace_change`
+- `media_artifact`
+
+This describes the transport/output shape. It does not reveal software-development meaning.
+
+### Identity and execution constraints
+
+The generic request also carries opaque and safety-critical data such as:
+
+- `work_id` — stable identity of the logical ATHBA work;
+- `submission_id` — unique identity of one actual execution attempt;
+- idempotency key;
+- execution budget;
+- payload or objective;
+- repository/base/allowed paths for a workspace job;
+- expected response schema or acceptance commands;
+- evidence references.
+
+Rack AI treats `work_id` and `submission_id` as opaque identifiers. It does not infer dependencies or development sequence from them.
+
+## Target generic request
+
+Conceptually:
+
+```text
+GenericAiJobRequest
+  version
+  source_system
   work_id
-  project_id
-  behavior_ref
-  work_kind
-  required_capabilities
-  preferred_capabilities
+  submission_id
+  idempotency_key
+  capabilities[]
+  complexity
+  requires_large_context
   priority
-  escalation_tier
-  attempt_number_within_tier
-  global_submission_sequence
-  execution_budget_seconds
-  base_ref
-  base_sha
-  allowed_paths
-  acceptance_contract
+  execution_form
+  timeout_seconds
+  input
+  execution_constraints
+  output_contract
   evidence_refs
 ```
 
-Rack AI returns two linked records.
+The exact wire format is a later cross-repository contract. The semantic boundary above is authoritative.
 
-### Selection evidence
+## Current deployment mapping
 
-```text
-WorkerSelectionDecision
-  decision_id
-  work_id
-  work_kind
-  required_capabilities
-  preferred_capabilities
-  eligible_workers
-  ineligible_workers_with_reasons
-  selected_worker_id
-  selection_reason
-  capability_version
-  qualification_evidence_refs
-  escalation_tier
-  priority
-  resource_and_lease_evidence
-  execution_budget_seconds
-  policy_version
-  created_at
-```
+Current deployment names are configuration evidence in Rack AI, never ATHBA domain constants.
 
-Selection reasons are bounded values such as:
-
-- `preferred`
-- `capability_fallback`
-- `capability_escalation`
-- `idle_overflow`
-
-### Execution provenance
-
-The existing `WorkerExecutionProvenance` records what actually ran. Selection evidence explains why it was selected. A mismatch between selected and executed worker fails closed.
-
-## Worker capability registry
-
-Rack AI extends its current worker/model/resource registry with measured capabilities and qualification evidence.
-
-Conceptual record:
+### Current small coding worker
 
 ```text
-WorkerCapabilityRecord
-  worker_id
-  capabilities
-  qualification_status
-  qualification_evidence_refs
-  capability_version
-  execution_constraints
-  concurrency_capacity
-  active_leases
+model profile: Qwen3.5 / eqaq-v2
+worker: local-coder
+resource: RTX 2060
+capabilities: coding
+qualified complexity: small bounded coding work
+large-context eligible: no
+qualification: qualified_with_constraints
 ```
 
-Qualification statuses:
-
-- `qualified`
-- `qualified_with_constraints`
-- `unavailable`
-
-Current initial mapping:
+### Current stronger worker
 
 ```text
-local-primary
-  high_reasoning
-  behavioral_test_design
-  semantic_review
-  code_artifact_authoring
-  bounded_code_edit
-  repository_navigation
-  compiler_test_repair
-
-local-coder
-  bounded_code_edit
-  repository_navigation
-  compiler_test_repair
-  narrow_multi_file_edit
-  exact_path_compliance
-  structured_tool_use
-  status: qualified_with_constraints
+model profile: Gemma primary profile
+worker: local-primary
+resource: RTX 4060 Ti
+capabilities: reasoning, coding
+qualified complexity: medium/large within measured envelope
+large-context eligible: yes
+qualification: qualified
 ```
 
-The registry must not grant `high_reasoning`, `behavioral_test_design`, or `semantic_review` to local-coder without new qualification evidence.
+### Future 4080 Super worker
 
-## Ready pool and execution queue
+A future worker running the same Gemma model/runtime profile on the RTX 4080 Super has the same intelligence capabilities as the 4060 Ti worker:
 
-There are two layers with different authority.
+```text
+capabilities: reasoning, coding
+qualification envelope: same model profile
+```
 
-### ATHBA ready-work pool
+Its throughput, load time, and availability may differ. Rack AI may prefer it because it is faster or already resident, but ATHBA sees no new semantic capability merely because the GPU is faster.
 
-ATHBA owns semantic readiness and stores:
+## Generic eligibility and ranking
 
-- project and behavior reference;
+Rack AI selection should be generic and deterministic.
+
+### Hard eligibility filters
+
+A worker is eligible only when:
+
+1. every requested capability is supported;
+2. the worker/model is qualified for the requested complexity;
+3. the large-context requirement is satisfied;
+4. the worker, model, harness, and resource are healthy and available or queueable;
+5. execution constraints can be enforced.
+
+### Ranking among eligible workers
+
+Rack AI may rank eligible workers using generic resource policy such as:
+
+- priority and queue age;
+- least-scarce sufficient capability profile;
+- warm/resident model preference;
+- measured throughput;
+- expected completion time;
+- current lease and resource pressure;
+- deterministic tie-break.
+
+For a `coding`-only small job, a coding-only worker is normally less scarce than a worker that also provides reasoning. This naturally preserves the stronger reasoning worker without Rack AI knowing the job is a frontier.
+
+For a `[reasoning, coding]` job, a coding-only worker is ineligible.
+
+## ATHBA mapping examples
+
+These mappings are internal ATHBA policy implemented before the connector boundary.
+
+### Complete behavioral scenario
+
+ATHBA knows this is scenario authoring. The connector emits:
+
+```text
+capabilities: [reasoning, coding]
+complexity: medium
+requires_large_context: false by default, true only when the actual context requires it
+priority: high when it blocks the active behavior
+execution_form: workspace_change
+```
+
+Under the current Rack AI registry, the coding-only Qwen worker is ineligible and a reasoning-plus-coding worker is selected.
+
+Rack AI never receives the phrase `scenario_authoring`.
+
+### Narrow frontier implementation
+
+ATHBA knows this is an active frontier implementation. The connector emits:
+
+```text
+capabilities: [coding]
+complexity: small
+requires_large_context: false
+priority: medium or high according to ATHBA critical-path policy
+execution_form: workspace_change
+```
+
+Both current primary and coder may support coding, but generic least-scarce-sufficient ranking normally selects the coding-only worker.
+
+Rack AI never receives the phrase `frontier_implementation`.
+
+### Stronger fallback for the same frontier
+
+After ATHBA proves the narrow tier exhausted, it retains the same `work_id` and creates a new `submission_id` with a stronger generic profile:
+
+```text
+capabilities: [reasoning, coding]
+complexity: medium
+requires_large_context: false unless evidence says otherwise
+priority: high
+execution_form: workspace_change
+```
+
+This makes the coding-only worker ineligible without telling Rack AI that this is a TDD escalation.
+
+## Replaceable connector
+
+ATHBA defines a polymorphic execution port conceptually equivalent to:
+
+```text
+AiExecutionPort
+  submit(GenericAiJobRequest) -> SubmissionAcknowledgement
+  get_status(submission_id) -> GenericJobStatus
+  get_result(submission_id) -> GenericAiJobResult
+  cancel(submission_id) -> CancellationResult
+```
+
+Implementations may include:
+
+- `RackAiConnector`;
+- deterministic fake connector for tests;
+- a future alternative rack/backend connector.
+
+The ATHBA TDD engine depends on the port, not directly on Rack AI's JSON or CLI.
+
+A separate ATHBA-owned mapper performs:
+
+```text
+ATHBA internal work
+  -> generic execution profile
+  -> GenericAiJobRequest
+```
+
+The Rack AI connector performs only transport, serialization, correlation, and generic result translation.
+
+## No shared semantic pool
+
+ATHBA and Rack AI do not share one queue or one authoritative pool.
+
+### ATHBA semantic work ledger
+
+ATHBA owns:
+
+- dependency graph;
+- behavioral state;
+- readiness;
 - TDD phase;
-- dependency state;
-- trusted base;
-- work kind and capability requirements;
-- escalation tier and attempts;
-- priority;
-- immutable acceptance contract.
+- project mutation safety;
+- attempt/escalation state;
+- trusted base and acceptance meaning.
 
-### Rack AI execution queue
+ATHBA submits only work it has already determined is ready.
 
-Rack AI owns physical execution readiness and stores:
+It should submit every currently dispatchable item, subject to its own project-mutation and idempotency rules, rather than expose its internal dependency graph to Rack AI.
 
-- accepted immutable work request;
-- eligible workers;
-- resource/lease state;
-- queue age and priority;
-- selection decision;
-- execution state;
-- packet/evidence result.
+### Rack AI generic job queue
 
-Rack AI may not make a semantically blocked behavior ready. ATHBA may not claim that a physical worker or GPU is available.
+Rack AI receives ready generic jobs and owns:
 
-One authoritative semantic state remains in ATHBA. One authoritative execution state remains in Rack AI. Idempotency keys, submission acknowledgements, lease IDs, transition receipts, and terminal packet IDs link them without duplicating authority.
+- queue ordering by generic priority;
+- worker/model/resource eligibility;
+- leases;
+- execution;
+- status and terminal evidence.
 
-## Priority and idle-primary overflow
+Rack AI does not decide that job B must precede job A. ATHBA submits A only after B has completed when that dependency exists.
 
-Idle-primary overflow is part of the target architecture but is **not required for the first routing proof**.
+A monotonically increasing submission sequence may be retained for audit, but Rack AI must not treat it as a semantic dependency mechanism.
 
-Current priority order for local-primary eligibility:
+## Queue interaction
 
-1. blocking high-reasoning planning or semantic work;
-2. complete scenario authoring and repair;
-3. intent review, senior review, and final reconciliation;
-4. narrow work escalated after coder exhaustion;
-5. optional narrow overflow work.
+```text
+ATHBA pending work
+  -> dependencies and state resolved internally
+  -> ATHBA ready and undispatched
+  -> connector submits generic job once
+  -> Rack AI acknowledges and queues it
+  -> Rack AI selects and executes when capacity exists
+  -> terminal result correlated by submission_id
+  -> ATHBA interprets result
+  -> ATHBA unlocks or creates further ready work
+```
 
-Version 1 is non-preemptive:
+Temporary resource unavailability leaves a submitted job queued in Rack AI. Permanent lack of any eligible capability returns a generic capability-unavailable blocker.
 
-- a short bounded overflow task already running may finish;
-- no new overflow work is leased while high-reasoning work is ready or queued;
-- overflow is explicitly marked in selection evidence;
-- overflow never changes the work's deterministic acceptance gates.
+## Attempt and escalation ownership
 
-This later optimisation keeps the primary productive without allowing narrow work to starve its unique semantic responsibilities.
+ATHBA owns model-attempt policy because only ATHBA knows whether a result is a candidate defect, semantic repair, or another development outcome.
 
-## Concurrency model
+Rack AI records each actual invocation and terminal result.
 
-Version 1 is intentionally conservative:
+For narrow implementation, version 1 remains:
 
-- one active mutating work item per project;
-- frontiers of one canonical scenario are sequential;
-- canonical promotion is compare-and-swap serialized;
-- independent projects may execute concurrently;
-- immutable-input reasoning may overlap with code execution;
-- speculative parallel mutation within one project is deferred.
+```text
+Tier 1
+  generic request: [coding], small
+  maximum actual submissions: 4
 
-This still enables useful two-GPU concurrency across independent projects and between non-mutating reasoning and a narrow code task, without introducing merge-queue complexity before the basic route is proven.
+Tier 2 after proven Tier-1 exhaustion
+  generic request: [reasoning, coding], medium
+  maximum actual submissions: 4
+```
 
-## Failure ownership
+These are two explicit ATHBA tiers, not eight anonymous retries.
 
-| Failure | Owner of interpretation/action |
-| --- | --- |
-| Candidate structural or semantic failure | ATHBA |
-| Model no-candidate failure after verified invocation | ATHBA attempt accounting, using Rack AI evidence |
-| Worker timeout after invocation | Rack AI evidence; ATHBA tier policy |
-| Worker unavailable / no eligible worker | Rack AI selection blocker surfaced to ATHBA |
-| Transport/executor/worktree failure | Rack AI |
-| Stale base or failed CAS promotion | ATHBA trust lifecycle with Rack AI Git evidence |
-| Deterministic regression failure | ATHBA |
-| Local-coder capability exhaustion | ATHBA authorizes tier escalation |
-| Local-primary fallback exhaustion | ATHBA records capability block |
-| Selection/execution provenance mismatch | fail closed across the boundary |
+Rack AI sees independent generic submissions linked by opaque `work_id`; it does not own the reason for escalation.
 
-Infrastructure failure never consumes a model submission. Model-originated failure consumes only the currently selected tier's budget.
+There is no automatic return from Tier 2 to Tier 1.
 
-## Version-1 scope required before PR23 completion
+## Dynamic GPUs and competing workloads
 
-1. Typed cross-repository work kind and capability requirements.
-2. Rack AI worker capability metadata and deterministic eligibility.
-3. Durable worker selection decision linked to execution provenance.
-4. Complete scenario authoring and repair through high-reasoning capability.
-5. Deterministic scenario decomposition unchanged.
-6. Local-coder preferred narrow frontier implementation.
-7. Local-primary fallback after four coder-tier submissions.
-8. Separate persisted per-tier attempt state and candidate lineage.
-9. Stale-base rejection and serialized canonical promotion.
-10. One fresh tiny-feature end-to-end proof.
-11. One fresh ReservationBook end-to-end proof and Gatekeeper reconciliation.
+Detailed three-GPU scheduling, ComfyUI leases, model residency, and workload switching belong to a separate Rack AI architecture discussion.
 
-## Deferred optimisation
+This boundary already supports that future design:
 
-The following are designed for compatibility but are not merge gates for the first PR23 proof:
+- model capability belongs to a model profile;
+- an executable worker is one runtime instance of that profile;
+- a physical GPU is a resource leased by Rack AI;
+- two workers running the same model on different GPUs expose the same semantic capabilities but different throughput/availability;
+- when ComfyUI leases one GPU, the corresponding worker becomes unavailable while other eligible workers continue or queued jobs wait;
+- ATHBA's work descriptors do not change.
 
-- idle-primary overflow;
-- sophisticated queue ageing;
-- multiple same-project ready mutation tickets;
-- adaptive routing from success history;
-- dynamic model bake-offs;
-- cross-project throughput optimisation;
-- cloud escalation;
+## Sequential proof before concurrency
+
+The first acceptance gate is routing correctness, not multi-GPU optimization.
+
+Required sequential proof order:
+
+1. a `[reasoning, coding]` request selects a suitable stronger worker;
+2. a `[coding]` small request selects the coding worker under least-scarce-sufficient ranking;
+3. a stronger fallback request for the same opaque work selects a reasoning-plus-coding worker;
+4. selection evidence matches execution provenance;
+5. one tiny ATHBA feature completes sequentially;
+6. only then test concurrent workers, idle overflow, dynamic GPU loss, or ComfyUI switching.
+
+## Version-1 scope required for PR23
+
+1. ATHBA internal work-to-profile mapping.
+2. Polymorphic AI execution port and Rack AI connector.
+3. Generic Rack AI capability set: reasoning, coding, visual, audio.
+4. Complexity: small, medium, large.
+5. `requires_large_context` boolean.
+6. Priority: low, medium, high, paramount.
+7. Generic worker/model capability registration and deterministic selection.
+8. Selection evidence linked to execution provenance.
+9. Primary-capable complete scenario authoring through `[reasoning, coding]`.
+10. Deterministic frontier decomposition unchanged.
+11. Coding-only preferred narrow implementation.
+12. Stronger `[reasoning, coding]` fallback after four narrow-tier failures.
+13. Persistence/resume of work, submissions, tiers, and candidate lineage.
+14. Fresh sequential tiny-feature proof.
+15. Fresh ReservationBook proof and final Gatekeeper reconciliation.
+
+## Deferred to the Rack AI scheduling specification
+
+- three-GPU placement policy;
+- model residency and warm-start optimization;
+- ComfyUI/image/video/audio lease arbitration;
+- idle stronger-worker overflow;
+- queue ageing refinements;
+- throughput forecasting;
 - preemption;
-- speculative branch reconciliation.
+- cross-project fairness;
+- adaptive success-rate routing.
 
-PR23 must not absorb a general distributed scheduler before one project completes successfully.
+Those features must use the same generic boundary and must not introduce ATHBA software-development semantics into Rack AI.
 
 ## Stop conditions
 
-- No runtime implementation begins before this design is reviewed.
-- No tool or test grammar change is justified by one model output.
-- No fifth submission exists within either tier.
-- No coder-primary-coder bounce loop exists.
-- No ReservationBook proof runs before the tiny capability-routing proof.
-- No idle-overflow implementation precedes preferred/fallback routing.
-- No cross-project scheduler sophistication precedes one-project completion.
-- If both tiers cannot complete the same tiny feature under the frozen generic contract, PR23 stops for architecture simplification review rather than adding another harness subsystem.
+- No Rack AI software-engineering work kinds.
+- No scenario, Tester, Developer, RED, GREEN, frontier, or Gatekeeper terms in the Rack AI routing contract.
+- No shared semantic queue.
+- No dependency scheduling delegated to Rack AI.
+- No tool or test-grammar change justified by one model output.
+- No fifth submission within a tier.
+- No coder-primary-coder bounce.
+- No concurrency implementation before sequential routing works.
+- No ReservationBook proof before the tiny routing proof.
+- If both generic tiers fail the same tiny feature under the frozen contract, PR23 stops for architecture simplification review rather than adding another fixture-driven subsystem.
 
 ## Definition of done
 
-The capability-routing architecture is complete when:
+The routing architecture is complete when:
 
-- ATHBA requests semantic work and capabilities without naming hardware;
-- Rack AI selects an eligible concrete worker and records why;
-- local-primary authors and repairs one complete scenario;
-- the deterministic adapter derives strict frontiers;
-- local-coder is preferred for narrow implementation;
-- local-primary receives bounded fallback work after truthful coder exhaustion;
-- attempts, candidate lineage, selection, execution, revision trust, and restart state remain durable;
-- a tiny feature completes end to end;
-- a fresh ReservationBook application completes or reaches a legitimate capability/human blocker without feature-specific harness changes;
-- every Gatekeeper checklist item receives final accepted-test YES/NO reconciliation.
+- ATHBA retains all software-development meaning;
+- ATHBA maps internal work to a small generic AI execution profile;
+- the connector is replaceable;
+- Rack AI receives only generic capabilities, complexity, context, priority, execution form, identity, and execution constraints;
+- Rack AI selects and evidences the concrete model/worker/resource;
+- complete scenario authoring reaches a reasoning-plus-coding worker;
+- deterministic adapters derive strict frontiers;
+- narrow implementation normally reaches a coding worker;
+- stronger fallback is bounded and preserves immutable work state;
+- sequential routing completes one tiny feature;
+- a fresh ReservationBook build completes or reaches a legitimate capability/human blocker without feature-specific harness changes;
+- every Gatekeeper item receives final accepted-test YES/NO reconciliation.
