@@ -349,3 +349,12 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Production composition injects one policy into all active PR23 factories and scenario-attempt evidence retains kind/effective timeout.
 - Added deterministic policy, factory, Rack request, persistence-compatibility, and existing strict-path focused coverage.
 - Live proof and final publication evidence are recorded only after their separate terminal run.
+
+## Execution-budget terminal proof
+
+- Generic corrective commit `22603bc` closes the persisted timeout-without-lineage route as a bounded terminal state; it never submits a repair without the immediate predecessor branch, SHA, and source.
+- Required validation after that correction: focused scenario/budget/runner/controller 48 passed; coding-principles and explicit mypy passed; full suite 484 passed in 144.02 seconds; compileall and diff check passed.
+- The first fresh Latch runtime exposed the generic route and is contaminated. The subsequent fresh project `pr23-live-latch-budget-20260902T133353Z` reached a truthful terminal `attempts_exhausted` outcome.
+- Four real local-coder Tester packets used the typed 300-second scenario budgets and terminalized in 70.478, 48.289, 24.551, and 127.430 seconds. The fourth was assessed as unchanged; no fifth attempt or canonical promotion occurred.
+- The proof did not reach a Developer frontier, checkpoint/resume, review, reconciliation, or final target pytest. This is fair local-coder candidate failure, not an ATHBA or Rack AI terminalization defect.
+- Full packet/tmux/forensic evidence is in `docs/pr23_live_latch_execution_budget_proof.md`.
