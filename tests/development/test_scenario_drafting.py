@@ -534,6 +534,40 @@ async def test_repair_uses_verified_previous_candidate_ref_sha_source_and_struct
 
 
 @pytest.mark.asyncio
+async def test_repair_preserves_source_after_candidate_parse_rejection():
+    invalid = plain_catalog_candidate(
+        body=(
+            '    "unsupported expression statement"\n'
+            "    catalog = Catalog()\n"
+            "    assert catalog\n"
+        ),
+    )
+    repaired = plain_catalog_candidate()
+    service, gateway, _reasoning, _reader = components(
+        [
+            accepted("catalog-ticket--scenario-draft-1", "u" * 40, "draft-1"),
+            accepted("catalog-ticket--scenario-draft-2", "v" * 40, "draft-2"),
+        ],
+        [approval("SRC-CATALOG")],
+        {"u" * 40: invalid, "v" * 40: repaired},
+    )
+
+    first = await service.draft(request("catalog"), binding())
+    second = await service.submit_candidate(request("catalog"), binding())
+
+    attempt = first.state.attempts[0]
+    unit, repair_binding = gateway.calls[1]
+    objective = json.loads(unit.objective)
+    assert attempt.status == "candidate_invalid"
+    assert attempt.candidate_source == invalid
+    assert "unsupported Python statement form" in attempt.feedback
+    assert second.submitted_attempt
+    assert repair_binding.base_ref == "u" * 40
+    assert repair_binding.base_sha == "u" * 40
+    assert objective["previous_candidate"]["source"] == invalid
+
+
+@pytest.mark.asyncio
 async def test_repair_fails_closed_when_persisted_candidate_ref_does_not_match_sha():
     store = MemoryStateStore()
     source = plain_catalog_candidate()

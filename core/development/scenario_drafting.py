@@ -283,6 +283,7 @@ class ScenarioDraftingService:
         attempt = state.attempts[-1]
         if attempt.candidate_revision is None or attempt.intent is not None:
             raise ValueError("scenario intent review requires an unreviewed accepted draft")
+        source: str | None = None
         try:
             source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
             prepared = _prepare_candidate(request, attempt, source, self.adapter_catalog)
@@ -322,7 +323,12 @@ class ScenarioDraftingService:
             self.state_store.save(updated)
             return ScenarioDraftOutcome(updated, False)
         except (SyntaxError, ValueError) as error:
-            invalid = replace(attempt, status="candidate_invalid", feedback=str(error))
+            invalid = replace(
+                attempt,
+                status="candidate_invalid",
+                feedback=str(error),
+                candidate_source=source,
+            )
             updated = replace(state, attempts=(*state.attempts[:-1], invalid))
             self.state_store.save(updated)
             return ScenarioDraftOutcome(updated, False)
