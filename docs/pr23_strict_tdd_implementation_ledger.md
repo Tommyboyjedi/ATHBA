@@ -340,3 +340,12 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - Attempt one remains a fresh draft from the canonical development base. Attempts two through four bind to the immediately preceding candidate ref/SHA only after ref resolution verifies the persisted SHA; missing or mismatched repair lineage fails closed. Candidate drafting never promotes the canonical development base.
 - Structural and semantic rejection feedback both produce explicit repair objectives containing the previous source and typed diagnostics. The four-attempt cap remains unchanged and the fourth candidate is assessed before exhaustion can be declared.
 - Focused deterministic tests cover strict candidate forms, contract injection, ref/SHA/source repair binding, structured persisted diagnostics, and mismatch failure. The earlier CounterBox live record remains historical and was not used as proof of this workflow. No live proof, ReservationBook run, model escalation, or Rack AI change was made in this session.
+
+## Execution-budget corrective pass
+
+- Bounded raw reads of the interrupted Latch state succeeded; the former reader-block claim was not reproducible.
+- Two local-coder terminal packets were retained; attempt three began without a packet or retained progress trace.
+- Added typed strict-TDD execution budgets: 300 seconds for scenario draft/repair and Developer, 450 for regression repair, 600 for behavior repair, and 900 for generic/legacy work.
+- Production composition injects one policy into all active PR23 factories and scenario-attempt evidence retains kind/effective timeout.
+- Added deterministic policy, factory, Rack request, persistence-compatibility, and existing strict-path focused coverage.
+- Live proof and final publication evidence are recorded only after their separate terminal run.

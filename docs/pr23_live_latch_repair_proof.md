@@ -12,6 +12,8 @@
 
 The production runner was started with the real local-primary reasoning boundary and the Rack AI CLI. It created the disposable project, durable feature/run/scenario state, and two Rack AI review-packet artifacts. The runner produced no terminal transition output and the external 700-second bound expired. A separate process inspection found no surviving live-run process.
 
+Historical correction: the 700-second external bound was shorter than the inherited 900-second work-unit allowance, so it did not establish an inner terminal result.
+
 The state artifact reader then blocked, so packet provenance and candidate-chain details could not be safely extracted. This is a fail-closed infrastructure result. It does not establish local-coder routing, Tester exhaustion, a scenario approval, any frontier, Developer work, regression, promotion, checkpoint/resume, review, reconciliation, or target pytest success. No generated target file was manually altered.
 
 Artifacts retained for follow-up include `state/scenario-drafts/pr23-live-latch-repair-20260902T104954Z--REQ-001.json`, `state/runs/pr23-live-latch-repair-20260902T104954Z-run.json`, and the two Rack AI packet paths under `/srv/rack-ai/state/changes/pr23-live-latch-repair-20260902T104954Z--REQ-001--scenario-draft-*-attempt-*/review-packet.json`.
