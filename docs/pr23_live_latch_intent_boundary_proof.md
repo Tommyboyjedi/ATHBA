@@ -60,3 +60,7 @@ frontier, checkpoint, resume, reconciliation, or target pytest was reached.
 Rack AI was not modified and no replacement run is authorized without an
 external Rack AI policy change. The final ATHBA source validation follows this
 terminal record and is committed separately.
+
+## Later audit clarification
+
+The preserved run contained one actual Tester submission and produced no candidate. It did not prove four-attempt exhaustion. The later audit classified the grep event as TOOL_NOT_ADVERTISED_MODEL_CALLED; no grep or tool-policy change was made merely to advance the proof.

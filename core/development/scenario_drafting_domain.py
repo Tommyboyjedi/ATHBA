@@ -20,6 +20,19 @@ from core.development.work_unit import WorkerExecutionProvenance
 MAX_TESTER_SCENARIO_ATTEMPTS = 4
 MAX_SCENARIO_CANDIDATE_SOURCE_CHARACTERS = 65536
 
+class ScenarioSubmissionMode(str, Enum):
+    FRESH_DRAFT = "fresh_draft"
+    FRESH_RETRY_AFTER_NO_CANDIDATE = "fresh_retry_after_no_candidate"
+    REPAIR_PREVIOUS_CANDIDATE = "repair_previous_candidate"
+    RETRY_REPAIR_FROM_EXISTING_CANDIDATE = "retry_repair_from_existing_candidate"
+
+class ScenarioSubmissionOutcome(str, Enum):
+    CANDIDATE_SUBMITTED = "candidate_submitted"
+    DISALLOWED_OR_UNKNOWN_TOOL_CALL = "disallowed_or_unknown_tool_call"
+    WORKER_MODEL_TIMEOUT = "worker_model_timeout"
+    MODEL_PROTOCOL_FAILURE = "model_protocol_failure"
+    MODEL_COMPLETED_WITHOUT_CANDIDATE = "model_completed_without_candidate"
+    EXTERNAL_BLOCKER = "external_blocker"
 
 class ScenarioCandidateIssueCode(str, Enum):
     SYNTAX_INVALID = "syntax_invalid"
@@ -233,6 +246,7 @@ class ScenarioDraftAttempt:
     repair_base_ref: str | None = None
     repair_base_sha: str | None = None
     repair_mode: str = "fresh_draft"
+    no_candidate_outcome: str | None = None
     selected_worker_id: str | None = None
     work_kind: str | None = None
     timeout_seconds: int | None = None
@@ -298,6 +312,7 @@ class ScenarioDraftAttempt:
             repair_base_ref=value.get("repair_base_ref"),
             repair_base_sha=value.get("repair_base_sha"),
             repair_mode=str(value.get("repair_mode", "fresh_draft")),
+            no_candidate_outcome=value.get("no_candidate_outcome"),
             selected_worker_id=value.get("selected_worker_id"),
             work_kind=value.get("work_kind"),
             timeout_seconds=value.get("timeout_seconds"),

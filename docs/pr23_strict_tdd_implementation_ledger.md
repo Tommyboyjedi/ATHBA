@@ -374,3 +374,7 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - `INCOMPLETE_ITEMS = PRESENT`: complete live progression remains unavailable
   pending an external Rack AI policy change; no Rack AI source/configuration or
   merge was performed.
+
+## Submission-accounting and minimal-tool audit (2026-09-02)
+
+Added the live-proof change-control gate, installed-JCode minimal-profile audit, and actual Tester-submission accounting. The audit found v0.80.0 minimal advertises agentgrep but not grep; the Latch event is classified as model-originated unadvertised-tool use. Four actual selected-worker no-candidate submissions are now permitted and bounded; routing/escalation remains deferred.

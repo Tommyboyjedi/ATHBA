@@ -698,34 +698,17 @@ async def test_noop_repairs_cannot_create_a_fifth_tester_attempt():
 
 
 @pytest.mark.asyncio
-async def test_timeout_without_candidate_lineage_ends_bounded_draft_route():
-    from dataclasses import replace
-    from core.development.scenario_drafting import _initial_state
-    from core.development.scenario_drafting_domain import ScenarioDraftAttempt
-
-    source = plain_catalog_candidate(body='    "docstring"\n    assert Catalog\n')
-    store = MemoryStateStore()
-    state = _initial_state(request("catalog"))
-    prior = ScenarioDraftAttempt(
-        1, "catalog-ticket--scenario-draft-1", "draft-1", "b" * 40,
-        "evidence/draft-1.json", "candidate_invalid", "remove docstring",
-        candidate_branch="b" * 40, candidate_source=source,
-    )
-    store.save(replace(state, attempts=(prior,)))
-    timeout = WorkUnitExecutionResult(
-        "catalog-ticket--scenario-draft-2", False, "failed", "draft-2",
-        error="jcode wall-clock timeout exceeded after 300 seconds",
-    )
+async def test_unselected_timeout_is_an_external_blocker_without_consuming_submission():
     service, gateway, _reasoning, _reader = components(
-        [timeout], [], {"b" * 40: source}, store
+        [WorkUnitExecutionResult("catalog-ticket--scenario-draft-1", False, "failed", "draft-1", error="executor unavailable timeout")],
+        [], {},
     )
 
-    timed_out = await service.submit_candidate(request("catalog"), binding())
-    terminal = await service.submit_candidate(request("catalog"), binding())
+    outcome = await service.submit_candidate(request("catalog"), binding())
 
-    assert timed_out.state.attempts[-1].status == "candidate_rejected"
-    assert timed_out.state.attempts[-1].candidate_revision is None
-    assert terminal.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+    assert outcome.state.status == ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value
+    assert outcome.state.attempts == ()
+    assert len(gateway.calls) == 1
 
 @pytest.mark.asyncio
 async def test_intent_protocol_failure_preserves_structurally_accepted_candidate_without_tester_retry():
@@ -792,3 +775,32 @@ async def test_empty_non_latch_candidate_is_typed_as_structural_no_test_and_can_
     assert "no_test" in {issue.code for issue in attempt.candidate_assessment.issues}
     assert attempt.candidate_source == ""
     assert gateway.calls and reasoning.requests == []
+
+
+@pytest.mark.asyncio
+async def test_four_selected_no_candidate_submissions_are_consumed_from_canonical_base():
+    results = [
+        WorkUnitExecutionResult(
+            f"catalog-ticket--scenario-draft-{number}", False, "failed", f"draft-{number}",
+            selected_worker_id="local-coder", error="Tool 'grep' is not allowed",
+        )
+        for number in range(1, 5)
+    ]
+    service, gateway, _reasoning, _reader = components(results, [], {})
+    outcomes = [await service.submit_candidate(request("catalog"), binding()) for _ in range(4)]
+    terminal = await service.submit_candidate(request("catalog"), binding())
+
+    state = outcomes[-1].state
+    assert [item.attempt_number for item in state.attempts] == [1, 2, 3, 4]
+    assert state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+    assert terminal.submitted_attempt is False
+    assert len(gateway.calls) == 4
+    assert [item.repair_mode for item in state.attempts] == [
+        "fresh_draft",
+        "fresh_retry_after_no_candidate",
+        "fresh_retry_after_no_candidate",
+        "fresh_retry_after_no_candidate",
+    ]
+    assert all(item.no_candidate_outcome == "disallowed_or_unknown_tool_call" for item in state.attempts)
+    assert all(item.selected_worker_id == "local-coder" for item in state.attempts)
+    assert all(call[1].base_sha == "a" * 40 for call in gateway.calls)

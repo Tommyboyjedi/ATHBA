@@ -38,6 +38,8 @@ from core.development.scenario_drafting_domain import (
     ScenarioDraftRequest,
     ScenarioDraftRunState,
     ScenarioDraftStatus,
+    ScenarioSubmissionMode,
+    ScenarioSubmissionOutcome,
 )
 from core.development.strict_tdd_execution_budget import (
     StrictTddExecutionBudgetPolicy,
@@ -255,9 +257,7 @@ class ScenarioDraftingService:
             self.state_store.save(exhausted)
             return ScenarioDraftOutcome(exhausted, False)
         attempt_number = len(state.attempts) + 1
-        repair = state.attempts[-1] if state.attempts else None
-        if repair is not None and not _has_repair_lineage(repair):
-            return _unrepairable_lineage_outcome(state, self.state_store)
+        repair = _last_candidate_attempt(state)
         repair_binding = _repair_binding(binding, request, repair, self.source_reader)
         unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state), repair))
         result = await self.execution_gateway.execute(unit, repair_binding)
@@ -342,11 +342,17 @@ class ScenarioDraftingService:
         unit = record.unit
         result = record.result
         accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
-        status = "candidate_submitted" if accepted else "candidate_rejected"
-        feedback = None if accepted else result.error or (
-            "accepted candidate is missing a durable candidate branch/ref" if result.accepted else result.status
+        outcome = _submission_outcome(result, accepted)
+        if outcome is ScenarioSubmissionOutcome.EXTERNAL_BLOCKER:
+            blocked = replace(state, status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value)
+            return ScenarioDraftOutcome(blocked, False)
+        status = outcome.value
+        feedback = None if accepted else _no_candidate_feedback(result, outcome)
+        attempt = replace(
+            _attempt(unit, result, status, feedback),
+            repair_mode=_submission_mode(state).value,
+            no_candidate_outcome=None if accepted else outcome.value,
         )
-        attempt = _attempt(unit, result, status, feedback)
         if state.attempts and attempt.candidate_revision is not None:
             try:
                 returned_source = self.source_reader.read(attempt.candidate_revision, record.request.allowed_test_path)
@@ -644,8 +650,8 @@ def _authoring_contract(request: ScenarioDraftRequest) -> ScenarioAuthoringContr
 def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repair: ScenarioDraftAttempt | None) -> str:
     payload: dict[str, object] = {
         "role": "Tester",
-        "task": "REPAIR MODE. Refactor the existing submitted test candidate. The existing test file is present in your base revision. Make the smallest changes required to resolve the listed violations. Preserve correct behavior already expressed. Do not discard it and invent an unrelated test." if repair else "Draft one complete behavioral scenario conforming to the supplied strict authoring contract.",
-        "repair_mode": "repair_previous_candidate" if repair else "fresh_draft",
+        "task": "REPAIR MODE. Refactor the existing submitted test candidate. The existing test file is present in your base revision. Make the smallest changes required to resolve the listed violations. Preserve correct behavior already expressed. Do not discard it and invent an unrelated test." if repair else ("Your previous Tester submission produced no candidate source or revision. Submit a new complete scenario from the unchanged development base. Use only tools actually exposed by the execution harness." if feedback and feedback.startswith("Your previous Tester submission") else "Draft one complete behavioral scenario conforming to the supplied strict authoring contract."),
+        "repair_mode": "repair_previous_candidate" if repair else ("fresh_retry_after_no_candidate" if feedback and feedback.startswith("Your previous Tester submission") else "fresh_draft"),
         "authoring_contract": _authoring_contract(request).to_dict(),
         "ticket": {
             "id": request.ticket.step_id,
@@ -687,6 +693,54 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
         }
     return json.dumps(payload, sort_keys=True)
 
+
+
+def _last_candidate_attempt(state: ScenarioDraftRunState) -> ScenarioDraftAttempt | None:
+    for attempt in reversed(state.attempts):
+        if _has_repair_lineage(attempt):
+            return attempt
+    return None
+
+
+def _submission_mode(state: ScenarioDraftRunState) -> ScenarioSubmissionMode:
+    if not state.attempts:
+        return ScenarioSubmissionMode.FRESH_DRAFT
+    candidate = _last_candidate_attempt(state)
+    if candidate is None:
+        return ScenarioSubmissionMode.FRESH_RETRY_AFTER_NO_CANDIDATE
+    if state.attempts[-1].candidate_revision is None:
+        return ScenarioSubmissionMode.RETRY_REPAIR_FROM_EXISTING_CANDIDATE
+    return ScenarioSubmissionMode.REPAIR_PREVIOUS_CANDIDATE
+
+
+def _submission_outcome(
+    result: WorkUnitExecutionResult, accepted: bool,
+) -> ScenarioSubmissionOutcome:
+    if accepted:
+        return ScenarioSubmissionOutcome.CANDIDATE_SUBMITTED
+    detail = (result.error or result.status).lower()
+    if result.selected_worker_id is None or ("advertised" in detail and "denied" in detail):
+        return ScenarioSubmissionOutcome.EXTERNAL_BLOCKER
+    if "tool" in detail and ("not allowed" in detail or "unknown" in detail or "disallowed" in detail):
+        return ScenarioSubmissionOutcome.DISALLOWED_OR_UNKNOWN_TOOL_CALL
+    if "timeout" in detail:
+        return ScenarioSubmissionOutcome.WORKER_MODEL_TIMEOUT
+    if "protocol" in detail:
+        return ScenarioSubmissionOutcome.MODEL_PROTOCOL_FAILURE
+    if "no candidate" in detail or "completed" in detail or "no change" in detail:
+        return ScenarioSubmissionOutcome.MODEL_COMPLETED_WITHOUT_CANDIDATE
+    return ScenarioSubmissionOutcome.EXTERNAL_BLOCKER
+
+
+def _no_candidate_feedback(
+    result: WorkUnitExecutionResult, outcome: ScenarioSubmissionOutcome,
+) -> str:
+    detail = result.error or result.status
+    return (
+        f"Your previous Tester submission ran on {result.selected_worker_id} but produced no candidate test. "
+        f"{detail} No candidate source or revision exists to repair. Submit a new complete scenario from "
+        "the unchanged development base. Use only tools actually exposed by the execution harness."
+    )
 
 def _has_repair_lineage(repair: ScenarioDraftAttempt) -> bool:
     return (
