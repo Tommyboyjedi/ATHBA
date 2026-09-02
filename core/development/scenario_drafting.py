@@ -283,6 +283,8 @@ class ScenarioDraftingService:
             return ScenarioDraftOutcome(exhausted, False)
         attempt_number = len(state.attempts) + 1
         repair = state.attempts[-1] if state.attempts else None
+        if repair is not None and not _has_repair_lineage(repair):
+            return _unrepairable_lineage_outcome(state, self.state_store)
         repair_binding = _repair_binding(binding, request, repair, self.source_reader)
         unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state), repair))
         result = await self.execution_gateway.execute(unit, repair_binding)
@@ -487,6 +489,17 @@ def _append_attempt(
     return ScenarioDraftOutcome(replace(state, attempts=attempts, status=status), True)
 
 
+def _unrepairable_lineage_outcome(
+    state: ScenarioDraftRunState,
+    state_store: ScenarioDraftStateStore,
+) -> ScenarioDraftOutcome:
+    exhausted = replace(
+        state, status=ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+    )
+    state_store.save(exhausted)
+    return ScenarioDraftOutcome(exhausted, False)
+
+
 def _last_feedback(state: ScenarioDraftRunState) -> str | None:
     return state.attempts[-1].feedback if state.attempts else None
 
@@ -630,6 +643,13 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
         }
     return json.dumps(payload, sort_keys=True)
 
+
+def _has_repair_lineage(repair: ScenarioDraftAttempt) -> bool:
+    return (
+        repair.candidate_branch is not None
+        and repair.candidate_revision is not None
+        and repair.candidate_source is not None
+    )
 
 def _repair_binding(
     binding: RepositoryBinding,

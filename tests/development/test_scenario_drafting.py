@@ -695,3 +695,34 @@ async def test_noop_repairs_cannot_create_a_fifth_tester_attempt():
     terminal = await service.draft(request("catalog"), binding())
     assert terminal.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
     assert len(gateway.calls) == 4
+
+
+@pytest.mark.asyncio
+async def test_timeout_without_candidate_lineage_ends_bounded_draft_route():
+    from dataclasses import replace
+    from core.development.scenario_drafting import _initial_state
+    from core.development.scenario_drafting_domain import ScenarioDraftAttempt
+
+    source = plain_catalog_candidate(body='    "docstring"\n    assert Catalog\n')
+    store = MemoryStateStore()
+    state = _initial_state(request("catalog"))
+    prior = ScenarioDraftAttempt(
+        1, "catalog-ticket--scenario-draft-1", "draft-1", "b" * 40,
+        "evidence/draft-1.json", "candidate_invalid", "remove docstring",
+        candidate_branch="b" * 40, candidate_source=source,
+    )
+    store.save(replace(state, attempts=(prior,)))
+    timeout = WorkUnitExecutionResult(
+        "catalog-ticket--scenario-draft-2", False, "failed", "draft-2",
+        error="jcode wall-clock timeout exceeded after 300 seconds",
+    )
+    service, gateway, _reasoning, _reader = components(
+        [timeout], [], {"b" * 40: source}, store
+    )
+
+    timed_out = await service.submit_candidate(request("catalog"), binding())
+    terminal = await service.submit_candidate(request("catalog"), binding())
+
+    assert timed_out.state.attempts[-1].status == "candidate_rejected"
+    assert timed_out.state.attempts[-1].candidate_revision is None
+    assert terminal.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
