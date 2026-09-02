@@ -1,30 +1,26 @@
-# PR23 Generic Rack AI Connector Contract
+# PR23 Generic Rack AI Workspace Connector Contract
 
 ## Status
 
 Documentation-only connector proposal.
 
-This document defines the anti-corruption layer between ATHBA's software-development domain and a generic AI rack/backend. Rack AI is the first implementation target, but ATHBA must remain portable to a different backend connector.
+This document defines the anti-corruption layer between ATHBA's software-development domain and Rack AI's generic bounded workspace executor.
 
-## Design goal
+It supersedes the earlier PR27 proposal to place `execution_form` on one universal job request.
 
-ATHBA must be able to say:
+## Decision
 
-```text
-I have a ready job requiring reasoning and coding,
-with medium complexity,
-normal context,
-high priority,
-and a bounded workspace-change contract.
-```
-
-It must not have to say:
+For PR23, ATHBA needs one backend operation:
 
 ```text
-Use local-primary on the 4060 Ti because this is scenario authoring.
+bounded workspace change
 ```
 
-Rack AI must be able to schedule the generic job without knowing what a scenario, frontier, Tester, Developer, RED, GREEN, or Gatekeeper is.
+The operation is selected by the connector method or Rack AI endpoint, not by an `execution_form` field.
+
+This reflects current Rack AI reality: `rack-ai/work-unit/v1` already translates one ready application-development work unit into the existing bounded change path. Rack AI does not currently implement generic `structured_response` or `media_artifact` job forms.
+
+Reasoning-only ATHBA work remains behind ATHBA's existing `ReasoningGateway` in this phase. Future generic inference, visual, audio, ComfyUI, and media-pipeline operations require a separate Rack AI specification.
 
 ## Layering
 
@@ -33,26 +29,28 @@ ATHBA domain
   internal stages, dependencies, TDD state, attempts, revisions
 
 ATHBA ExecutionProfileResolver
-  maps an internal stage to generic model/scheduling parameters
+  maps an internal stage to broad model capabilities and generic routing values
 
-AiExecutionPort
-  backend-neutral submission/status/result contract
+AiWorkspaceExecutionPort
+  backend-neutral bounded-workspace submission/status/result contract
 
-RackAiConnector
-  serializes generic requests and translates generic results
+RackAiWorkspaceConnector
+  serializes the generic workspace request and translates generic results
 
-Rack AI
-  generic capability registry, queue, worker/resource selection, execution
+Rack AI workspace executor
+  queue, worker/model/resource selection, trusted worktree execution, evidence
 ```
 
-The execution-profile resolver and connector are separate responsibilities:
+Rules:
 
 - the resolver knows ATHBA stages but not Rack AI transport;
-- the connector knows Rack AI transport but not ATHBA stage semantics.
+- the connector knows the workspace transport but not ATHBA stage meaning;
+- Rack AI receives no ATHBA work kind;
+- a future backend can replace Rack AI by implementing the same port.
 
 ## Generic capability vocabulary
 
-Version 1 defines four broad model capability classes:
+Version 1 defines four broad model classes:
 
 ```text
 reasoning
@@ -61,13 +59,11 @@ visual
 audio
 ```
 
-The field is a non-empty set because one job may require multiple broad capabilities.
-
-Examples:
+The field is a non-empty set:
 
 ```text
-[reasoning]
 [coding]
+[reasoning]
 [reasoning, coding]
 [visual]
 [audio]
@@ -75,17 +71,15 @@ Examples:
 
 Rules:
 
-- capability names are generic model classes;
+- capabilities describe broad model types;
+- no scenario, Tester, Developer, frontier, repair, review, or Gatekeeper term is a capability;
+- no model, worker, endpoint, or GPU ID is a capability;
 - unknown required capabilities fail closed;
-- no ATHBA stage name is a capability;
-- no model or GPU identifier is a capability;
-- capability expansion requires a versioned cross-repository contract;
-- detailed software skills remain ATHBA internal;
-- measured worker qualification remains Rack AI configuration/evidence.
+- capability expansion requires a versioned contract;
+- detailed development meaning stays inside ATHBA;
+- measured model qualification stays inside Rack AI configuration/evidence.
 
-## Generic scheduling parameters
-
-### Complexity
+## Generic complexity
 
 ```text
 small
@@ -93,17 +87,21 @@ medium
 large
 ```
 
-Complexity is a generic difficulty/size envelope used against a worker/model's qualified capability envelope.
+Complexity is a generic size/difficulty envelope used against a registered model's qualified envelope.
 
-### Large-context requirement
+It is not priority and does not imply semantic readiness.
+
+## Context requirement
 
 ```text
 requires_large_context: bool
 ```
 
-Rack AI determines which registered model profiles satisfy the large-context class.
+Rack AI determines which registered profiles satisfy it.
 
-### Priority
+## Global priority vocabulary
+
+Rack AI may define:
 
 ```text
 low
@@ -112,111 +110,114 @@ high
 paramount
 ```
 
-Priority is queue order only.
+Priority controls rack-wide queue/resource arbitration only. It does not alter required capabilities or semantic acceptance.
 
-It must never be used as an implicit capability upgrade.
+## ATHBA priority contract
 
-### Execution form
+ATHBA is a slow-burn background source and may submit only:
 
 ```text
-structured_response
-workspace_change
-media_artifact
+low
+medium
 ```
 
-Execution form tells the backend what kind of output/containment contract is required. It does not reveal software-development stage.
-
-## Boundary request
-
-Conceptual typed request:
+Meaning within the connector:
 
 ```text
-GenericAiJobRequest
-  version
+low
+  background ATHBA work that may wait behind normal rack demand
+
+medium
+  ordinary ready ATHBA work, including work blocking progress inside ATHBA
+```
+
+ATHBA must never submit:
+
+```text
+high
+paramount
+```
+
+Those values are reserved for other explicitly authorized rack workloads or operator/system policy, including future interactive media demand, urgent service restoration, or resource-drain decisions.
+
+Enforcement is defense in depth:
+
+1. the ATHBA resolver type exposes only `low` and `medium`;
+2. `RackAiWorkspaceConnector` rejects any ATHBA request above `medium`;
+3. Rack AI source/admission policy records an ATHBA maximum of `medium` and rejects forged higher priority.
+
+Rack AI may schedule or drain ATHBA work because a higher-priority external workload arrived. It must not promote ATHBA's own priority.
+
+## Conceptual port
+
+```text
+AiWorkspaceExecutionPort
+  submit_workspace_change(request) -> SubmissionAcknowledgement
+  get_status(submission_id) -> WorkspaceJobStatus
+  get_result(submission_id) -> WorkspaceJobResult
+  cancel(submission_id) -> CancellationResult
+```
+
+Implementations:
+
+```text
+RackAiWorkspaceConnector
+DeterministicFakeWorkspaceConnector
+AlternativeWorkspaceBackendConnector
+```
+
+ATHBA domain code depends on the port, not Rack AI CLI or packet classes.
+
+## Request
+
+```text
+GenericWorkspaceJobRequest
+  contract_version
   source_system
   work_id
   submission_id
   idempotency_key
-  capabilities: set[GenericCapability]
+  capabilities: set[GenericModelCapability]
   complexity: GenericComplexity
   requires_large_context: bool
-  priority: GenericPriority
-  execution_form: GenericExecutionForm
-  timeout_seconds: int
-  input: GenericJobInput
-  constraints: GenericExecutionConstraints
-  output_contract: GenericOutputContract
-  evidence_refs: list[str]
-```
-
-### Identity
-
-`work_id`
-
-- stable across model attempts and ATHBA capability tiers;
-- opaque to Rack AI;
-- never reused for different semantic work.
-
-`submission_id`
-
-- unique for every actual backend submission;
-- survives connector retries and process restart;
-- used to correlate acknowledgements, status, and terminal result.
-
-`idempotency_key`
-
-- prevents duplicate execution of the same submission;
-- is not a dependency or sequence mechanism.
-
-A monotonic `submission_sequence` may be included for audit, but Rack AI must not infer semantic ordering from it.
-
-## Generic job input
-
-The connector supports generic forms without leaking ATHBA stage names.
-
-### Structured response input
-
-```text
-GenericStructuredInput
-  prompt
-  response_schema
-  immutable_context_refs
-```
-
-### Workspace change input
-
-```text
-GenericWorkspaceInput
+  priority: AthbaOutboundPriority
+  timeout_seconds
   objective
   repository_binding
   base_ref
   base_sha
   allowed_paths
   acceptance_commands
-  immutable_context_refs
+  required_artifacts
+  environment_resources
+  network_policy
+  evidence_refs
 ```
 
-### Media input
+No field carries ATHBA stage, TDD phase, dependency meaning, model tier, worker ID, model ID, GPU ID, or JCode profile.
 
-Reserved for later visual/audio workloads.
+### Identity
 
-Rack AI is allowed to understand repository/workspace safety because that is generic execution infrastructure. It is not allowed to interpret the objective as a scenario, frontier, repair, or review.
+`work_id`:
 
-## Generic execution constraints
+- stable across attempts and ATHBA-internal stronger-route changes;
+- opaque to Rack AI;
+- never reused for different semantic work.
 
-Possible generic constraints include:
+`submission_id`:
 
-- timeout;
-- network policy;
-- filesystem/path policy;
-- process policy;
-- required artifacts;
-- output size bounds;
-- cancellation behavior.
+- unique for every actual backend submission;
+- stable across connector delivery retry;
+- correlates acknowledgement, status, and terminal result.
 
-These remain generic and enforceable by the backend.
+`idempotency_key`:
 
-## Generic acknowledgement and status
+- prevents duplicate execution of one submission;
+- is not a dependency or sequence mechanism.
+
+An audit sequence may be sent, but Rack AI must not infer semantic ordering from it.
+
+## Acknowledgement and status
 
 ```text
 SubmissionAcknowledgement
@@ -228,7 +229,7 @@ SubmissionAcknowledgement
 ```
 
 ```text
-GenericJobStatus
+WorkspaceJobStatus
   submission_id
   state: queued | selected | running | terminal | cancelled | blocked
   selected_worker_summary, optional
@@ -236,20 +237,24 @@ GenericJobStatus
   evidence_refs
 ```
 
-Temporary absence of capacity is `queued`, not capability failure.
+Temporary lack of capacity is `queued`.
 
-No registered worker satisfying the hard generic requirements is `capability_unavailable`.
+No registered model satisfying hard capabilities is `capability_unavailable`.
 
-## Generic terminal result
+Invalid ATHBA priority is `source_priority_rejected`.
+
+## Terminal result
 
 ```text
-GenericAiJobResult
+WorkspaceJobResult
   work_id
   submission_id
   terminal_status
-  output
-  artifact_refs
   candidate_revision, optional
+  branch, optional
+  worktree_ref, optional
+  changed_paths
+  acceptance_result
   selection_decision
   execution_provenance
   duration
@@ -257,15 +262,9 @@ GenericAiJobResult
   evidence_refs
 ```
 
-The connector translates transport fields but does not decide whether the result is valid RED, candidate defect, semantic repair, or regression failure. ATHBA interprets that after receipt.
+The connector translates transport and generic executor facts. It does not decide whether a result is valid RED, candidate defect, semantic repair, regression failure, or reason to escalate.
 
-## Selection evidence versus execution provenance
-
-Rack AI returns two linked generic records.
-
-### Selection decision
-
-Explains why a worker was chosen:
+## Selection evidence
 
 ```text
 GenericSelectionDecision
@@ -283,319 +282,182 @@ GenericSelectionDecision
   resource_evidence
 ```
 
-Allowed generic reasons may include:
-
-- least_scarce_sufficient;
-- only_eligible;
-- higher_throughput;
-- warm_model;
-- capability_required;
-- queue_priority;
-- operator_policy.
-
-They must not include `scenario_authoring`, `frontier`, or another ATHBA term.
-
-### Execution provenance
-
-Proves what actually ran:
+Allowed reasons are generic, for example:
 
 ```text
-WorkerExecutionProvenance
-  worker_id
-  model_profile_id
-  provider_profile
-  resource_id
-  backend
-  harness_profile
+least_scarce_sufficient
+only_eligible
+higher_throughput
+warm_model
+capability_required
+queue_priority
+operator_policy
 ```
 
-Selection and execution worker IDs must agree. A mismatch fails closed.
+Selection reasons must not contain ATHBA stage terminology.
 
-## Rack AI worker/model registration
+## Execution provenance
 
-The generic target registry separates model capability from runtime placement.
-
-### Model profile
+Existing Rack AI `WorkerExecutionProvenance` proves what actually ran:
 
 ```text
-GenericModelProfile
-  model_profile_id
-  capabilities
-  max_complexity_by_capability
-  large_context_eligible
-  context_window
-  qualification_status
-  qualification_evidence_refs
-  profile_version
+worker_id
+model_profile_id
+provider_profile
+resource_id
+backend
+harness_profile
 ```
 
-### Worker runtime
+The selected and executed worker must agree. A mismatch fails closed.
+
+## Current model profile examples
 
 ```text
-GenericWorkerRuntime
-  worker_id
-  model_profile_id
-  harness
-  execution_forms
-  resource_requirements
-  status
-  concurrency_capacity
-  active_leases
+Qwen local-coder profile
+  capabilities: [coding]
+  qualified complexity: small and selected bounded medium coding tasks
+  large context: no
 ```
-
-### Physical resource
 
 ```text
-GenericResource
-  resource_id
-  resource_kind
-  memory_capacity
-  health
-  lease_state
-  supported_runtime_profiles
+Gemma primary profile
+  capabilities: [reasoning, coding]
+  qualified complexity: medium/large within measured limits
+  large context: yes
 ```
 
-The same model profile may have several worker runtimes on different GPUs. They expose the same model intelligence/capability profile while differing in throughput, warm state, and availability.
+A future 4080 runtime using the same Gemma profile exposes the same capabilities while differing in throughput and availability.
 
-## Current mapping examples
+## Eligibility and ranking
 
-### Coding-only small job
+Hard filters:
 
-Request:
+1. all requested capabilities supported;
+2. qualification covers complexity;
+3. context requirement satisfied;
+4. runtime/resource healthy or queueable;
+5. workspace constraints enforceable;
+6. source priority accepted.
+
+Ranking may use:
+
+- least-scarce sufficient profile;
+- availability and leases;
+- warm model state;
+- measured throughput;
+- expected duration;
+- queue age;
+- global priority;
+- deterministic tie-break.
+
+For `[coding]`, small, the coding-only worker is normally preferred. For `[reasoning, coding]`, it is ineligible.
+
+## ATHBA internal mapping examples
+
+Only the right-hand side crosses the connector.
 
 ```text
-capabilities: [coding]
-complexity: small
-requires_large_context: false
-priority: medium or high
+scenario authoring
+  -> [reasoning, coding], medium complexity, medium priority
+
+frontier implementation tier 1
+  -> [coding], small complexity, low or medium priority
+
+frontier implementation stronger route
+  -> [reasoning, coding], medium complexity, medium priority
 ```
 
-Current eligible profiles:
+There is no `execution_form` because all three use the workspace port.
 
-- local-coder profile;
-- local-primary profile, if registered as coding-capable.
-
-Generic ranking should normally select the least-scarce sufficient coding worker, preserving reasoning capacity.
-
-### Reasoning-plus-coding job
-
-Request:
-
-```text
-capabilities: [reasoning, coding]
-complexity: medium
-requires_large_context: false
-priority: high
-```
-
-The coding-only profile is ineligible. A current primary profile is eligible.
-
-### Reasoning-only review
-
-Request:
-
-```text
-capabilities: [reasoning]
-complexity: medium
-priority: high
-execution_form: structured_response
-```
-
-Rack AI chooses any qualified reasoning worker without knowing this is a review.
-
-## ATHBA internal mapping
-
-The connector never receives `AthbaWorkKind` directly.
-
-An ATHBA-owned resolver produces a generic profile:
-
-```text
-AthbaExecutionProfile
-  capabilities
-  complexity
-  requires_large_context
-  priority
-  execution_form
-  timeout_seconds
-```
-
-Example internal mapping:
-
-```text
-scenario_authoring
-  -> [reasoning, coding], medium, high, workspace_change
-
-frontier_implementation_tier_1
-  -> [coding], small, high, workspace_change
-
-frontier_implementation_tier_2
-  -> [reasoning, coding], medium, high, workspace_change
-```
-
-Only the right side crosses the boundary.
-
-## Polymorphic ATHBA port
-
-Conceptual protocol:
-
-```text
-AiExecutionPort
-  submit(request) -> SubmissionAcknowledgement
-  get_status(submission_id) -> GenericJobStatus
-  get_result(submission_id) -> GenericAiJobResult
-  cancel(submission_id) -> CancellationResult
-```
-
-Implementations:
-
-```text
-RackAiConnector
-DeterministicFakeConnector
-AlternativeRackConnector
-```
-
-ATHBA domain code must not import Rack AI CLI packet types directly after migration. Backend-specific mapping remains in the connector package.
-
-## Dependency and pool boundary
-
-The target connector does not send an ATHBA dependency graph.
+## Dependency and queue boundary
 
 ATHBA:
 
-- knows dependency edges;
-- marks work ready;
+- owns dependencies and semantic readiness;
 - withholds blocked work;
-- submits all currently dispatchable ready items;
-- unlocks new work after terminal interpretation.
+- submits each currently dispatchable ready item once;
+- unlocks new work after interpreting terminal results.
 
 Rack AI:
 
-- queues already-ready generic jobs;
+- queues already-ready workspace jobs;
 - selects workers/resources;
+- enforces source priority;
 - returns status and terminal evidence.
 
-An existing compatibility field such as `depends_on` may remain readable during migration, but it must not become Rack AI's authority for ATHBA execution order.
+Rack AI does not sequence ATHBA dependencies.
 
-## Priority ownership
+## Stronger-route mapping
 
-ATHBA chooses priority from its internal critical-path policy and sends only the generic enum.
-
-Rack AI may combine priority with queue age and operator-wide workload policy.
-
-Rules:
-
-- `paramount` is rare and must be explicitly justified;
-- Rack AI may not rewrite required capabilities because of priority;
-- priority may affect when a job runs, never whether its result is semantically accepted;
-- the connector persists the priority actually submitted.
-
-## Escalation through generic profiles
-
-ATHBA owns escalation semantics.
+ATHBA owns why requirements change.
 
 For one stable `work_id`:
 
 ```text
-Tier 1 submission
+initial narrow submission
   capabilities: [coding]
   complexity: small
+  priority: low or medium
 
-Tier 2 submission after ATHBA exhaustion decision
+stronger submission after ATHBA-internal exhaustion
   capabilities: [reasoning, coding]
   complexity: medium
+  priority: medium
 ```
 
-Rack AI sees two generic submissions with different requirements. It does not need an `escalation_tier` software-development field.
+Rack AI sees generic submissions. It does not need an ATHBA escalation field.
 
-ATHBA persists:
+## Current Rack AI change surface
 
-- tier;
-- attempts consumed;
-- candidate history;
-- reason the generic profile changed.
+The required change is bounded:
 
-Rack AI persists:
+1. preserve existing `rack-ai/work-unit/v1` compatibility;
+2. add a versioned or additive capability set;
+3. retain small/medium/large complexity;
+4. retain `requires_large_context`;
+5. add global low/medium/high/paramount priority;
+6. enforce source-specific priority ceilings, with ATHBA capped at medium;
+7. add generic model capability and qualification metadata;
+8. implement deterministic generic eligibility/ranking;
+9. return selection evidence linked to execution provenance;
+10. keep the existing trusted workspace-change executor unchanged.
 
-- each generic request;
-- each selection decision;
-- each execution result.
+Not required:
 
-## Failure mapping
+- a universal execution-form enum;
+- structured-response execution through Rack AI;
+- visual/audio/media executors;
+- ATHBA work kinds;
+- ATHBA dependency graphs;
+- shared semantic pools;
+- ComfyUI arbitration;
+- three-GPU optimization;
+- preemption;
+- idle-primary overflow.
 
-### Generic backend failures
+## Compatibility
 
-Examples:
+Migration is additive:
 
-- no eligible capability;
-- worker unavailable;
-- resource unavailable;
-- executor failure;
-- transport failure;
-- timeout;
-- malformed packet;
-- selection/provenance mismatch.
-
-The connector maps these to typed backend-neutral failures.
-
-ATHBA then decides whether the failure:
-
-- consumes a model attempt;
-- blocks externally;
-- permits repair;
-- authorizes a stronger generic profile.
-
-The connector must not make that software-development decision.
-
-## Replaceability test
-
-The architecture is portable only if a test can replace Rack AI with a fake or alternative connector and run the same ATHBA transition sequence without changing:
-
-- Behavior Contract logic;
-- scenario state;
-- frontier decomposition;
-- RED/GREEN classification;
-- attempt accounting;
-- revision trust rules;
-- Gatekeeper reconciliation.
-
-Backend replacement may change worker identities and scheduling, but not ATHBA semantics.
-
-## Minimum Rack AI change implied by this contract
-
-The target Rack AI extension is deliberately smaller than the first PR27 draft:
-
-1. replace or extend singular `implementation` capability with the generic capability set `reasoning`, `coding`, `visual`, `audio`;
-2. retain `small`, `medium`, `large` complexity;
-3. retain `requires_large_context`;
-4. add `low`, `medium`, `high`, `paramount` priority;
-5. register generic model capabilities and qualification envelopes;
-6. select workers using only generic fields and resource state;
-7. return generic selection evidence linked to execution provenance;
-8. accept opaque IDs and generic execution forms;
-9. do not add ATHBA work kinds or dependency semantics.
-
-Detailed multi-GPU optimization, ComfyUI arbitration, and model-residency policy remain a separate Rack AI specification.
-
-## Compatibility and migration
-
-Version 1 migration should be additive:
-
-- old `capability=implementation` requests remain readable during a bounded compatibility period;
-- the connector emits the new version only after Rack AI supports it;
+- old `capability=implementation` requests remain readable during a bounded compatibility period and map to the legacy coding route;
+- the connector emits the new contract only after Rack AI supports it;
 - old packets remain readable;
-- selection evidence is optional for historical packets and mandatory for new capability-routed proofs;
-- no live routing changes until deterministic connector and selector tests pass.
+- selection evidence is optional for historical packets and mandatory for new routed proofs;
+- no live route changes until deterministic connector and selector tests pass.
 
 ## Acceptance criteria
 
 The connector contract is accepted when:
 
 - no software-engineering stage crosses the boundary;
-- capability values are only broad model classes;
-- priority has exactly four defined values;
-- complexity and large-context semantics remain generic;
+- capabilities are only broad model classes;
+- PR23 uses only the workspace operation;
+- no `execution_form` field is required;
+- ATHBA can emit only low/medium priority;
+- Rack AI independently enforces the ATHBA priority ceiling;
 - ATHBA dependencies remain internal;
-- the connector is polymorphic and replaceable;
-- Rack AI selection is based only on generic requirements and resource state;
-- one sequential qualification proves reasoning-plus-coding, coding-only, and stronger fallback requests choose appropriate current workers;
-- selection evidence matches execution provenance.
+- the port is polymorphic and replaceable;
+- Rack AI selects only from generic requirements and resource state;
+- selection evidence matches execution provenance;
+- a sequential qualification proves reasoning-plus-coding, coding-only, and stronger generic requests select appropriate current workers.
