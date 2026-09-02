@@ -13,6 +13,10 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
+from core.development.scenario_drafting_domain import (
+    ScenarioAuthoringContract, ScenarioCandidateAssessment, ScenarioCandidateAssessmentRequest, ScenarioCandidateIssue,
+    ScenarioCandidateIssueCode,
+)
 from core.development.microcycle_domain import (
     BoundaryAssessment, BoundaryClassificationRequest, BoundaryDiagnostic,
     BoundaryOutcome, DiagnosticFact, FinalTestMaterialisationRequest,
@@ -181,6 +185,122 @@ class PythonScenarioParser:
             if isinstance(call.func, ast.Attribute):
                 return call.func.attr
         return type(node).__name__
+
+
+def _span(node: ast.stmt) -> SourceSpan:
+    return SourceSpan(node.lineno, node.end_lineno or node.lineno)
+
+
+def _issue(code: ScenarioCandidateIssueCode, detail: str, node: ast.stmt | None = None) -> ScenarioCandidateIssue:
+    return ScenarioCandidateIssue(code.value, detail, None if node is None else _span(node))
+
+
+def _decorator_name(node: ast.expr) -> str:
+    return ast.unparse(node.func if isinstance(node, ast.Call) else node)
+
+
+@dataclass(frozen=True)
+class _CandidateAssessmentFacts:
+    module_docstring_node: ast.stmt | None
+    tests: tuple[ast.FunctionDef, ...]
+    helpers: tuple[ast.FunctionDef, ...]
+    fixtures: tuple[ast.FunctionDef, ...]
+    classes: tuple[ast.ClassDef, ...]
+    async_functions: tuple[ast.AsyncFunctionDef, ...]
+    parameterized: tuple[ast.FunctionDef, ...]
+    unsupported_top: tuple[ast.stmt, ...]
+    nested: tuple[ast.stmt, ...]
+    references: tuple[str, ...]
+    substitutes: tuple[str, ...]
+    mocked: tuple[str, ...]
+    evasions: tuple[str, ...]
+    identities: tuple[str, ...]
+
+
+class PythonCandidateAssessmentFactory:
+    """Collects strict Python candidate facts without throwing away diagnostics."""
+
+    def assess(self, request: ScenarioCandidateAssessmentRequest) -> ScenarioCandidateAssessment:
+        if request.contract.language_id != PYTHON_LANGUAGE_ID or request.contract.framework != "pytest":
+            raise ValueError("Python candidate assessment requires the python pytest contract")
+        try:
+            module = ast.parse(request.candidate.source)
+        except SyntaxError as error:
+            span = None if error.lineno is None else SourceSpan(error.lineno, error.lineno)
+            issue = ScenarioCandidateIssue(ScenarioCandidateIssueCode.SYNTAX_INVALID.value, f"Candidate has invalid Python syntax at line {error.lineno}: {error.msg}.", span)
+            return ScenarioCandidateAssessment(False, (), issues=(issue,))
+        return self._assessment(request, module)
+
+    def _assessment(self, request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> ScenarioCandidateAssessment:
+        facts = _candidate_facts(request, module)
+        return _assessment_from_facts(facts)
+
+
+def _candidate_facts(request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> _CandidateAssessmentFacts:
+    functions = tuple(node for node in module.body if isinstance(node, ast.FunctionDef))
+    async_functions = tuple(node for node in module.body if isinstance(node, ast.AsyncFunctionDef))
+    tests = tuple(node for node in functions if node.name.startswith("test_"))
+    helpers = tuple(node for node in functions if not node.name.startswith("test_"))
+    classes = tuple(node for node in module.body if isinstance(node, ast.ClassDef))
+    fixtures = tuple(node for node in functions if any(_decorator_name(item).endswith("fixture") for item in node.decorator_list))
+    parameterized = tuple(node for node in tests if any(_decorator_name(item).endswith("parametrize") for item in node.decorator_list))
+    doc_node = module.body[0] if ast.get_docstring(module) is not None else None
+    allowed = (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign, ast.FunctionDef)
+    unsupported_top = tuple(node for node in module.body if not isinstance(node, allowed) and node is not doc_node)
+    nested = tuple(node for test in tests for node in ast.walk(test) if node is not test and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)))
+    production_module = Path(request.production_path).with_suffix("").as_posix().replace("/", ".")
+    production_name = production_module.rsplit(".", 1)[-1]
+    references = (request.production_path,) if PythonCandidateAnalyzer._references(module, production_module) else ()
+    substitutes = PythonCandidateAnalyzer._substitutes(module, production_name)
+    mocked = PythonCandidateAnalyzer._mocked_targets(_MockAnalysisRequest(module, production_name, production_module))
+    evasions = PythonCandidateAnalyzer._evasions(module)
+    identities = tuple(f"{request.candidate.test_path}::{node.name}" for node in tests)
+    return _CandidateAssessmentFacts(doc_node, tests, helpers, fixtures, classes, async_functions, parameterized, unsupported_top, nested, references, substitutes, mocked, evasions, identities)
+
+
+def _assessment_from_facts(facts: _CandidateAssessmentFacts) -> ScenarioCandidateAssessment:
+    issues = _candidate_issues(facts)
+    return ScenarioCandidateAssessment(
+        True, facts.identities, tuple(node.name for node in facts.helpers), tuple(node.name for node in facts.fixtures),
+        tuple(node.name for node in facts.classes), tuple(node.name for node in facts.async_functions),
+        tuple(node.name for node in facts.parameterized), facts.module_docstring_node is not None,
+        tuple(type(node).__name__ for node in facts.unsupported_top), tuple(type(node).__name__ for node in facts.nested),
+        facts.references, facts.substitutes, facts.mocked, facts.evasions, tuple(issues),
+    )
+
+
+def _candidate_issues(facts: _CandidateAssessmentFacts) -> list[ScenarioCandidateIssue]:
+    issues: list[ScenarioCandidateIssue] = []
+    if facts.module_docstring_node is not None:
+        issues.append(_issue(ScenarioCandidateIssueCode.MODULE_DOCSTRING, "Remove the module docstring; the contract permits imports, module data, and one ordinary top-level test only.", facts.module_docstring_node))
+    if not facts.tests:
+        issues.append(_issue(ScenarioCandidateIssueCode.NO_TEST, "Define exactly one supported pytest test: one ordinary top-level function named test_* ."))
+    if len(facts.tests) > 1:
+        issues.append(_issue(ScenarioCandidateIssueCode.MULTIPLE_TESTS, "Keep exactly one supported pytest test; remove the additional test functions.", facts.tests[1]))
+    for node in facts.helpers:
+        issues.append(_issue(ScenarioCandidateIssueCode.HELPER_FUNCTION, f"Remove helper function {node.name}; move its setup directly into the single test.", node))
+    for node in facts.fixtures:
+        issues.append(_issue(ScenarioCandidateIssueCode.FIXTURE, f"Remove fixture {node.name}; fixtures are not supported in a scenario candidate.", node))
+    for class_node in facts.classes:
+        issues.append(_issue(ScenarioCandidateIssueCode.TEST_CLASS, f"Remove class {class_node.name}; test classes are not supported.", class_node))
+    for async_node in facts.async_functions:
+        issues.append(_issue(ScenarioCandidateIssueCode.ASYNC_TEST, f"Replace async test {async_node.name} with an ordinary synchronous pytest test.", async_node))
+    for node in facts.parameterized:
+        issues.append(_issue(ScenarioCandidateIssueCode.PARAMETERIZED_TEST, f"Remove pytest parameterization from {node.name}; submit one ordinary test case.", node))
+    for top_node in facts.unsupported_top:
+        issues.append(_issue(ScenarioCandidateIssueCode.UNSUPPORTED_TOP_LEVEL, f"Remove unsupported top-level {type(top_node).__name__}; only imports, module data, and one test are allowed.", top_node))
+    for nested_node in facts.nested:
+        issues.append(_issue(ScenarioCandidateIssueCode.UNSUPPORTED_NESTED, f"Remove nested {type(nested_node).__name__}; dynamic nested declarations are unsupported.", nested_node))
+    if not facts.references:
+        issues.append(_issue(ScenarioCandidateIssueCode.MISSING_PRODUCTION_REFERENCE, "Import or directly reference the declared production module: the candidate does not reference the declared production path."))
+    for name in facts.substitutes:
+        issues.append(_issue(ScenarioCandidateIssueCode.SUBSTITUTE_IMPLEMENTATION, f"Remove substitute production implementation {name}; exercise the declared production module instead."))
+    for target in facts.mocked:
+        issues.append(_issue(ScenarioCandidateIssueCode.MOCKED_BEHAVIOR, f"Remove behavior mock {target}; it mocks the behavior under development, so exercise the real declared production path."))
+    for marker in facts.evasions:
+        code = ScenarioCandidateIssueCode.SKIP_OR_XFAIL if marker in {"skip", "xfail"} else ScenarioCandidateIssueCode.MISSING_CAPABILITY_EVASION
+        issues.append(_issue(code, f"Remove {marker}; it is a missing-capability evasion, so do not skip, xfail, or evade a missing production capability."))
+    return issues
 
 
 class PythonCandidateAnalyzer:
@@ -458,6 +578,12 @@ class PythonPytestAdapter:
         production_path: str,
     ) -> ScenarioStaticAnalysis:
         return PythonCandidateAnalyzer().analyse(candidate, production_path)
+
+    def assess_candidate(
+        self,
+        request: ScenarioCandidateAssessmentRequest,
+    ) -> ScenarioCandidateAssessment:
+        return PythonCandidateAssessmentFactory().assess(request)
 
     def canonicalise_candidate(
         self,

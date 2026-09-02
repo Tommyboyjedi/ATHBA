@@ -63,6 +63,9 @@ class CandidateSourceReader:
         self.calls.append((revision, test_path))
         return self.sources[revision]
 
+    def resolve(self, ref):
+        return ref
+
 
 def ticket(kind):
     if kind == "catalog":
@@ -135,6 +138,7 @@ def accepted(work_unit_id, revision, change_id):
         change_id=change_id,
         accepted_revision=revision,
         evidence_location=f"evidence/{change_id}.json",
+        branch=revision,
     )
 
 
@@ -488,3 +492,83 @@ def test_language_neutral_domain_has_no_python_comment_or_name_policy():
 
     assert "ATHBA-SCENARIO-" not in source
     assert "ast." not in source
+
+
+
+@pytest.mark.asyncio
+async def test_repair_uses_verified_previous_candidate_ref_sha_source_and_structured_assessment():
+    invalid = (
+        '"""not allowed"""\n'
+        'from catalog import Catalog\n\n'
+        'def helper():\n'
+        '    return Catalog\n\n'
+        'def test_model_catalog_behavior():\n'
+        '    assert Catalog\n'
+    )
+    repaired = plain_catalog_candidate()
+    service, gateway, _reasoning, _reader = components(
+        [
+            accepted("catalog-ticket--scenario-draft-1", "m" * 40, "draft-1"),
+            accepted("catalog-ticket--scenario-draft-2", "n" * 40, "draft-2"),
+        ],
+        [approval("SRC-CATALOG")],
+        {"m" * 40: invalid, "n" * 40: repaired},
+    )
+
+    first = await service.draft(request("catalog"), binding())
+    second = await service.submit_candidate(request("catalog"), binding())
+
+    attempt = first.state.attempts[0]
+    assert attempt.status == "candidate_invalid"
+    assert attempt.candidate_assessment is not None
+    assert {item.code for item in attempt.candidate_assessment.issues} >= {"module_docstring", "helper_function"}
+    unit, repair_binding = gateway.calls[1]
+    objective = json.loads(unit.objective)
+    assert second.submitted_attempt
+    assert repair_binding.base_ref == "m" * 40
+    assert repair_binding.base_sha == "m" * 40
+    assert objective["repair_mode"] == "repair_previous_candidate"
+    assert objective["previous_candidate"]["source"] == invalid
+    assert objective["previous_candidate"]["assessment"]["issues"]
+    assert objective["authoring_contract"]["required_test_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_fails_closed_when_persisted_candidate_ref_does_not_match_sha():
+    store = MemoryStateStore()
+    source = plain_catalog_candidate()
+    service, _gateway, _reasoning, reader = components([], [], {"p" * 40: source}, store)
+    state = __import__("core.development.scenario_drafting", fromlist=["_initial_state"])._initial_state(request("catalog"))
+    first = __import__("core.development.scenario_drafting_domain", fromlist=["ScenarioDraftAttempt"]).ScenarioDraftAttempt(
+        1, "catalog-ticket--scenario-draft-1", "draft-1", "p" * 40, "evidence/draft-1.json",
+        "candidate_invalid", "remove the helper", candidate_source=source, candidate_branch="wrong-ref",
+    )
+    store.save(__import__("dataclasses").replace(state, attempts=(first,)))
+    reader.resolve = lambda ref: "q" * 40
+
+    with pytest.raises(ValueError, match="does not resolve"):
+        await service.submit_candidate(request("catalog"), binding())
+
+
+@pytest.mark.parametrize(
+    "source, code",
+    [
+        ('"""doc"""\nfrom catalog import Catalog\n\ndef test_catalog():\n    assert Catalog\n', "module_docstring"),
+        ('from catalog import Catalog\n\n@pytest.fixture\ndef data():\n    return Catalog\n\ndef test_catalog(data):\n    assert data\n', "fixture"),
+        ("from catalog import Catalog\n\n@pytest.mark.parametrize('x', [1])\ndef test_catalog(x):\n    assert Catalog\n", "parameterized_test"),
+        ('from catalog import Catalog\n\nasync def test_catalog():\n    assert Catalog\n', "async_test"),
+    ],
+)
+def test_adapter_assessment_reports_typed_strict_grammar_violations(source, code):
+    from core.development.microcycle_domain import ScenarioSourceCandidate
+    from core.development.scenario_drafting import _authoring_contract
+    from core.development.scenario_drafting_domain import ScenarioCandidateAssessmentRequest
+
+    proposal = request("catalog")
+    candidate_value = ScenarioSourceCandidate(
+        proposal.scenario_id, proposal.ticket.step_id, proposal.language_id, proposal.allowed_test_path,
+        source, proposal.ticket.test_name, "r" * 40, "evidence/r.json",
+    )
+    assessment = PythonPytestAdapter().assess_candidate(ScenarioCandidateAssessmentRequest(candidate_value, proposal.ticket.production_path, _authoring_contract(proposal)))
+
+    assert code in {item.code for item in assessment.issues}

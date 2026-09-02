@@ -10,10 +10,130 @@ from core.development.microcycle_domain import (
     ScenarioIntentResult,
     ScenarioSourceCandidate,
     ScenarioStaticAnalysis,
+    SourceSpan,
 )
 from core.development.tdd_progression import TddStepProposal
 
 MAX_TESTER_SCENARIO_ATTEMPTS = 4
+MAX_SCENARIO_CANDIDATE_SOURCE_CHARACTERS = 65536
+
+
+class ScenarioCandidateIssueCode(str, Enum):
+    SYNTAX_INVALID = "syntax_invalid"
+    MODULE_DOCSTRING = "module_docstring"
+    NO_TEST = "no_test"
+    MULTIPLE_TESTS = "multiple_tests"
+    HELPER_FUNCTION = "helper_function"
+    FIXTURE = "fixture"
+    TEST_CLASS = "test_class"
+    ASYNC_TEST = "async_test"
+    PARAMETERIZED_TEST = "parameterized_test"
+    UNSUPPORTED_TOP_LEVEL = "unsupported_top_level"
+    UNSUPPORTED_NESTED = "unsupported_nested"
+    MISSING_PRODUCTION_REFERENCE = "missing_production_reference"
+    SUBSTITUTE_IMPLEMENTATION = "substitute_implementation"
+    MOCKED_BEHAVIOR = "mocked_behavior"
+    SKIP_OR_XFAIL = "skip_or_xfail"
+    MISSING_CAPABILITY_EVASION = "missing_capability_evasion"
+
+
+@dataclass(frozen=True)
+class ScenarioAuthoringContract:
+    """Typed strict grammar shared by authoring and deterministic validation."""
+
+    language_id: str
+    framework: str
+    required_test_count: int
+    allowed_top_level_forms: tuple[str, ...]
+    prohibited_top_level_forms: tuple[str, ...]
+    prohibited_test_forms: tuple[str, ...]
+    requires_direct_production_reference: bool
+    prohibits_substitute_implementation: bool
+    prohibits_behavior_mocking: bool
+    prohibits_skip_or_xfail: bool
+    canonical_identity_policy: str
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ScenarioCandidateIssue:
+    code: str
+    detail: str
+    source_span: SourceSpan | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "code": self.code,
+            "detail": self.detail,
+            "source_span": None if self.source_span is None else self.source_span.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioCandidateIssue":
+        span = value.get("source_span")
+        return cls(str(value["code"]), str(value["detail"]), None if span is None else SourceSpan.from_dict(dict(span)))
+
+
+@dataclass(frozen=True)
+class ScenarioCandidateAssessment:
+    """Typed persisted facts and repair instructions for a submitted candidate."""
+
+    syntax_valid: bool
+    actual_test_identities: tuple[str, ...]
+    helper_function_names: tuple[str, ...] = ()
+    fixture_names: tuple[str, ...] = ()
+    class_names: tuple[str, ...] = ()
+    async_test_names: tuple[str, ...] = ()
+    parameterized_test_names: tuple[str, ...] = ()
+    module_docstring_present: bool = False
+    unsupported_top_level_nodes: tuple[str, ...] = ()
+    unsupported_nested_nodes: tuple[str, ...] = ()
+    production_reference_paths: tuple[str, ...] = ()
+    substitute_definitions: tuple[str, ...] = ()
+    mocked_behavior_targets: tuple[str, ...] = ()
+    evasion_markers: tuple[str, ...] = ()
+    issues: tuple[ScenarioCandidateIssue, ...] = ()
+
+    @property
+    def accepted(self) -> bool:
+        return self.syntax_valid and not self.issues
+
+    def to_dict(self) -> dict[str, object]:
+        return {**asdict(self), "issues": [item.to_dict() for item in self.issues]}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioCandidateAssessment":
+        return cls(
+            syntax_valid=bool(value.get("syntax_valid", False)),
+            actual_test_identities=tuple(value.get("actual_test_identities", ())),
+            helper_function_names=tuple(value.get("helper_function_names", ())),
+            fixture_names=tuple(value.get("fixture_names", ())),
+            class_names=tuple(value.get("class_names", ())),
+            async_test_names=tuple(value.get("async_test_names", ())),
+            parameterized_test_names=tuple(value.get("parameterized_test_names", ())),
+            module_docstring_present=bool(value.get("module_docstring_present", False)),
+            unsupported_top_level_nodes=tuple(value.get("unsupported_top_level_nodes", ())),
+            unsupported_nested_nodes=tuple(value.get("unsupported_nested_nodes", ())),
+            production_reference_paths=tuple(value.get("production_reference_paths", ())),
+            substitute_definitions=tuple(value.get("substitute_definitions", ())),
+            mocked_behavior_targets=tuple(value.get("mocked_behavior_targets", ())),
+            evasion_markers=tuple(value.get("evasion_markers", ())),
+            issues=tuple(ScenarioCandidateIssue.from_dict(dict(item)) for item in value.get("issues", ())),
+        )
+
+    def repair_feedback(self) -> str:
+        if not self.issues:
+            return "candidate satisfies the strict authoring contract"
+        return " ".join(item.detail for item in self.issues)
+
+
+@dataclass(frozen=True)
+class ScenarioCandidateAssessmentRequest:
+    candidate: ScenarioSourceCandidate
+    production_path: str
+    contract: ScenarioAuthoringContract
 
 
 class ScenarioDraftStatus(str, Enum):
@@ -77,6 +197,14 @@ class ScenarioDraftAttempt:
     intent: ScenarioIntentResult | None = None
     candidate: ScenarioSourceCandidate | None = None
     static_analysis: ScenarioStaticAnalysis | None = None
+    candidate_assessment: ScenarioCandidateAssessment | None = None
+    candidate_branch: str | None = None
+    candidate_source: str | None = None
+    repair_parent_attempt: int | None = None
+    repair_base_ref: str | None = None
+    repair_base_sha: str | None = None
+    repair_mode: str = "fresh_draft"
+    selected_worker_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.attempt_number < 1:
@@ -85,6 +213,8 @@ class ScenarioDraftAttempt:
             raise ValueError("scenario draft attempt fields must be non-empty")
         if self.feedback is not None and not self.feedback.strip():
             raise ValueError("scenario draft feedback must be non-empty when supplied")
+        if self.candidate_source is not None and len(self.candidate_source) > MAX_SCENARIO_CANDIDATE_SOURCE_CHARACTERS:
+            raise ValueError("candidate source exceeds the scenario test-file limit")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -92,6 +222,7 @@ class ScenarioDraftAttempt:
             "intent": None if self.intent is None else self.intent.to_dict(),
             "candidate": None if self.candidate is None else self.candidate.to_dict(),
             "static_analysis": None if self.static_analysis is None else asdict(self.static_analysis),
+            "candidate_assessment": None if self.candidate_assessment is None else self.candidate_assessment.to_dict(),
         }
 
     @classmethod
@@ -99,6 +230,7 @@ class ScenarioDraftAttempt:
         intent = value.get("intent")
         candidate = value.get("candidate")
         static_analysis = value.get("static_analysis")
+        candidate_assessment = value.get("candidate_assessment")
         return cls(
             attempt_number=int(value["attempt_number"]),
             work_unit_id=str(value["work_unit_id"]),
@@ -109,6 +241,14 @@ class ScenarioDraftAttempt:
             feedback=value.get("feedback"),
             intent=None if intent is None else ScenarioIntentResult.from_dict(dict(intent)),
             candidate=None if candidate is None else ScenarioSourceCandidate.from_dict(dict(candidate)),
+            candidate_assessment=None if candidate_assessment is None else ScenarioCandidateAssessment.from_dict(dict(candidate_assessment)),
+            candidate_branch=value.get("candidate_branch"),
+            candidate_source=value.get("candidate_source"),
+            repair_parent_attempt=value.get("repair_parent_attempt"),
+            repair_base_ref=value.get("repair_base_ref"),
+            repair_base_sha=value.get("repair_base_sha"),
+            repair_mode=str(value.get("repair_mode", "fresh_draft")),
+            selected_worker_id=value.get("selected_worker_id"),
             static_analysis=None if static_analysis is None else ScenarioStaticAnalysis(
                 actual_test_identity=str(static_analysis["actual_test_identity"]),
                 production_reference_paths=tuple(static_analysis.get("production_reference_paths", ())),

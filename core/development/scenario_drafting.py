@@ -25,6 +25,9 @@ from core.development.microcycle_domain import (
 )
 from core.development.scenario_drafting_domain import (
     MAX_TESTER_SCENARIO_ATTEMPTS,
+    ScenarioAuthoringContract,
+    ScenarioCandidateAssessment,
+    ScenarioCandidateAssessmentRequest,
     ScenarioDraftAttempt,
     ScenarioDraftOutcome,
     ScenarioDraftRequest,
@@ -44,6 +47,7 @@ class ScenarioDraftStateStore(Protocol):
 
 class ScenarioCandidateSourceReader(Protocol):
     def read(self, revision: str, test_path: str) -> str: ...
+    def resolve(self, ref: str) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,7 @@ class ScenarioDraftWorkUnitRequest:
     request: ScenarioDraftRequest
     attempt_number: int
     feedback: str | None
+    repair_attempt: ScenarioDraftAttempt | None = None
 
 
 @dataclass(frozen=True)
@@ -89,7 +94,7 @@ class ScenarioDraftWorkUnitFactory:
             id=work_unit_id,
             project_id=draft.ticket.step_id,
             parent_ticket_id=draft.ticket.step_id,
-            objective=_tester_objective(draft, request.feedback),
+            objective=_tester_objective(draft, request.feedback, request.repair_attempt),
             allowed_paths=[draft.allowed_test_path],
             acceptance=AcceptanceContract(
                 commands=[[self.python_executable, "-B", "-m", "py_compile", draft.allowed_test_path]],
@@ -119,6 +124,19 @@ class GitCandidateScenarioSourceReader:
             raise ValueError(f"candidate scenario source is unavailable: {detail}")
         return result.stdout
 
+    def resolve(self, ref: str) -> str:
+        result = subprocess.run(
+            ["git", "rev-parse", ref],
+            cwd=self.repository_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise ValueError(f"candidate scenario ref is unavailable: {detail}")
+        return result.stdout.strip()
+
 
 @dataclass(frozen=True)
 class ScenarioIntentReviewRequest:
@@ -136,8 +154,9 @@ class ScenarioIntentReviewRequest:
 @dataclass(frozen=True)
 class ScenarioCandidatePreparation:
     candidate: ScenarioSourceCandidate
-    static_analysis: ScenarioStaticAnalysis
-    draft: TestScenarioDraft
+    assessment: ScenarioCandidateAssessment
+    static_analysis: ScenarioStaticAnalysis | None
+    draft: TestScenarioDraft | None
 
 
 class ScenarioIntentReviewer:
@@ -244,8 +263,10 @@ class ScenarioDraftingService:
             self.state_store.save(exhausted)
             return ScenarioDraftOutcome(exhausted, False)
         attempt_number = len(state.attempts) + 1
-        unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state)))
-        result = await self.execution_gateway.execute(unit, binding.with_base_sha(request.development_base_revision))
+        repair = state.attempts[-1] if state.attempts else None
+        repair_binding = _repair_binding(binding, request, repair, self.source_reader)
+        unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state), repair))
+        result = await self.execution_gateway.execute(unit, repair_binding)
         outcome = self._record_submission(ScenarioDraftExecutionRecord(state, request, unit, result))
         self.state_store.save(outcome.state)
         return outcome
@@ -265,20 +286,22 @@ class ScenarioDraftingService:
         try:
             source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
             prepared = _prepare_candidate(request, attempt, source, self.adapter_catalog)
-            feedback = prepared.static_analysis.rejection_feedback()
-            if feedback is not None:
+            feedback = prepared.assessment.repair_feedback()
+            if not prepared.assessment.accepted:
                 invalid = replace(
                     attempt,
                     status="candidate_invalid",
                     feedback=feedback,
                     candidate=prepared.candidate,
                     static_analysis=prepared.static_analysis,
+                    candidate_assessment=prepared.assessment,
+                    candidate_source=source,
                 )
                 updated = replace(state, attempts=(*state.attempts[:-1], invalid))
                 self.state_store.save(updated)
                 return ScenarioDraftOutcome(updated, False)
             intent = await self.intent_reviewer.review(
-                _review_request(prepared.draft, request, self.adapter_catalog, prepared.static_analysis)
+                _review_request(_approved_draft(prepared), request, self.adapter_catalog, _approved_analysis(prepared))
             )
             reviewed = replace(
                 attempt,
@@ -287,11 +310,13 @@ class ScenarioDraftingService:
                 intent=intent,
                 candidate=prepared.candidate,
                 static_analysis=prepared.static_analysis,
+                candidate_assessment=prepared.assessment,
+                candidate_source=source,
             )
             updated = replace(state, attempts=(*state.attempts[:-1], reviewed))
             if intent.status == "approved":
                 frozen = ScenarioFreezeFactory().freeze(
-                    ScenarioFreezeRequest(prepared.draft, intent, self.adapter_catalog, request.development_base_revision)
+                    ScenarioFreezeRequest(_approved_draft(prepared), intent, self.adapter_catalog, request.development_base_revision)
                 )
                 updated = replace(updated, approved_microcycle=frozen, status=ScenarioDraftStatus.APPROVED.value)
             self.state_store.save(updated)
@@ -306,9 +331,16 @@ class ScenarioDraftingService:
         state = record.state
         unit = record.unit
         result = record.result
-        if not result.accepted or result.accepted_revision is None:
-            return _append_attempt(state, _attempt(unit, result, "candidate_rejected", result.error or result.status))
-        return _append_attempt(state, _attempt(unit, result, "candidate_submitted", None))
+        accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
+        status = "candidate_submitted" if accepted else "candidate_rejected"
+        feedback = None if accepted else result.error or (
+            "accepted candidate is missing a durable candidate branch/ref" if result.accepted else result.status
+        )
+        attempt = _attempt(unit, result, status, feedback)
+        if state.attempts:
+            parent = state.attempts[-1]
+            attempt = replace(attempt, repair_base_ref=parent.candidate_branch or parent.candidate_revision, repair_base_sha=parent.candidate_revision)
+        return _append_attempt(state, attempt)
 
 
 def _initial_state(request: ScenarioDraftRequest) -> ScenarioDraftRunState:
@@ -352,6 +384,10 @@ def _attempt(
         status=status,
         feedback=feedback,
         intent=intent,
+        candidate_branch=result.branch,
+        repair_parent_attempt=None if unit.id.endswith("-1") else int(unit.id.rsplit("-", 1)[1]) - 1,
+        repair_mode="fresh_draft" if unit.id.endswith("-1") else "repair_previous_candidate",
+        selected_worker_id=result.selected_worker_id,
     )
 
 
@@ -381,30 +417,26 @@ def _prepare_candidate(
     if attempt.candidate_revision is None or attempt.evidence_location is None:
         raise ValueError("candidate preparation requires accepted Rack AI evidence")
     provisional = ScenarioSourceCandidate(
-        request.scenario_id,
-        request.ticket.step_id,
-        request.language_id,
-        request.allowed_test_path,
-        source,
-        request.ticket.test_name,
-        attempt.candidate_revision,
-        attempt.evidence_location,
+        request.scenario_id, request.ticket.step_id, request.language_id,
+        request.allowed_test_path, source, request.ticket.test_name,
+        attempt.candidate_revision, attempt.evidence_location,
     )
     adapter = catalog.for_language(request.language_id)
+    assessor = getattr(adapter, "assess_candidate", None)
+    if not callable(assessor):
+        raise ValueError("language adapter does not implement scenario candidate assessment")
+    assessment = assessor(ScenarioCandidateAssessmentRequest(provisional, request.ticket.production_path, _authoring_contract(request)))
+    if not assessment.accepted:
+        return ScenarioCandidatePreparation(provisional, assessment, None, None)
     analysis = adapter.analyse_candidate(provisional, request.ticket.production_path)
     candidate = replace(provisional, actual_test_identity=analysis.actual_test_identity)
     canonical = adapter.canonicalise_candidate(candidate, request.ticket.test_name)
     draft = TestScenarioDraft(
-        request.scenario_id,
-        request.ticket.step_id,
-        request.language_id,
-        canonical.source,
-        request.ticket.test_name,
-        request.allowed_test_path,
-        "awaiting independent scenario intent review",
-        request.source_requirement_refs,
+        request.scenario_id, request.ticket.step_id, request.language_id,
+        canonical.source, request.ticket.test_name, request.allowed_test_path,
+        "awaiting independent scenario intent review", request.source_requirement_refs,
     )
-    return ScenarioCandidatePreparation(candidate, analysis, draft)
+    return ScenarioCandidatePreparation(candidate, assessment, analysis, draft)
 
 
 def _review_request(
@@ -447,10 +479,34 @@ def _intent_result(scenario_id: str, text: str) -> ScenarioIntentResult:
     return ScenarioIntentResult(scenario_id, disposition, rationale, tuple(str(item) for item in evidence))
 
 
-def _tester_objective(request: ScenarioDraftRequest, feedback: str | None) -> str:
-    payload = {
+def _approved_draft(prepared: ScenarioCandidatePreparation) -> TestScenarioDraft:
+    if prepared.draft is None:
+        raise ValueError("candidate assessment must pass before intent review")
+    return prepared.draft
+
+
+def _approved_analysis(prepared: ScenarioCandidatePreparation) -> ScenarioStaticAnalysis:
+    if prepared.static_analysis is None:
+        raise ValueError("candidate assessment must pass before semantic analysis")
+    return prepared.static_analysis
+
+
+def _authoring_contract(request: ScenarioDraftRequest) -> ScenarioAuthoringContract:
+    return ScenarioAuthoringContract(
+        request.language_id, request.test_framework, 1,
+        ("imports", "module data assignments", "one ordinary test function"),
+        ("module docstrings", "helper functions", "fixtures", "classes", "async tests"),
+        ("parameterization", "nested functions/classes", "dynamic generation", "skip/xfail"),
+        True, True, True, True, "adapter_normalises one submitted ordinary test",
+    )
+
+
+def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repair: ScenarioDraftAttempt | None) -> str:
+    payload: dict[str, object] = {
         "role": "Tester",
-        "task": "Draft one complete behavioral scenario; this is planning material, not the active RED test.",
+        "task": "REPAIR MODE. Refactor the existing submitted test candidate. The existing test file is present in your base revision. Make the smallest changes required to resolve the listed violations. Preserve correct behavior already expressed. Do not discard it and invent an unrelated test." if repair else "Draft one complete behavioral scenario conforming to the supplied strict authoring contract.",
+        "repair_mode": "repair_previous_candidate" if repair else "fresh_draft",
+        "authoring_contract": _authoring_contract(request).to_dict(),
         "ticket": {
             "id": request.ticket.step_id,
             "behavior": request.ticket.focused_behavior,
@@ -478,7 +534,35 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None) -> st
             "do not materialise a frontier or start implementation",
         ],
     }
+    if repair is not None:
+        payload["previous_candidate"] = {
+            "attempt": repair.attempt_number,
+            "ref": repair.candidate_branch,
+            "sha": repair.candidate_revision,
+            "source": repair.candidate_source,
+            "assessment": None if repair.candidate_assessment is None else repair.candidate_assessment.to_dict(),
+            "deterministic_feedback": repair.feedback,
+            "intent_feedback": None if repair.intent is None else repair.intent.rationale,
+        }
     return json.dumps(payload, sort_keys=True)
+
+
+def _repair_binding(
+    binding: RepositoryBinding,
+    request: ScenarioDraftRequest,
+    repair: ScenarioDraftAttempt | None,
+    reader: ScenarioCandidateSourceReader,
+) -> RepositoryBinding:
+    if repair is None:
+        return binding.with_base_sha(request.development_base_revision)
+    if repair.candidate_branch is None or repair.candidate_revision is None or repair.candidate_source is None:
+        raise ValueError("repair candidate lineage is unavailable")
+    if reader.resolve(repair.candidate_branch) != repair.candidate_revision:
+        raise ValueError("repair candidate ref does not resolve to its persisted SHA")
+    return RepositoryBinding(
+        binding.repository_id, repair.candidate_branch, repair.candidate_revision,
+        binding.registered_root, binding.environment_resources,
+    )
 
 
 def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:

@@ -101,7 +101,7 @@ class GitGateway:
             run(worktree, "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "-qm", unit.id)
             revision = run(worktree, "rev-parse", "HEAD").strip()
             return WorkUnitExecutionResult(
-                unit.id, True, "checks_passed", accepted_revision=revision,
+                unit.id, True, "checks_passed", branch=revision, accepted_revision=revision,
                 evidence_location=f"evidence/{unit.id}",
             )
         finally:

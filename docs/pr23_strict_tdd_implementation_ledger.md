@@ -331,3 +331,12 @@ This session establishes the rollback baseline required by PR22. It does not cla
 - No live proof, ReservationBook, PR21, Rack AI source/configuration change, or
   merge was performed. INCOMPLETE_ITEMS = PRESENT: the live tiny-feature and
   fresh ReservationBook proof gates remain deferred.
+
+
+## Session 8C2: scenario-candidate repair protocol
+
+- Reworked the incomplete scenario-drafting lineage scaffold into typed authoring contracts and typed adapter-owned candidate assessments. The same strict Python/pytest grammar now informs the Tester objective and deterministic candidate validation.
+- Candidate attempts persist bounded source, candidate ref/SHA, parent/base lineage, mode, selected worker identity, structured issues/spans, and semantic feedback. Historical state without these optional fields remains readable.
+- Attempt one remains a fresh draft from the canonical development base. Attempts two through four bind to the immediately preceding candidate ref/SHA only after ref resolution verifies the persisted SHA; missing or mismatched repair lineage fails closed. Candidate drafting never promotes the canonical development base.
+- Structural and semantic rejection feedback both produce explicit repair objectives containing the previous source and typed diagnostics. The four-attempt cap remains unchanged and the fourth candidate is assessed before exhaustion can be declared.
+- Focused deterministic tests cover strict candidate forms, contract injection, ref/SHA/source repair binding, structured persisted diagnostics, and mismatch failure. The earlier CounterBox live record remains historical and was not used as proof of this workflow. No live proof, ReservationBook run, model escalation, or Rack AI change was made in this session.

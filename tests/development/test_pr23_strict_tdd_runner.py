@@ -63,7 +63,8 @@ class GitGateway:
             changed = tuple(git(worktree, "diff", "--cached", "--name-only").splitlines())
             assert changed and all(path in unit.allowed_paths for path in changed)
             git(worktree, "-c", "user.name=ATHBA", "-c", "user.email=athba@example.test", "commit", "--no-verify", "-m", unit.id)
-            return WorkUnitExecutionResult(unit.id, True, "checks_passed", accepted_revision=git(worktree, "rev-parse", "HEAD"), evidence_location=f"fake/{unit.id}", policy_evidence=ExecutionPolicyEvidence(unit.allowed_paths, unit.allowed_paths))
+            revision = git(worktree, "rev-parse", "HEAD")
+            return WorkUnitExecutionResult(unit.id, True, "checks_passed", branch=revision, accepted_revision=revision, evidence_location=f"fake/{unit.id}", policy_evidence=ExecutionPolicyEvidence(unit.allowed_paths, unit.allowed_paths))
         finally:
             subprocess.run(["git","worktree","remove","--force",str(worktree)], cwd=self.root, capture_output=True, text=True, check=False); shutil.rmtree(worktree, ignore_errors=True)
 
