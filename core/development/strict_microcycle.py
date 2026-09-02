@@ -43,6 +43,7 @@ from core.development.microcycle_domain import (
     ScenarioCompletion,
     ScenarioFrontier,
 )
+from core.development.athba_workspace_routing import AthbaModelWorkKind, AthbaWorkspaceIdentity
 from core.development.strict_tdd_execution_budget import (
     StrictTddExecutionBudgetPolicy,
     StrictTddWorkKind,
@@ -156,6 +157,8 @@ class DeveloperFrontierWorkUnitFactory:
                 StrictTddWorkKind.FRONTIER_DEVELOPER
             ),
             work_kind=StrictTddWorkKind.FRONTIER_DEVELOPER,
+            model_work_kind=AthbaModelWorkKind.FRONTIER_IMPLEMENTATION,
+            workspace_identity=AthbaWorkspaceIdentity(f"{request.artifact.scenario_id}--frontier-{request.artifact.frontier_index}", identifier, identifier),
             change_key=identifier,
             status=WorkUnitStatus.READY,
         )
@@ -192,6 +195,8 @@ class RegressionRepairWorkUnitFactory:
                 StrictTddWorkKind.REGRESSION_REPAIR
             ),
             work_kind=StrictTddWorkKind.REGRESSION_REPAIR,
+            model_work_kind=AthbaModelWorkKind.REGRESSION_REPAIR,
+            workspace_identity=AthbaWorkspaceIdentity(f"{request.artifact.scenario_id}--frontier-{request.artifact.frontier_index}--regression-repair", identifier, identifier),
             change_key=identifier,
             status=WorkUnitStatus.READY,
         )

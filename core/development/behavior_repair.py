@@ -35,6 +35,7 @@ from core.development.strict_tdd_execution_budget import (
     StrictTddWorkKind,
 )
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
+from core.development.athba_workspace_routing import AthbaModelWorkKind, AthbaWorkspaceIdentity
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway
 
@@ -133,6 +134,8 @@ class BehaviorRepairWorkUnitFactory:
                 StrictTddWorkKind.BEHAVIOR_REPAIR
             ),
             work_kind=StrictTddWorkKind.BEHAVIOR_REPAIR,
+            model_work_kind=AthbaModelWorkKind.SEMANTIC_BEHAVIOR_REPAIR,
+            workspace_identity=AthbaWorkspaceIdentity(f"{request.artifact.scenario_id}--behavior-repair", identifier, identifier),
             change_key=identifier,
             status=WorkUnitStatus.READY,
         )

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from core.development.athba_workspace_routing import AthbaModelWorkKind, AthbaWorkspaceIdentity
 from core.development.strict_tdd_execution_budget import StrictTddWorkKind
 
 
@@ -56,6 +57,8 @@ class DevelopmentWorkUnit:
     max_implementation_attempts: int = 2
     timeout_seconds: int = 900
     work_kind: StrictTddWorkKind = StrictTddWorkKind.GENERIC
+    model_work_kind: AthbaModelWorkKind | None = None
+    workspace_identity: AthbaWorkspaceIdentity | None = None
     network: str = "disabled"
     change_key: str | None = None
     status: WorkUnitStatus = WorkUnitStatus.PLANNED
@@ -87,6 +90,8 @@ class DevelopmentWorkUnit:
             raise ValueError("timeout seconds must be positive")
         if not isinstance(self.work_kind, StrictTddWorkKind):
             raise ValueError("work kind must be a StrictTddWorkKind")
+        if (self.model_work_kind is None) != (self.workspace_identity is None):
+            raise ValueError("workspace work kind and identity must be supplied together")
         if self.change_key is not None:
             _require_text(self.change_key, "work unit change key")
 
