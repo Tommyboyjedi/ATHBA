@@ -1,219 +1,322 @@
-# PR23 Worker-Routing State Machines
+# PR23 ATHBA Routing and Generic Connector State Machines
 
 ## Status
 
 Documentation-only companion to `pr23_worker_capability_routing_architecture.md`.
 
-## Complete scenario authoring
+The diagrams distinguish:
+
+- ATHBA's internal software-development state;
+- ATHBA's generic execution-profile mapping;
+- the replaceable connector boundary;
+- Rack AI's generic queue and resource selection.
+
+Rack AI does not receive ATHBA software-engineering work kinds.
+
+## End-to-end boundary
+
+```mermaid
+flowchart LR
+    A[ATHBA development state] --> B{Semantically ready?}
+    B -->|no| C[Remain internal: blocked or pending]
+    B -->|yes| D[ATHBA execution-profile resolver]
+    D --> E[Generic AI job request]
+    E --> F[AiExecutionPort]
+    F --> G[RackAiConnector]
+    G --> H[Rack AI generic queue]
+    H --> I[Generic capability and resource selection]
+    I --> J[Selected model worker resource]
+    J --> K[Generic terminal result]
+    K --> G
+    G --> L[Generic result translated]
+    L --> M[ATHBA interprets development meaning]
+    M --> A
+```
+
+The software-development stage never crosses the connector boundary.
+
+## ATHBA internal work ledger
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending
+    Pending --> Ready: dependencies and prior state satisfied
+    Ready --> Dispatchable: project mutation and idempotency rules permit
+    Dispatchable --> Submitted: connector acknowledgement persisted
+    Submitted --> Queued: Rack AI acknowledges generic job
+    Queued --> Running: Rack AI selects and leases capacity
+    Running --> TerminalResult: generic terminal evidence returned
+    TerminalResult --> Interpreting: ATHBA applies domain meaning
+    Interpreting --> Completed: accepted development transition
+    Interpreting --> Ready: bounded repair or next submission
+    Interpreting --> Pending: new ATHBA dependency or later frontier
+    Interpreting --> Blocked: external or capability blocker
+    Completed --> [*]
+    Blocked --> [*]
+```
+
+ATHBA may submit every item that is both semantically ready and dispatchable. It does not share its dependency graph or mutable semantic state with Rack AI.
+
+## Rack AI generic queue
+
+```mermaid
+stateDiagram-v2
+    [*] --> Received
+    Received --> Validated: generic contract valid
+    Received --> Rejected: invalid generic contract
+    Validated --> Queued
+    Queued --> WaitingForCapacity: eligible worker exists but is busy
+    Queued --> CapabilityUnavailable: no worker satisfies hard requirements
+    Queued --> Selected: eligible resource available
+    WaitingForCapacity --> Selected: capacity becomes available
+    Selected --> Running: lease acquired
+    Running --> Terminal
+    Terminal --> [*]
+    Rejected --> [*]
+    CapabilityUnavailable --> [*]
+```
+
+Rack AI understands only generic capability, complexity, context, priority, execution form, constraints, and opaque identity.
+
+## Complete scenario authoring inside ATHBA
 
 ```mermaid
 stateDiagram-v2
     [*] --> ScenarioReady
-    ScenarioReady --> SelectionRequested: ATHBA emits high-reasoning capability request
-    SelectionRequested --> PrimarySelected: Rack AI selects qualified worker
-    SelectionRequested --> CapabilityBlocked: no eligible worker
-    PrimarySelected --> CandidateReturned: candidate source/ref/SHA returned
-    PrimarySelected --> NoCandidate: model-originated terminal result
-    PrimarySelected --> ExternalBlocked: executor/transport/selection failure
-    CandidateReturned --> StructuralRejected: language adapter rejects
+    ScenarioReady --> ProfileResolved: ATHBA maps internal stage
+    ProfileResolved --> Submitted: capabilities reasoning plus coding
+    Submitted --> CandidateReturned: workspace candidate exists
+    Submitted --> NoCandidate: verified model-originated no-candidate result
+    Submitted --> ExternalBlocked: executor or connector blocker
+    CandidateReturned --> StructuralRejected: deterministic adapter rejects
     CandidateReturned --> IntentPending: structural acceptance
-    StructuralRejected --> RepairRequested: submissions remain
+    StructuralRejected --> RepairProfile: submissions remain
+    NoCandidate --> FreshRetryProfile: submissions remain
     IntentPending --> IntentApproved: independent review approves
-    IntentPending --> RepairRequested: semantic repair required
-    IntentPending --> ReviewerBlocked: review protocol/infrastructure failure
-    RepairRequested --> PrimarySelected: next bounded primary submission
-    NoCandidate --> PrimarySelected: fresh retry and submissions remain
-    NoCandidate --> CapabilityBlocked: fourth submission exhausted
+    IntentPending --> RepairProfile: semantic repair required
+    IntentPending --> ReviewerBlocked: review protocol or infrastructure failure
+    RepairProfile --> Submitted: same generic reasoning plus coding profile
+    FreshRetryProfile --> Submitted: same generic reasoning plus coding profile
     IntentApproved --> ScenarioFrozen
     ScenarioFrozen --> [*]
     ExternalBlocked --> [*]
     ReviewerBlocked --> [*]
-    CapabilityBlocked --> [*]
 ```
 
-Scenario authoring uses one high-reasoning tier with at most four actual model submissions. Infrastructure failures do not consume the model budget.
+Rack AI sees a generic `[reasoning, coding]` workspace job. It does not know it is authoring or repairing a scenario.
 
 ## Deterministic frontier progression
 
 ```mermaid
 flowchart TD
-    A[Approved frozen scenario] --> B[Language adapter parses scenario]
+    A[Approved frozen scenario] --> B[Language adapter parses]
     B --> C[Ordered syntactically complete fragments]
     C --> D[Materialise smallest active frontier]
-    D --> E[Deterministic parse / collect / execute]
+    D --> E[Deterministic parse collect execute]
     E -->|valid missing capability or wrong behavior| F[Accepted RED frontier]
-    E -->|artifact invalid| G[Adapter or scenario failure]
+    E -->|artifact invalid| G[ATHBA adapter or scenario route]
     E -->|infrastructure invalid| H[External blocker]
-    F --> I[Submit narrow implementation work]
-    I --> J[Focused GREEN verification]
-    J -->|pass| K[Accumulated deterministic regression]
-    J -->|fail| L[Bounded implementation repair or escalation]
-    K -->|pass| M[CAS canonical promotion]
-    K -->|fail| N[Bounded regression repair or escalation]
-    M --> O{More fragments?}
-    O -->|yes| D
-    O -->|no| P[Complete canonical scenario GREEN]
-    P --> Q[Behavior-level review]
+    F --> I[Create internal narrow implementation work]
+    I --> J[Map to generic coding small job]
+    J --> K[Focused GREEN verification]
+    K -->|pass| L[Accumulated deterministic regression]
+    K -->|fail| M[ATHBA repair or tier decision]
+    L -->|pass| N[CAS canonical promotion]
+    L -->|fail| O[ATHBA regression repair decision]
+    N --> P{More fragments?}
+    P -->|yes| D
+    P -->|no| Q[Complete canonical scenario GREEN]
+    Q --> R[Behavior-level review]
 ```
 
-No model creates intermediate fragment tests. The same canonical test evolves through history.
+No model creates intermediate fragment tests.
 
-## Narrow implementation and escalation
+## Narrow implementation and stronger fallback
 
 ```mermaid
 stateDiagram-v2
     [*] --> NarrowReady
-    NarrowReady --> CoderSelection: required capability bounded_code_edit
-    CoderSelection --> CoderAttempt
-    CoderAttempt --> Accepted: deterministic gates clear
-    CoderAttempt --> CoderRetry: genuine model failure and attempts remain
-    CoderRetry --> CoderAttempt
-    CoderAttempt --> PrimaryEscalation: fourth coder submission fails
-    CoderAttempt --> ExternalBlocked: infrastructure failure
-    PrimaryEscalation --> PrimaryAttempt
-    PrimaryAttempt --> Accepted: deterministic gates clear
-    PrimaryAttempt --> PrimaryRetry: genuine model failure and attempts remain
-    PrimaryRetry --> PrimaryAttempt
-    PrimaryAttempt --> CapabilityBlocked: fourth primary submission fails
-    PrimaryAttempt --> ExternalBlocked: infrastructure failure
+    NarrowReady --> CodingProfile: ATHBA tier one mapping
+    CodingProfile --> CoderSubmission: generic coding small request
+    CoderSubmission --> Accepted: deterministic gates clear
+    CoderSubmission --> CoderRetry: genuine model failure and submissions remain
+    CoderRetry --> CodingProfile
+    CoderSubmission --> StrongerProfile: fourth tier-one submission fails
+    CoderSubmission --> ExternalBlocked: connector or executor failure
+    StrongerProfile --> PrimarySubmission: generic reasoning plus coding medium request
+    PrimarySubmission --> Accepted: deterministic gates clear
+    PrimarySubmission --> PrimaryRetry: genuine model failure and submissions remain
+    PrimaryRetry --> StrongerProfile
+    PrimarySubmission --> CapabilityBlocked: fourth tier-two submission fails
+    PrimarySubmission --> ExternalBlocked
     Accepted --> [*]
     CapabilityBlocked --> [*]
     ExternalBlocked --> [*]
 ```
 
-There is no transition from the primary fallback tier back to the coder tier.
+Rack AI sees only the generic profile attached to each submission. ATHBA owns why the profile changed.
 
-## Per-tier attempt accounting
+## Per-tier identities
 
 ```mermaid
 flowchart LR
-    W[Immutable work identity] --> T1[Tier 1 local-coder preferred]
-    T1 --> A1[submission 1]
-    A1 --> A2[submission 2]
-    A2 --> A3[submission 3]
-    A3 --> A4[submission 4]
-    A4 --> X{success?}
-    X -->|yes| Done[continue normal TDD]
-    X -->|no| T2[Tier 2 local-primary fallback]
-    T2 --> B1[submission 1]
-    B1 --> B2[submission 2]
-    B2 --> B3[submission 3]
-    B3 --> B4[submission 4]
-    B4 --> Y{success?}
+    W[Stable ATHBA work_id] --> T1[Tier 1 generic coding small]
+    T1 --> A1[submission_id 1]
+    A1 --> A2[submission_id 2]
+    A2 --> A3[submission_id 3]
+    A3 --> A4[submission_id 4]
+    A4 --> X{accepted?}
+    X -->|yes| Done[continue TDD]
+    X -->|no| T2[Tier 2 reasoning plus coding medium]
+    T2 --> B1[new submission_id 1]
+    B1 --> B2[new submission_id 2]
+    B2 --> B3[new submission_id 3]
+    B3 --> B4[new submission_id 4]
+    B4 --> Y{accepted?}
     Y -->|yes| Done
-    Y -->|no| Block[capability_blocked]
+    Y -->|no| Block[ATHBA capability blocked]
 ```
 
-Every actual invocation has a unique submission and change identity. Process restart cannot reset either tier.
+`work_id` is opaque to Rack AI. Every actual invocation has a unique `submission_id` and execution/change identity.
 
-## ATHBA ready pool to Rack AI execution queue
+## Capability filtering without software semantics
+
+```mermaid
+flowchart TD
+    A[Generic job capabilities complexity context] --> B[Registered model profiles]
+    B --> C{All required capabilities supported?}
+    C -->|no| D[Ineligible: missing generic capability]
+    C -->|yes| E{Qualified for complexity?}
+    E -->|no| F[Ineligible: complexity envelope]
+    E -->|yes| G{Large context satisfied?}
+    G -->|no| H[Ineligible: context]
+    G -->|yes| I[Eligible worker instances]
+    I --> J[Resource and lease filtering]
+    J --> K[Generic ranking]
+    K --> L[Selection decision]
+    L --> M[Execution provenance]
+    M --> N{Selected equals executed?}
+    N -->|yes| O[Return terminal result]
+    N -->|no| P[Fail closed]
+```
+
+## Priority is independent of capability
+
+```mermaid
+flowchart LR
+    A[ATHBA semantic readiness] --> D[Dispatchable]
+    B[Required capability set] --> E[Rack AI eligibility]
+    C[Low medium high paramount] --> F[Rack AI queue ordering]
+    D --> G[Generic job]
+    E --> H[Eligible workers]
+    F --> I[Scheduling order]
+```
+
+A high-priority coding-only job does not become a reasoning job. A low-priority reasoning job remains reasoning work.
+
+## No shared pool and no dependency leakage
 
 ```mermaid
 sequenceDiagram
-    participant A as ATHBA semantic ready pool
-    participant R as Rack AI execution queue
-    participant S as Rack AI selector
-    participant W as Selected worker
-    A->>R: immutable DevelopmentWorkDescriptor
-    R-->>A: durable submission acknowledgement
-    R->>S: request eligibility and resource selection
-    S-->>R: WorkerSelectionDecision
-    R->>W: bounded work invocation
+    participant A as ATHBA work ledger
+    participant C as Rack AI connector
+    participant R as Rack AI generic queue
+    participant W as Worker
+
+    A->>A: resolve dependencies and readiness
+    A->>C: submit ready GenericAiJobRequest
+    C->>R: serialize generic job
+    R-->>C: queued acknowledgement
+    C-->>A: persist submission acknowledgement
+    R->>W: select and execute when capacity exists
     W-->>R: terminal execution evidence
-    R-->>A: terminal packet + selection + provenance
-    A->>A: interpret candidate and advance TDD state
+    R-->>C: generic result
+    C-->>A: correlated result by submission_id
+    A->>A: interpret and unlock next internal work
 ```
 
-ATHBA alone decides semantic readiness. Rack AI alone decides concrete worker/resource availability.
+Rack AI receives no behavior graph and no instruction that job A must precede job B. ATHBA simply does not submit B until B is ready.
 
-## Worker selection and execution provenance
+## Replaceable connector
+
+```mermaid
+classDiagram
+    class AiExecutionPort {
+      +submit(job)
+      +get_status(submission_id)
+      +get_result(submission_id)
+      +cancel(submission_id)
+    }
+    class RackAiConnector
+    class FakeAiConnector
+    class AlternativeRackConnector
+    AiExecutionPort <|.. RackAiConnector
+    AiExecutionPort <|.. FakeAiConnector
+    AiExecutionPort <|.. AlternativeRackConnector
+    class AthbaExecutionProfileResolver
+    AthbaExecutionProfileResolver --> AiExecutionPort
+```
+
+ATHBA domain services depend on the port, not Rack AI's transport schema.
+
+## Sequential routing proof
+
+```mermaid
+sequenceDiagram
+    participant A as ATHBA
+    participant C as Connector
+    participant R as Rack AI
+
+    A->>C: reasoning+coding medium scenario job
+    C->>R: generic request
+    R-->>A: stronger worker selection and terminal evidence
+    A->>A: deterministic scenario decomposition
+    A->>C: coding small frontier job
+    C->>R: generic request
+    R-->>A: coding worker selection and terminal evidence
+    A->>A: deterministic GREEN and regression
+    A->>C: reasoning+coding medium fallback job
+    C->>R: generic request after proven tier exhaustion
+    R-->>A: stronger worker selection and terminal evidence
+```
+
+This sequential proof is required before any concurrent GPU scheduling test.
+
+## Same model on two GPUs and competing workload
 
 ```mermaid
 flowchart TD
-    A[Work kind and required capabilities] --> B[Capability registry lookup]
-    B --> C[Eligible workers]
-    B --> D[Ineligible workers with reasons]
-    C --> E[Resource and lease filtering]
-    E --> F[Priority policy]
-    F --> G[WorkerSelectionDecision]
-    G --> H[Worker invocation]
-    H --> I[WorkerExecutionProvenance]
-    I --> J{Selected worker equals executed worker?}
-    J -->|yes| K[Return terminal packet]
-    J -->|no| L[Fail closed: provenance mismatch]
+    MP[Gemma model capability profile: reasoning plus coding] --> W1[Worker instance on 4060 Ti]
+    MP --> W2[Worker instance on 4080 Super]
+    W1 --> Q[Generic eligible worker set]
+    W2 --> Q
+    C[ComfyUI lease requests 4080] --> R[Rack AI resource manager]
+    R --> W2X[4080 worker temporarily unavailable]
+    W1 --> Q2[Remaining eligible reasoning capacity]
 ```
 
-Selection evidence explains **why** a worker was selected. Execution provenance proves **what** ran.
-
-## Idle-primary overflow
-
-```mermaid
-stateDiagram-v2
-    [*] --> PrimaryIdle
-    PrimaryIdle --> HighReasoningLease: high-reasoning work ready
-    PrimaryIdle --> EscalatedLease: no high-reasoning work; escalated narrow work ready
-    PrimaryIdle --> OverflowLease: no high-reasoning or escalated work; overflow eligible
-    OverflowLease --> OverflowRunning
-    OverflowRunning --> PrimaryIdle: bounded task finishes
-    HighReasoningLease --> HighReasoningRunning
-    HighReasoningRunning --> PrimaryIdle: task finishes
-    EscalatedLease --> EscalatedRunning
-    EscalatedRunning --> PrimaryIdle: task finishes
-```
-
-Version 1 is non-preemptive. If high-reasoning work arrives during a bounded overflow task, the running task finishes, but no additional overflow lease is issued.
-
-## Project mutation lock
-
-```mermaid
-flowchart TD
-    A[Ready mutating work] --> B{Project mutation lane free?}
-    B -->|no| C[Remain semantically ready but unleased]
-    B -->|yes| D[Acquire project mutation lease]
-    D --> E[Execute against exact base ref/SHA]
-    E --> F{Terminal candidate accepted?}
-    F -->|no| G[Release lease; preserve trusted base]
-    F -->|yes| H[Compare-and-swap canonical promotion]
-    H -->|CAS pass| I[Persist new canonical revision]
-    H -->|CAS fail| J[Reject stale result]
-    I --> K[Release lease]
-    J --> K
-    G --> K
-```
-
-One active mutating lane per project is the version-1 rule. Independent projects may execute concurrently.
-
-## Failure ownership matrix
-
-| Event | Consumes model submission? | Primary owner | Next action |
-| --- | --- | --- | --- |
-| Structurally invalid candidate | Yes | ATHBA | repair within current tier |
-| Semantic repair disposition | Yes | ATHBA | repair within current tier |
-| Model uses unadvertised tool / no candidate | Yes | ATHBA using Rack AI evidence | fresh retry within current tier |
-| Worker timeout after verified invocation | Yes | Rack AI evidence + ATHBA tier policy | next bounded submission or escalation |
-| Worker not selected | No | Rack AI | external/capability blocker |
-| Executor/transport/worktree failure | No | Rack AI | external blocker |
-| No eligible worker | No | Rack AI selection | capability blocker |
-| Malformed terminal packet/provenance mismatch | No | cross-boundary contract | fail closed |
-| Focused GREEN failure | Yes | ATHBA | repair current tier |
-| Deterministic regression failure | Yes when repair model invoked | ATHBA | bounded repair / escalation |
-| Four coder submissions fail | N/A | ATHBA | authorize primary tier |
-| Four primary submissions fail | N/A | ATHBA | capability-blocked terminal state |
+The detailed lease/scheduler policy is deferred to a separate Rack AI specification. ATHBA's generic job does not change when one worker disappears.
 
 ## Resume invariants
 
-Persisted state must retain:
+Persisted ATHBA state retains:
 
-- immutable work ID;
-- current tier;
-- submissions consumed within each tier;
-- global submission sequence;
-- last selected worker decision;
-- actual execution provenance;
-- candidate and no-candidate history;
-- repair and escalation parents;
+- internal work identity and development stage;
+- generic execution profile used for each submission;
+- tier and submissions consumed;
+- candidate and no-candidate lineage;
 - base ref/SHA and allowed paths;
+- connector submission acknowledgement;
+- Rack AI selection evidence and execution provenance;
 - pending transition receipt;
-- canonical revision and project mutation lease state.
+- canonical revision.
 
-A completed frontier, model submission, selection decision, or promotion must not be repeated after restart.
+Persisted Rack AI state retains:
+
+- generic request and idempotency key;
+- queue/execution status;
+- selected worker/resource decision;
+- lease evidence;
+- terminal packet.
+
+A completed submission, transition, or promotion must not be repeated after restart.
