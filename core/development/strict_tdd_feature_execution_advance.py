@@ -38,6 +38,8 @@ async def advance(
     if draft_state is None:
         return await _submit_draft(executor, request, scenario_id)
     if draft_state.approved_microcycle is None:
+        if draft_state.status in {"intent_protocol_failure", "scenario_harness_failure"}:
+            return _blocked_draft_result(request, scenario_id, draft_state.status)
         if _intent_review_is_pending(draft_state):
             return await _review_intent(executor, request, scenario_id)
         return await _submit_draft(executor, request, scenario_id)
@@ -103,7 +105,7 @@ async def advance(
 def _intent_review_is_pending(state: ScenarioDraftRunState) -> bool:
     return bool(
         state.attempts
-        and state.attempts[-1].status == "candidate_submitted"
+        and state.attempts[-1].status in {"candidate_submitted", "intent_review_pending"}
         and state.attempts[-1].candidate_revision is not None
         and state.attempts[-1].intent is None
     )
@@ -156,10 +158,15 @@ async def _review_intent(
             request.canonical_development_base,
         )
     )
+    status = outcome.state.status
+    if status == "intent_protocol_failure":
+        return _result(ScenarioTransitionKind.INTENT_PROTOCOL_FAILURE, request, None, _blocked_draft_outcome(request, scenario_id, status), reasoning=True)
+    if status == "scenario_harness_failure":
+        return _result(ScenarioTransitionKind.SCENARIO_HARNESS_FAILURE, request, None, _blocked_draft_outcome(request, scenario_id, status), reasoning=True)
     approved = outcome.approved
     kind = ScenarioTransitionKind.INTENT_APPROVED if approved else ScenarioTransitionKind.INTENT_REPAIR_REQUIRED
-    status = "intent_approved" if approved else "intent_repair_required"
-    return _result(kind, request, None, _draft_outcome(request, scenario_id, status), reasoning=True)
+    result_status = "intent_approved" if approved else "intent_repair_required"
+    return _result(kind, request, None, _draft_outcome(request, scenario_id, result_status), reasoning=True)
 
 
 def _after_behavior_completion(
@@ -218,6 +225,26 @@ class StrictFeatureScenarioRunLoop:
             blocked_reason="transition_safety_guard_exhausted",
         )
 
+
+def _blocked_draft_result(
+    request: FeatureScenarioRequest,
+    scenario_id: str,
+    reason: str,
+) -> ScenarioAdvanceResult:
+    kind = ScenarioTransitionKind.INTENT_PROTOCOL_FAILURE if reason == "intent_protocol_failure" else ScenarioTransitionKind.SCENARIO_HARNESS_FAILURE
+    return _result(kind, request, None, _blocked_draft_outcome(request, scenario_id, reason))
+
+
+def _blocked_draft_outcome(
+    request: FeatureScenarioRequest,
+    scenario_id: str,
+    reason: str,
+) -> FeatureScenarioResult:
+    return FeatureScenarioResult(
+        request.behavior.ref, scenario_id, reason,
+        f"refs/heads/{request.project.default_ref}", request.canonical_development_base,
+        None, None, blocked_reason=reason,
+    )
 
 def _draft_outcome(
     request: FeatureScenarioRequest,

@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
 
+from core.development.scenario_intent_review import ScenarioIntentProtocolFailure
+
 from core.development.microcycle_domain import (
     MicrocycleState,
     ScenarioIntentResult,
@@ -165,6 +167,8 @@ class ScenarioDraftStatus(str, Enum):
     DRAFTING = "drafting"
     APPROVED = "approved"
     ATTEMPTS_EXHAUSTED = "attempts_exhausted"
+    INTENT_PROTOCOL_FAILURE = "intent_protocol_failure"
+    SCENARIO_HARNESS_FAILURE = "scenario_harness_failure"
 
 
 @dataclass(frozen=True)
@@ -234,6 +238,10 @@ class ScenarioDraftAttempt:
     timeout_seconds: int | None = None
     worker_provenance: WorkerExecutionProvenance | None = None
     unchanged_evidence: ScenarioCandidateUnchangedEvidence | None = None
+    intent_review_status: str | None = None
+    intent_review_response_attempts: int = 0
+    intent_protocol_failure: ScenarioIntentProtocolFailure | None = None
+    intent_review_evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.attempt_number < 1:
@@ -248,6 +256,8 @@ class ScenarioDraftAttempt:
             raise ValueError("scenario attempt timeout must be positive integer seconds")
         if self.candidate_source is not None and len(self.candidate_source) > MAX_SCENARIO_CANDIDATE_SOURCE_CHARACTERS:
             raise ValueError("candidate source exceeds the scenario test-file limit")
+        if self.intent_review_response_attempts not in {0, 1, 2}:
+            raise ValueError("intent review response attempts must be zero, one, or two")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -258,6 +268,8 @@ class ScenarioDraftAttempt:
             "candidate_assessment": None if self.candidate_assessment is None else self.candidate_assessment.to_dict(),
             "worker_provenance": None if self.worker_provenance is None else asdict(self.worker_provenance),
             "unchanged_evidence": None if self.unchanged_evidence is None else self.unchanged_evidence.to_dict(),
+            "intent_protocol_failure": None if self.intent_protocol_failure is None else self.intent_protocol_failure.to_dict(),
+            "intent_review_evidence_refs": list(self.intent_review_evidence_refs),
         }
 
     @classmethod
@@ -268,6 +280,7 @@ class ScenarioDraftAttempt:
         candidate_assessment = value.get("candidate_assessment")
         worker_provenance = value.get("worker_provenance")
         unchanged_evidence = value.get("unchanged_evidence")
+        intent_protocol_failure = value.get("intent_protocol_failure")
         return cls(
             attempt_number=int(value["attempt_number"]),
             work_unit_id=str(value["work_unit_id"]),
@@ -290,6 +303,10 @@ class ScenarioDraftAttempt:
             timeout_seconds=value.get("timeout_seconds"),
             worker_provenance=None if worker_provenance is None else WorkerExecutionProvenance(**dict(worker_provenance)),
             unchanged_evidence=None if unchanged_evidence is None else ScenarioCandidateUnchangedEvidence.from_dict(dict(unchanged_evidence)),
+            intent_review_status=value.get("intent_review_status"),
+            intent_review_response_attempts=int(value.get("intent_review_response_attempts", 0)),
+            intent_protocol_failure=None if intent_protocol_failure is None else ScenarioIntentProtocolFailure.from_dict(dict(intent_protocol_failure)),
+            intent_review_evidence_refs=tuple(str(item) for item in value.get("intent_review_evidence_refs", ())),
             static_analysis=None if static_analysis is None else ScenarioStaticAnalysis(
                 actual_test_identity=str(static_analysis["actual_test_identity"]),
                 production_reference_paths=tuple(static_analysis.get("production_reference_paths", ())),

@@ -45,7 +45,12 @@ from core.development.strict_tdd_execution_budget import (
 )
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
-from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
+from core.development.scenario_intent_review import (
+    MAX_INTENT_RESPONSE_EVIDENCE_CHARACTERS,
+    ScenarioIntentReviewOutcome,
+    ScenarioIntentReviewStatus,
+    ScenarioIntentReviewer,
+)
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway, WorkUnitExecutionResult
 
 
@@ -171,40 +176,20 @@ class ScenarioIntentReviewRequest:
 
 
 @dataclass(frozen=True)
+class ScenarioCandidateFailureRequest:
+    state: ScenarioDraftRunState
+    attempt: ScenarioDraftAttempt
+    source: str
+    feedback: str
+    prepared: "ScenarioCandidatePreparation | None" = None
+
+
+@dataclass(frozen=True)
 class ScenarioCandidatePreparation:
     candidate: ScenarioSourceCandidate
     assessment: ScenarioCandidateAssessment
     static_analysis: ScenarioStaticAnalysis | None
     draft: TestScenarioDraft | None
-
-
-class ScenarioIntentReviewer:
-    """Independently judges ticket evidence and never receives solution material."""
-
-    def __init__(self, gateway: ReasoningGateway):
-        self.gateway = gateway
-
-    async def review(self, request: ScenarioIntentReviewRequest) -> ScenarioIntentResult:
-        response = await self.gateway.reason(
-            ReasoningRequest(
-                purpose="athba_scenario_intent_review",
-                prompt=_intent_prompt(request),
-                project_id=request.behavior_ref,
-                requires_large_context=False,
-            )
-        )
-        try:
-            return _intent_result(request.scenario_id, response.text)
-        except json.JSONDecodeError as error:
-            repaired = await self.gateway.reason(
-                ReasoningRequest(
-                    purpose="athba_scenario_intent_json_repair",
-                    prompt=_intent_repair_prompt(response.text, str(error)),
-                    project_id=request.behavior_ref,
-                    requires_large_context=False,
-                )
-            )
-            return _intent_result(request.scenario_id, repaired.text)
 
 
 class ScenarioFreezeFactory:
@@ -251,22 +236,7 @@ class ScenarioDraftingService:
         request: ScenarioDraftRequest,
         binding: RepositoryBinding,
     ) -> ScenarioDraftOutcome:
-        """Compatibility API that advances only through persisted draft transitions."""
-        for _ in range(MAX_TESTER_SCENARIO_ATTEMPTS * 2):
-            state = self.state_store.load(request.scenario_id)
-            if state is not None and state.approved_microcycle is not None:
-                return ScenarioDraftOutcome(state, False)
-            if state is not None and state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value:
-                return ScenarioDraftOutcome(state, False)
-            if state is not None and state.attempts and state.attempts[-1].status == "candidate_submitted":
-                outcome = await self.review_intent(request)
-            else:
-                outcome = await self.submit_candidate(request, binding)
-            if outcome.approved or outcome.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value:
-                return outcome
-            if outcome.state.attempts and outcome.state.attempts[-1].status != "candidate_submitted":
-                return outcome
-        raise RuntimeError("scenario draft compatibility transition guard exhausted")
+        return await ScenarioDraftCompatibilityLoop(self).draft(request, binding)
 
     async def submit_candidate(
         self,
@@ -275,7 +245,10 @@ class ScenarioDraftingService:
     ) -> ScenarioDraftOutcome:
         state = self.state_store.load(request.scenario_id) or _initial_state(request)
         _validate_resume(state, request)
-        if state.approved_microcycle is not None:
+        if state.approved_microcycle is not None or state.status in {
+            ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value,
+            ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
+        }:
             return ScenarioDraftOutcome(state, False)
         if len(state.attempts) >= MAX_TESTER_SCENARIO_ATTEMPTS:
             exhausted = replace(state, status=ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value)
@@ -304,55 +277,65 @@ class ScenarioDraftingService:
         attempt = state.attempts[-1]
         if attempt.candidate_revision is None or attempt.intent is not None:
             raise ValueError("scenario intent review requires an unreviewed accepted draft")
-        source: str | None = None
+        source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
         try:
-            source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
             prepared = _prepare_candidate(request, attempt, source, self.adapter_catalog)
-            feedback = prepared.assessment.repair_feedback()
-            if not prepared.assessment.accepted:
-                invalid = replace(
-                    attempt,
-                    status="candidate_invalid",
-                    feedback=feedback,
-                    candidate=prepared.candidate,
-                    static_analysis=prepared.static_analysis,
-                    candidate_assessment=prepared.assessment,
-                    candidate_source=source,
-                )
-                updated = replace(state, attempts=(*state.attempts[:-1], invalid))
-                self.state_store.save(updated)
-                return ScenarioDraftOutcome(updated, False)
-            intent = await self.intent_reviewer.review(
-                _review_request(_approved_draft(prepared), request, self.adapter_catalog, _approved_analysis(prepared))
-            )
-            reviewed = replace(
-                attempt,
-                status=intent.status,
-                feedback=intent.rationale,
-                intent=intent,
-                candidate=prepared.candidate,
-                static_analysis=prepared.static_analysis,
-                candidate_assessment=prepared.assessment,
-                candidate_source=source,
-            )
-            updated = replace(state, attempts=(*state.attempts[:-1], reviewed))
-            if intent.status == "approved":
-                frozen = ScenarioFreezeFactory().freeze(
-                    ScenarioFreezeRequest(_approved_draft(prepared), intent, self.adapter_catalog, request.development_base_revision)
-                )
-                updated = replace(updated, approved_microcycle=frozen, status=ScenarioDraftStatus.APPROVED.value)
-            self.state_store.save(updated)
-            return ScenarioDraftOutcome(updated, False)
         except (SyntaxError, ValueError) as error:
-            invalid = replace(
-                attempt,
-                status="candidate_invalid",
-                feedback=str(error),
-                candidate_source=source,
-            )
-            updated = replace(state, attempts=(*state.attempts[:-1], invalid))
+            outcome = _candidate_failure(ScenarioCandidateFailureRequest(state, attempt, source, str(error)))
+            self.state_store.save(outcome.state)
+            return outcome
+        if not prepared.assessment.accepted:
+            outcome = _candidate_failure(ScenarioCandidateFailureRequest(state, attempt, source, prepared.assessment.repair_feedback(), prepared))
+            self.state_store.save(outcome.state)
+            return outcome
+        pending = replace(
+            attempt,
+            status="intent_review_pending",
+            candidate=prepared.candidate,
+            static_analysis=prepared.static_analysis,
+            candidate_assessment=prepared.assessment,
+            candidate_source=source,
+        )
+        self.state_store.save(replace(state, attempts=(*state.attempts[:-1], pending)))
+        intent_outcome = await self.intent_reviewer.review(
+            _review_request(_approved_draft(prepared), request, self.adapter_catalog, _approved_analysis(prepared))
+        )
+        reviewed = replace(
+            pending,
+            status=_intent_attempt_status(intent_outcome.status),
+            feedback=_intent_feedback(intent_outcome),
+            intent=intent_outcome.result,
+            candidate=prepared.candidate,
+            static_analysis=prepared.static_analysis,
+            candidate_assessment=prepared.assessment,
+            candidate_source=source,
+            intent_review_status=intent_outcome.status.value,
+            intent_review_response_attempts=intent_outcome.response_attempts,
+            intent_protocol_failure=intent_outcome.protocol_failure,
+            intent_review_evidence_refs=intent_outcome.reasoning_evidence_refs,
+        )
+        if intent_outcome.status == ScenarioIntentReviewStatus.PROTOCOL_FAILURE:
+            updated = replace(state, attempts=(*state.attempts[:-1], reviewed), status=ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value)
             self.state_store.save(updated)
             return ScenarioDraftOutcome(updated, False)
+        if intent_outcome.result is None:
+            raise RuntimeError("semantic intent outcome requires a result")
+        updated = replace(state, attempts=(*state.attempts[:-1], reviewed))
+        if intent_outcome.status != ScenarioIntentReviewStatus.APPROVED:
+            self.state_store.save(updated)
+            return ScenarioDraftOutcome(updated, False)
+        try:
+            frozen = ScenarioFreezeFactory().freeze(
+                ScenarioFreezeRequest(_approved_draft(prepared), intent_outcome.result, self.adapter_catalog, request.development_base_revision)
+            )
+        except (SyntaxError, ValueError) as error:
+            failed = replace(reviewed, status="scenario_harness_failure", feedback=str(error))
+            blocked = replace(state, attempts=(*state.attempts[:-1], failed), status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value)
+            self.state_store.save(blocked)
+            return ScenarioDraftOutcome(blocked, False)
+        approved = replace(updated, approved_microcycle=frozen, status=ScenarioDraftStatus.APPROVED.value)
+        self.state_store.save(approved)
+        return ScenarioDraftOutcome(approved, False)
 
     def _record_submission(self, record: ScenarioDraftExecutionRecord) -> ScenarioDraftOutcome:
         state = record.state
@@ -390,6 +373,55 @@ class ScenarioDraftingService:
             unchanged_evidence=unchanged,
         )
         return _append_attempt(state, rejected)
+
+
+@dataclass(frozen=True)
+class ScenarioDraftCompatibilityLoop:
+    service: ScenarioDraftingService
+
+    async def draft(
+        self,
+        request: ScenarioDraftRequest,
+        binding: RepositoryBinding,
+    ) -> ScenarioDraftOutcome:
+        for _ in range(MAX_TESTER_SCENARIO_ATTEMPTS * 2):
+            state = self.service.state_store.load(request.scenario_id)
+            if state is not None and (state.approved_microcycle is not None or _is_terminal_draft_state(state)):
+                return ScenarioDraftOutcome(state, False)
+            if state is not None and state.attempts and state.attempts[-1].status in {"candidate_submitted", "intent_review_pending"}:
+                outcome = await self.service.review_intent(request)
+            else:
+                outcome = await self.service.submit_candidate(request, binding)
+            if outcome.approved or _is_terminal_draft_state(outcome.state) or _requires_external_repair(outcome.state):
+                return outcome
+        raise RuntimeError("scenario draft compatibility transition guard exhausted")
+
+
+def _is_terminal_draft_state(state: ScenarioDraftRunState) -> bool:
+    return state.status in {
+        ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value,
+        ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value,
+        ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
+    }
+
+
+def _requires_external_repair(state: ScenarioDraftRunState) -> bool:
+    return bool(state.attempts and state.attempts[-1].status != "candidate_submitted")
+
+
+def _candidate_failure(request: ScenarioCandidateFailureRequest) -> ScenarioDraftOutcome:
+    prepared = request.prepared
+    invalid = replace(
+        request.attempt,
+        status="candidate_invalid",
+        feedback=request.feedback,
+        candidate=None if prepared is None else prepared.candidate,
+        static_analysis=None if prepared is None else prepared.static_analysis,
+        candidate_assessment=None if prepared is None else prepared.assessment,
+        candidate_source=request.source,
+    )
+    updated = replace(request.state, attempts=(*request.state.attempts[:-1], invalid))
+    return ScenarioDraftOutcome(updated, False)
 
 
 def _initial_state(request: ScenarioDraftRequest) -> ScenarioDraftRunState:
@@ -573,6 +605,18 @@ def _intent_result(scenario_id: str, text: str) -> ScenarioIntentResult:
     if not isinstance(disposition, str) or not isinstance(rationale, str) or not isinstance(evidence, list):
         raise ValueError("scenario intent review must include disposition, feedback, and evidence_refs")
     return ScenarioIntentResult(scenario_id, disposition, rationale, tuple(str(item) for item in evidence))
+
+
+def _intent_attempt_status(status: ScenarioIntentReviewStatus) -> str:
+    return "intent_review_protocol_failure" if status == ScenarioIntentReviewStatus.PROTOCOL_FAILURE else status.value
+
+
+def _intent_feedback(outcome: ScenarioIntentReviewOutcome) -> str:
+    result = outcome.result
+    if result is not None:
+        return result.rationale
+    failure = outcome.protocol_failure
+    return "intent review protocol failure" if failure is None else failure.parse_error or failure.schema_error or "intent review protocol failure"
 
 
 def _approved_draft(prepared: ScenarioCandidatePreparation) -> TestScenarioDraft:

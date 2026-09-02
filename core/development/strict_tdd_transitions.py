@@ -43,6 +43,8 @@ class ScenarioTransitionKind(str, Enum):
     DRAFT_CANDIDATE_SUBMITTED = "scenario_draft_candidate_submitted"
     INTENT_APPROVED = "scenario_intent_approved"
     INTENT_REPAIR_REQUIRED = "scenario_intent_repair_required"
+    INTENT_PROTOCOL_FAILURE = "scenario_intent_protocol_failure"
+    SCENARIO_HARNESS_FAILURE = "scenario_harness_failure"
     REVISION_INITIALISED = "revision_initialised"
     MICROCYCLE_ADVANCED = "microcycle_advanced"
     PROJECT_SYNCHRONISED = "project_synchronised"

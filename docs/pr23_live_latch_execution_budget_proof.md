@@ -70,3 +70,20 @@ Durations are Rack AI workspace creation to packet modification time. Every pack
 - The 700-second historical bound is `EXTERNAL_PROOF_TIMEOUT`, not local-coder exhaustion.
 - `JCODE_PROGRESS_SIGNAL_AVAILABLE = NO`; no idle watchdog was implemented.
 - Rack AI source/configuration was not changed, ReservationBook was not started, and no merge occurred.
+
+
+## Historical classification correction: intent-review boundary
+
+The statement above that this run was fair local-coder candidate failure is withdrawn
+for attempt three onward. Subsequent forensic review found that attempt three passed
+the structural candidate gate and reached intent review. Its malformed reviewer output
+was incorrectly converted into `candidate_invalid`; attempt four was consequently a
+spurious Tester repair. The original record remains intact for traceability.
+
+- `LOCAL_CODER_CAPABILITY_EXHAUSTED_FAIRLY = NO`
+- `INTENT_REVIEW_PROTOCOL_FAILURE_MISROUTED = YES`
+- `ATTEMPT_4_WAS_SPURIOUS_TESTER_REPAIR = YES`
+- `HISTORICAL_PROOF_CONTAMINATED = YES`
+
+See `docs/pr23_latch_intent_protocol_forensics.md` for the durable evidence and
+its explicit raw-response retention limitation.

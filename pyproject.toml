@@ -65,6 +65,7 @@ files = [
   "core/development/strict_tdd_feature_application_advance.py",
   "core/development/strict_microcycle.py",
   "core/development/behavior_repair.py",
+  "core/development/scenario_intent_review.py",
   "core/development/scenario_drafting.py",
 ]
 check_untyped_defs = true

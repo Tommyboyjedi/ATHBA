@@ -726,3 +726,53 @@ async def test_timeout_without_candidate_lineage_ends_bounded_draft_route():
     assert timed_out.state.attempts[-1].status == "candidate_rejected"
     assert timed_out.state.attempts[-1].candidate_revision is None
     assert terminal.state.status == ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
+
+@pytest.mark.asyncio
+async def test_intent_protocol_failure_preserves_structurally_accepted_candidate_without_tester_retry():
+    source = plain_catalog_candidate()
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "z" * 40, "draft-1")],
+        ["not json", "still not json"], {"z" * 40: source},
+    )
+    outcome = await service.draft(request("catalog"), binding())
+    resumed = await service.draft(request("catalog"), binding())
+    attempt = outcome.state.attempts[0]
+    assert outcome.state.status == ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value
+    assert attempt.status == "intent_review_protocol_failure"
+    assert attempt.candidate_assessment is not None and attempt.candidate_assessment.accepted
+    assert attempt.candidate_source == source
+    assert attempt.intent_protocol_failure is not None
+    assert attempt.intent_review_response_attempts == 2
+    assert len(gateway.calls) == 1 and len(reasoning.requests) == 2
+    assert resumed.state == outcome.state
+
+
+@pytest.mark.asyncio
+async def test_one_bounded_json_fence_is_accepted_for_intent_review():
+    value, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "w" * 40, "draft-1")],
+        ["```json" + chr(10) + approval("SRC-CATALOG") + chr(10) + "```"],
+        {"w" * 40: plain_catalog_candidate()},
+    )
+    outcome = await value.draft(request("catalog"), binding())
+    assert outcome.approved
+    assert len(gateway.calls) == 1 and len(reasoning.requests) == 1
+    assert outcome.state.attempts[0].intent_review_response_attempts == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [
+    json.dumps({"disposition": "unexpected", "feedback": "detail", "evidence_refs": ["SRC-CATALOG"]}),
+    json.dumps({"disposition": "approved", "feedback": "", "evidence_refs": ["SRC-CATALOG"]}),
+])
+async def test_invalid_intent_schema_is_a_typed_protocol_failure(invalid):
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "x" * 40, "draft-1")],
+        [invalid, invalid], {"x" * 40: plain_catalog_candidate()},
+    )
+    outcome = await service.draft(request("catalog"), binding())
+    assert outcome.state.status == ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value
+    assert outcome.state.attempts[0].candidate_assessment is not None
+    assert outcome.state.attempts[0].candidate_assessment.accepted
+    assert outcome.state.attempts[0].intent_protocol_failure is not None
+    assert len(gateway.calls) == 1 and len(reasoning.requests) == 2
