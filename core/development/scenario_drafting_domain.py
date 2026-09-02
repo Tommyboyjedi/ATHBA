@@ -230,6 +230,8 @@ class ScenarioDraftAttempt:
     repair_base_sha: str | None = None
     repair_mode: str = "fresh_draft"
     selected_worker_id: str | None = None
+    work_kind: str | None = None
+    timeout_seconds: int | None = None
     worker_provenance: WorkerExecutionProvenance | None = None
     unchanged_evidence: ScenarioCandidateUnchangedEvidence | None = None
 
@@ -240,6 +242,10 @@ class ScenarioDraftAttempt:
             raise ValueError("scenario draft attempt fields must be non-empty")
         if self.feedback is not None and not self.feedback.strip():
             raise ValueError("scenario draft feedback must be non-empty when supplied")
+        if self.timeout_seconds is not None and (
+            type(self.timeout_seconds) is not int or self.timeout_seconds <= 0
+        ):
+            raise ValueError("scenario attempt timeout must be positive integer seconds")
         if self.candidate_source is not None and len(self.candidate_source) > MAX_SCENARIO_CANDIDATE_SOURCE_CHARACTERS:
             raise ValueError("candidate source exceeds the scenario test-file limit")
 
@@ -280,6 +286,8 @@ class ScenarioDraftAttempt:
             repair_base_sha=value.get("repair_base_sha"),
             repair_mode=str(value.get("repair_mode", "fresh_draft")),
             selected_worker_id=value.get("selected_worker_id"),
+            work_kind=value.get("work_kind"),
+            timeout_seconds=value.get("timeout_seconds"),
             worker_provenance=None if worker_provenance is None else WorkerExecutionProvenance(**dict(worker_provenance)),
             unchanged_evidence=None if unchanged_evidence is None else ScenarioCandidateUnchangedEvidence.from_dict(dict(unchanged_evidence)),
             static_analysis=None if static_analysis is None else ScenarioStaticAnalysis(

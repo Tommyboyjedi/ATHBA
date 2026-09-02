@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -29,6 +29,10 @@ from core.development.microcycle_domain import (
     MaterialisedTestArtifact,
     MicrocycleState,
     RegressionState,
+)
+from core.development.strict_tdd_execution_budget import (
+    StrictTddExecutionBudgetPolicy,
+    StrictTddWorkKind,
 )
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -85,8 +89,13 @@ class BehaviorRepairWorkUnitRequest:
     attempt_number: int
 
 
+@dataclass(frozen=True)
 class BehaviorRepairWorkUnitFactory:
     """Creates a production-only packet for one completed canonical scenario."""
+
+    budget_policy: StrictTddExecutionBudgetPolicy = field(
+        default_factory=StrictTddExecutionBudgetPolicy
+    )
 
     def build(self, request: BehaviorRepairWorkUnitRequest) -> DevelopmentWorkUnit:
         identifier = f"{request.artifact.scenario_id}--behavior-repair-{request.attempt_number}"
@@ -120,6 +129,10 @@ class BehaviorRepairWorkUnitFactory:
                 required_artifacts=[request.production_path],
             ),
             max_implementation_attempts=1,
+            timeout_seconds=self.budget_policy.timeout_for(
+                StrictTddWorkKind.BEHAVIOR_REPAIR
+            ),
+            work_kind=StrictTddWorkKind.BEHAVIOR_REPAIR,
             change_key=identifier,
             status=WorkUnitStatus.READY,
         )

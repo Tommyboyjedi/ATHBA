@@ -6,7 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -42,6 +42,10 @@ from core.development.microcycle_domain import (
     RegressionState,
     ScenarioCompletion,
     ScenarioFrontier,
+)
+from core.development.strict_tdd_execution_budget import (
+    StrictTddExecutionBudgetPolicy,
+    StrictTddWorkKind,
 )
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -115,8 +119,13 @@ class DeveloperFrontierRequest:
     attempt_number: int
 
 
+@dataclass(frozen=True)
 class DeveloperFrontierWorkUnitFactory:
     """Creates a Developer packet containing only one accepted frontier."""
+
+    budget_policy: StrictTddExecutionBudgetPolicy = field(
+        default_factory=StrictTddExecutionBudgetPolicy
+    )
 
     def build(self, request: DeveloperFrontierRequest) -> DevelopmentWorkUnit:
         identifier = f"{request.artifact.scenario_id}--frontier-{request.artifact.frontier_index}--developer-{request.attempt_number}"
@@ -143,13 +152,22 @@ class DeveloperFrontierWorkUnitFactory:
                 required_artifacts=[request.production_path],
             ),
             max_implementation_attempts=1,
+            timeout_seconds=self.budget_policy.timeout_for(
+                StrictTddWorkKind.FRONTIER_DEVELOPER
+            ),
+            work_kind=StrictTddWorkKind.FRONTIER_DEVELOPER,
             change_key=identifier,
             status=WorkUnitStatus.READY,
         )
 
 
+@dataclass(frozen=True)
 class RegressionRepairWorkUnitFactory:
     """Limits Developer repair context to the current frontier and new regressions."""
+
+    budget_policy: StrictTddExecutionBudgetPolicy = field(
+        default_factory=StrictTddExecutionBudgetPolicy
+    )
 
     def build(self, request: DeveloperFrontierRequest, failing_nodes: tuple[str, ...]) -> DevelopmentWorkUnit:
         identifier = f"{request.artifact.scenario_id}--frontier-{request.artifact.frontier_index}--regression-repair-{request.attempt_number}"
@@ -170,6 +188,10 @@ class RegressionRepairWorkUnitFactory:
             allowed_paths=[request.production_path],
             acceptance=AcceptanceContract(commands, required_artifacts=[request.production_path]),
             max_implementation_attempts=1,
+            timeout_seconds=self.budget_policy.timeout_for(
+                StrictTddWorkKind.REGRESSION_REPAIR
+            ),
+            work_kind=StrictTddWorkKind.REGRESSION_REPAIR,
             change_key=identifier,
             status=WorkUnitStatus.READY,
         )

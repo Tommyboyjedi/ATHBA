@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from core.development.strict_tdd_execution_budget import StrictTddWorkKind
+
 
 SUPPORTED_CAPABILITIES = {"implementation"}
 SUPPORTED_COMPLEXITIES = {"small", "medium", "large"}
@@ -53,6 +55,7 @@ class DevelopmentWorkUnit:
     requires_large_context: bool = False
     max_implementation_attempts: int = 2
     timeout_seconds: int = 900
+    work_kind: StrictTddWorkKind = StrictTddWorkKind.GENERIC
     network: str = "disabled"
     change_key: str | None = None
     status: WorkUnitStatus = WorkUnitStatus.PLANNED
@@ -80,8 +83,10 @@ class DevelopmentWorkUnit:
             raise ValueError(f"unsupported work unit network policy: {self.network}")
         if self.max_implementation_attempts <= 0:
             raise ValueError("max implementation attempts must be positive")
-        if self.timeout_seconds <= 0:
+        if type(self.timeout_seconds) is not int or self.timeout_seconds <= 0:
             raise ValueError("timeout seconds must be positive")
+        if not isinstance(self.work_kind, StrictTddWorkKind):
+            raise ValueError("work kind must be a StrictTddWorkKind")
         if self.change_key is not None:
             _require_text(self.change_key, "work unit change key")
 

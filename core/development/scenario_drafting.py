@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 import subprocess
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -38,6 +38,10 @@ from core.development.scenario_drafting_domain import (
     ScenarioDraftRequest,
     ScenarioDraftRunState,
     ScenarioDraftStatus,
+)
+from core.development.strict_tdd_execution_budget import (
+    StrictTddExecutionBudgetPolicy,
+    StrictTddWorkKind,
 )
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -91,10 +95,18 @@ class ScenarioDraftExecutionRecord:
 @dataclass(frozen=True)
 class ScenarioDraftWorkUnitFactory:
     python_executable: str = "python3"
+    budget_policy: StrictTddExecutionBudgetPolicy = field(
+        default_factory=StrictTddExecutionBudgetPolicy
+    )
 
     def build(self, request: ScenarioDraftWorkUnitRequest) -> DevelopmentWorkUnit:
         draft = request.request
         work_unit_id = f"{draft.ticket.step_id}--scenario-draft-{request.attempt_number}"
+        work_kind = (
+            StrictTddWorkKind.SCENARIO_REPAIR
+            if request.repair_attempt is not None
+            else StrictTddWorkKind.SCENARIO_DRAFT
+        )
         return DevelopmentWorkUnit(
             id=work_unit_id,
             project_id=draft.ticket.step_id,
@@ -106,6 +118,8 @@ class ScenarioDraftWorkUnitFactory:
                 required_artifacts=[draft.allowed_test_path],
             ),
             max_implementation_attempts=1,
+            timeout_seconds=self.budget_policy.timeout_for(work_kind),
+            work_kind=work_kind,
             change_key=f"{work_unit_id}--attempt-{request.attempt_number}",
             status=WorkUnitStatus.READY,
         )
@@ -421,6 +435,9 @@ def _attempt(
         repair_parent_attempt=None if unit.id.endswith("-1") else int(unit.id.rsplit("-", 1)[1]) - 1,
         repair_mode="fresh_draft" if unit.id.endswith("-1") else "repair_previous_candidate",
         selected_worker_id=result.selected_worker_id,
+        work_kind=unit.work_kind.value,
+        timeout_seconds=unit.timeout_seconds,
+        worker_provenance=result.worker_provenance,
     )
 
 
