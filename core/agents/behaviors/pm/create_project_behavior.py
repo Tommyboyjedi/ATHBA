@@ -1,6 +1,6 @@
 import uuid
 
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.agents.pm_agent import PmAgent
 from core.controllers.project_controller import ProjectsController
 from core.dataclasses.agent_message import AgentMessage
@@ -8,10 +8,14 @@ from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 
 
-class CreateProjectBehavior(AgentBehavior):
+class CreateProjectBehavior:
     intent = ["create_project", "create_new_project", "initiate_project", "project_creation"]
 
-    async def run(self, agent: PmAgent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage]:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage]:
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent in self.intent:
             await agent.log("Creating new project context for session.")
             project_name = llm_response.entities.get("project_name")

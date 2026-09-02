@@ -3,7 +3,7 @@ Tests for ticket-related API endpoints.
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 @pytest.mark.asyncio
@@ -52,14 +52,14 @@ async def test_ticket_repo_list_all(sample_ticket):
                 "project_id": "test_project_456",
                 "title": "Test Ticket",
                 "description": "Test description",
-                "due": datetime.utcnow(),
+                "due": datetime.now(UTC),
                 "eta": "1 week",
                 "agents": [],
                 "label": "Feature",
                 "severity": "Medium",
                 "column": "Backlog",
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
                 "history": []
             }
         ]
@@ -118,14 +118,14 @@ async def test_ticket_repo_get_backlog_tickets(sample_ticket):
                 "project_id": "test_project_456",
                 "title": "Backlog Ticket",
                 "description": "In backlog",
-                "due": datetime.utcnow(),
+                "due": datetime.now(UTC),
                 "eta": "1 week",
                 "agents": [],
                 "label": "Feature",
                 "severity": "Medium",
                 "column": "Backlog",
-                "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
                 "history": []
             }
         ]

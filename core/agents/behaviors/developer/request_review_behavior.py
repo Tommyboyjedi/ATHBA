@@ -4,14 +4,14 @@ Request Review Behavior for Developer Agent.
 This behavior requests code review from the Tester agent.
 """
 
-from datetime import datetime
-from core.agents.interfaces import AgentBehavior
+from datetime import UTC, datetime
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from core.dataclasses.history_entry import HistoryEntry
 
 
-class RequestReviewBehavior(AgentBehavior):
+class RequestReviewBehavior:
     """
     Behavior for requesting code review from Tester.
     
@@ -24,7 +24,7 @@ class RequestReviewBehavior(AgentBehavior):
     
     intent = ["request_review"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the request review behavior.
         
@@ -36,6 +36,10 @@ class RequestReviewBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
@@ -87,7 +91,7 @@ class RequestReviewBehavior(AgentBehavior):
             "column": "Review",
             "agents": [agent.name, "Tester"],  # Add Tester to agents list
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="review_requested",
                 actor=agent.name,
                 details=f"Code review requested from Tester agent"

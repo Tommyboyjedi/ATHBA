@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 
 from core.dataclasses.projses import Projses
@@ -17,5 +17,5 @@ class AgentMessage:
         return {
             "sender": self.sender,
             "text": self.text,
-            "timestamp": self.timestamp or datetime.utcnow().isoformat(),
+            "timestamp": self.timestamp or datetime.now(UTC).isoformat(),
         }

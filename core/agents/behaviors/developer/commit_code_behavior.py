@@ -4,14 +4,14 @@ Commit Code Behavior for Developer Agent.
 This behavior commits generated code to the Git branch.
 """
 
-from datetime import datetime
-from core.agents.interfaces import AgentBehavior
+from datetime import UTC, datetime
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from core.dataclasses.history_entry import HistoryEntry
 
 
-class CommitCodeBehavior(AgentBehavior):
+class CommitCodeBehavior:
     """
     Behavior for committing code to Git with Uncle Bob's Law #1 enforcement.
     
@@ -28,7 +28,7 @@ class CommitCodeBehavior(AgentBehavior):
     
     intent = ["commit_code"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the commit code behavior.
         
@@ -40,6 +40,10 @@ class CommitCodeBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
@@ -116,7 +120,7 @@ class CommitCodeBehavior(AgentBehavior):
         updates = {
             "commits": commits,
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="code_committed",
                 actor=agent.name,
                 details=f"Committed code: {result['commit_sha'][:7]} - {commit_message}"

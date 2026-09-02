@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, List, Optional
 
 from bson import ObjectId
@@ -69,7 +69,7 @@ class TicketRepo:
         return await self.get(ticket_id)
 
     async def create(self, ticket: TicketModel) -> TicketModel:
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         data = self._to_document(ticket)
         data["created_at"] = now
         data["updated_at"] = now
@@ -93,7 +93,7 @@ class TicketRepo:
 
         document.pop("_id", None)
         document.pop("id", None)
-        document["updated_at"] = datetime.utcnow()
+        document["updated_at"] = datetime.now(UTC)
         result = await self.col.update_one(
             self._id_filter(ticket_id),
             {"$set": document},
@@ -139,7 +139,7 @@ class TicketRepo:
     async def assign_ticket(self, ticket_id: str, agents: list[str]) -> bool:
         result = await self.col.update_one(
             self._id_filter(ticket_id),
-            {"$set": {"agents": agents, "column": "To Do", "updated_at": datetime.utcnow()}},
+            {"$set": {"agents": agents, "column": "To Do", "updated_at": datetime.now(UTC)}},
         )
         return result.modified_count == 1
 

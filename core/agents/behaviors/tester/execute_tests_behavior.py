@@ -4,14 +4,15 @@ Execute Tests Behavior for Tester Agent.
 This behavior executes tests using pytest and captures results.
 """
 
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
-from datetime import datetime
+from datetime import UTC, datetime
 from core.dataclasses.history_entry import HistoryEntry
+from core.services.service_requests import TestRunRequest
 
 
-class ExecuteTestsBehavior(AgentBehavior):
+class ExecuteTestsBehavior:
     """
     Behavior for executing tests with pytest.
     
@@ -24,7 +25,7 @@ class ExecuteTestsBehavior(AgentBehavior):
     
     intent = ["execute_tests", "run_tests", "test", "pytest"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the execute tests behavior.
         
@@ -36,6 +37,10 @@ class ExecuteTestsBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
@@ -80,9 +85,11 @@ class ExecuteTestsBehavior(AgentBehavior):
         
         # Execute tests
         results = await agent.test_service.run_tests(
-            agent.project.id,
-            test_files=test_files,
-            verbose=True
+            TestRunRequest(
+                project_id=agent.project.id,
+                test_files=test_files,
+                verbose=True,
+            )
         )
         
         # Update ticket with results
@@ -92,13 +99,13 @@ class ExecuteTestsBehavior(AgentBehavior):
         # Add history entry
         status_emoji = "✅" if results["status"] == "success" else "❌" if results["status"] == "failure" else "⚠️"
         ticket.history.append(HistoryEntry(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             agent="Tester",
             action="execute_tests",
             details=f"{status_emoji} Tests executed: {results['passed']}/{results['total']} passed ({results['pass_rate']*100:.1f}%)"
         ))
         
-        ticket.updated_at = datetime.utcnow()
+        ticket.updated_at = datetime.now(UTC)
         await agent.ticket_repo.update(ticket)
         
         # Format response based on results

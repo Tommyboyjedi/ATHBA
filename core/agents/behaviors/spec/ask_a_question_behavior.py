@@ -1,15 +1,12 @@
-from core.agents.interfaces import AgentBehavior
-from core.agents.spec_agent import SpecBuilderAgent
-from core.dataclasses.agent_message import AgentMessage
-from core.dataclasses.llm_intent import LlmIntent
+from core.agents.interfaces import BehaviorExecution
+from core.dataclasses.chat_message import ChatMessage
 
 
-class AskAQuestionBehavior(AgentBehavior):
+class AskAQuestionBehavior:
     intent = ["ask_a_question", "query", "ask", "inquire", "question", "interrogate", "probe", "request_info"]
 
-    async def run(self, agent: SpecBuilderAgent, user_input: str, llm_response: LlmIntent) -> AgentMessage | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
+        llm_response = execution.intent
         if llm_response.intent not in self.intent:
-            return AgentMessage(
-                sender=agent.name,
-                text=llm_response.response,
-            )
+            return None
+        return [ChatMessage(sender=execution.agent.name, content=llm_response.response)]
