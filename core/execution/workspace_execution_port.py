@@ -8,10 +8,13 @@ from core.execution.rack_ai_request import RepositoryBinding
 
 class WorkspaceExecutionStatus(str, Enum):
     ACCEPTED = "accepted"
+    REJECTED = "rejected"
     NO_CANDIDATE = "no_candidate"
     TIMEOUT = "timeout"
     BACKEND_UNAVAILABLE = "backend_unavailable"
     CAPABILITY_UNAVAILABLE = "capability_unavailable"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
+    DUPLICATE_SUBMISSION = "duplicate_submission"
     MALFORMED_RESULT = "malformed_result"
     SELECTION_EXECUTION_MISMATCH = "selection_execution_mismatch"
     CANCELLED = "cancelled"
@@ -39,13 +42,19 @@ class WorkspaceExecutionRequest:
         if not isinstance(self.network_policy, str) or not self.network_policy.strip():
             raise ValueError("workspace network policy must be non-empty")
 
-    def to_wire(self) -> dict[str, object]:
-        return {"contract_version": "athba-workspace-execution/v1", "source_system": "athba", "work_id": self.identity.work_id, "submission_id": self.identity.submission_id, "idempotency_key": self.identity.idempotency_key, "capabilities": sorted(item.value for item in self.profile.required_capabilities), "complexity": self.profile.complexity.value, "requires_large_context": self.profile.requires_large_context, "priority": self.profile.priority.value, "timeout_seconds": self.profile.timeout_seconds, "repository": self.repository.to_dict(), "allowed_writable_paths": list(self.allowed_writable_paths), "environment_resources": list(self.repository.environment_resources), "network_policy": self.network_policy, "acceptance_commands": [list(item) for item in self.acceptance_commands], "required_artifacts": list(self.required_artifacts), "objective": self.objective, "evidence_refs": list(self.evidence_refs)}
 
 @dataclass(frozen=True)
 class WorkspaceExecutionResult:
     identity: AthbaWorkspaceIdentity
     status: WorkspaceExecutionStatus
+    candidate_revision: str | None = None
+    branch: str | None = None
+    worktree_ref: str | None = None
+    changed_paths: tuple[str, ...] = ()
+    acceptance_verdict: str | None = None
+    generic_failure: str | None = None
+    selection_decision: dict[str, object] | None = None
+    execution_provenance: dict[str, object] | None = None
     accepted_revision: str | None = None
     evidence_refs: tuple[str, ...] = ()
     error: str | None = None
@@ -56,7 +65,7 @@ class WorkspaceExecutionResult:
         return self.status in {WorkspaceExecutionStatus.NO_CANDIDATE, WorkspaceExecutionStatus.TIMEOUT}
 
     def is_external_blocker(self) -> bool:
-        return self.status in {WorkspaceExecutionStatus.BACKEND_UNAVAILABLE, WorkspaceExecutionStatus.CAPABILITY_UNAVAILABLE, WorkspaceExecutionStatus.MALFORMED_RESULT, WorkspaceExecutionStatus.SELECTION_EXECUTION_MISMATCH}
+        return self.status in {WorkspaceExecutionStatus.BACKEND_UNAVAILABLE, WorkspaceExecutionStatus.CAPABILITY_UNAVAILABLE, WorkspaceExecutionStatus.TEMPORARILY_UNAVAILABLE, WorkspaceExecutionStatus.MALFORMED_RESULT, WorkspaceExecutionStatus.SELECTION_EXECUTION_MISMATCH}
 
 class AiWorkspaceExecutionPort(Protocol):
     """Replaceable port for one generic bounded workspace-change operation."""

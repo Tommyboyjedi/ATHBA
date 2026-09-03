@@ -65,11 +65,8 @@ def test_athba_priority_has_only_low_and_medium():
         AthbaOutboundPriority("paramount")
 
 
-def test_request_wire_has_no_athba_stage_or_concrete_resource_identity():
-    wire = request().to_wire()
-    assert "work_kind" not in wire
-    assert not {"worker_id", "model_id", "gpu_id", "jcode_profile"} & set(wire)
-    assert wire["capabilities"] == ["coding"]
+def test_request_does_not_embed_rack_ai_wire_details():
+    assert not hasattr(request(), "to_wire")
 
 
 def test_fake_replays_same_submission_idempotently():
@@ -127,6 +124,13 @@ def test_tier_policy_does_not_consume_attempt_for_external_blocker_or_duplicate(
 def test_connector_fails_closed_on_selection_execution_mismatch():
     class Transport:
         def submit(self, payload):
-            return {"submission_id": payload["submission_id"], "status": "accepted", "selected_worker_id": "selected", "executed_worker_id": "other"}
+            routing = payload["work_unit"]["routing"]
+            return {
+                "submission_id": routing["submission_id"],
+                "status": "checks_passed",
+                "acceptance_verdict": "approved",
+                "selection_decision": {"submission_id": routing["submission_id"], "selected_worker_id": "selected"},
+                "worker_provenance": {"worker_id": "other"},
+            }
     result = RackAiWorkspaceConnector(Transport()).submit_workspace_change(request())
     assert result.status == WorkspaceExecutionStatus.SELECTION_EXECUTION_MISMATCH

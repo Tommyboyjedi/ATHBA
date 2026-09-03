@@ -24,7 +24,15 @@ class DeterministicFakeWorkspacePort:
         if prior is not None:
             return prior
         outcome = self.outcomes.pop(0) if self.outcomes else FakeWorkspaceOutcome(WorkspaceExecutionStatus.NO_CANDIDATE)
-        result = WorkspaceExecutionResult(request.identity, outcome.status, outcome.accepted_revision, outcome.evidence_refs, outcome.error, outcome.selected_worker_id, outcome.executed_worker_id)
+        result = WorkspaceExecutionResult(
+            identity=request.identity,
+            status=outcome.status,
+            accepted_revision=outcome.accepted_revision,
+            evidence_refs=outcome.evidence_refs,
+            error=outcome.error,
+            selected_worker_id=outcome.selected_worker_id,
+            executed_worker_id=outcome.executed_worker_id,
+        )
         self.submitted.append(request)
         self._results[request.identity.submission_id] = result
         return result
