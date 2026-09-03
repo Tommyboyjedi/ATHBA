@@ -160,3 +160,20 @@ correction scopes `work_id` to the durable `scenario_id` (stable across attempts
 and derives a distinct attempt `submission_id`/idempotency key. The deterministic
 test proves same-scenario retries retain their work id while both retry and a
 different fresh project receive distinct submissions. This does not alter Rack AI,
+
+### Second fresh live attempt after both generic corrections
+
+Run/project `pr29-signal-board-20260903T133400Z` used ATHBA
+`8639c0247d8b79ac5b4566414b93658aeeabad22` and Rack AI
+`56d2c69f1e815acd12fca9065945c5e46de5a36a`. It created distinct scenario-scoped
+Rack submissions and completed REQ-001 through approved scenario, typed RED,
+accepted Developer candidates, GREEN, regression, canonical promotion, and
+scenario completion. The scenario's independent review rationale cites
+`SignalBoard.create`; the source-evidence transport operated on the exact source
+clause selected for the behavior.
+
+Immediately after REQ-001 completion, the real Senior behavior reviewer returned
+a response that was not valid JSON. The runner surfaced `invalid_input` and the
+durable run/feature state remains `running` at the persisted terminal transition;
+no REQ-002 scenario was created in this attempt. This is unambiguous real-model
+protocol failure evidence, not permission to retry, change prompts or grammar,
