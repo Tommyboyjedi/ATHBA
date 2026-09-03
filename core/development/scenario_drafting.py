@@ -45,6 +45,7 @@ from core.development.strict_tdd_execution_budget import (
     StrictTddExecutionBudgetPolicy,
     StrictTddWorkKind,
 )
+from core.development.athba_workspace_routing import AthbaModelWorkKind, AthbaWorkspaceIdentity
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.development.scenario_intent_review import (
@@ -127,6 +128,8 @@ class ScenarioDraftWorkUnitFactory:
             max_implementation_attempts=1,
             timeout_seconds=self.budget_policy.timeout_for(work_kind),
             work_kind=work_kind,
+            model_work_kind=(AthbaModelWorkKind.SCENARIO_REPAIR if request.repair_attempt is not None else AthbaModelWorkKind.COMPLETE_SCENARIO_AUTHORING),
+            workspace_identity=AthbaWorkspaceIdentity(f"{draft.ticket.step_id}--scenario-draft", work_unit_id, work_unit_id),
             change_key=f"{work_unit_id}--attempt-{request.attempt_number}",
             status=WorkUnitStatus.READY,
         )
