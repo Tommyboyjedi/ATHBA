@@ -111,6 +111,13 @@ def _intent_review_is_pending(state: ScenarioDraftRunState) -> bool:
     )
 
 
+def _source_requirement_evidence(request: FeatureScenarioRequest):
+    clauses = {item.ref: item for item in request.contract.source_clauses}
+    missing = [ref for ref in request.behavior.source_refs if ref not in clauses]
+    if missing:
+        raise ValueError("behavior source refs are absent from the behavior contract")
+    return tuple(clauses[ref] for ref in request.behavior.source_refs)
+
 async def _submit_draft(
     executor: StrictFeatureScenarioExecutor,
     request: FeatureScenarioRequest,
@@ -127,6 +134,7 @@ async def _submit_draft(
             ticket.test_path,
             _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
             request.canonical_development_base,
+            _source_requirement_evidence(request),
         ),
         request.project.binding().with_base_sha(request.canonical_development_base),
     )
@@ -156,6 +164,7 @@ async def _review_intent(
             ticket.test_path,
             _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
             request.canonical_development_base,
+            _source_requirement_evidence(request),
         )
     )
     status = outcome.state.status

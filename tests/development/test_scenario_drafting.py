@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from core.development.scenario_drafting_domain import (
 )
 from core.development.tdd_progression import TddStepProposal
 from core.execution.rack_ai_contract import RepositoryBinding
+from core.development.specification_domain import SourceRequirementClause
 from core.execution.reasoning_gateway import ReasoningResult
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
@@ -200,7 +202,32 @@ async def test_approved_catalog_scenario_is_frozen_from_isolated_candidate_witho
 
 
 @pytest.mark.asyncio
+async def test_author_and_intent_reviewer_receive_exact_source_requirement_evidence():
+    source_clause = SourceRequirementClause(
+        "SRC-CATALOG",
+        "catalog.add(name, payload) records payload exactly under name.",
+        "behavior",
+    )
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "b" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"b" * 40: candidate("catalog")},
+    )
+
+    outcome = await service.draft(
+        replace(request("catalog"), source_requirement_evidence=(source_clause,)),
+        binding(),
+    )
+
+    assert outcome.approved
+    author_payload = json.loads(gateway.calls[0][0].objective)
+    reviewer_payload = json.loads(reasoning.requests[0].prompt)
+    expected = [source_clause.to_dict()]
+    assert author_payload["source_requirements"] == expected
+    assert reviewer_payload["source_requirements"] == expected
+@pytest.mark.asyncio
 async def test_wrong_profile_behavior_is_rejected_with_descriptive_feedback_and_no_freeze():
+
     value, gateway, _reasoning, _reader = components(
         [accepted("profile-ticket--scenario-draft-1", "c" * 40, "draft-1")],
         [json.dumps({

@@ -102,3 +102,46 @@ No model invocation was made before this gate. No Rack AI source or configuratio
 - ATHBA failed closed at `unsupported_language_boundary` after the resulting RED evidence; this is model-originated semantic drift, not a trusted-root or routing defect.
 - A controlled terminal resume returned blocked (exit 2) without repeating submissions, frontiers, scenario attempts, or developer attempts.
 - No ATHBA or Rack AI source, Rack AI trust policy, JCode profile, strict grammar, or execution budget was changed.
+
+## REQ-002 semantic-drift forensics and generic correction
+
+The first divergence was a generic source-evidence propagation defect, not a
+second Tester reliability trial. The preserved feature contract is the
+authoritative record; the local-primary raw intent-review reply was intentionally
+ephemeral, while its decoded disposition, rationale, and symbolic evidence refs
+are durably retained in the scenario state.
+
+| Stage | Durable evidence | Finding |
+| --- | --- | --- |
+| Original requirement | Feature state `original_requirement` and `SignalBoard.Publish` clause | Exact lower-case `publish(name, payload)` is required; no additional behavior is permitted. |
+| Behavior planner hand-off | REQ-002 behavior plus the Rack AI scenario packets | The ticket reduced that clause to `Publish signal payload`, a generic outcome, and opaque `SignalBoard.Publish`; it did not carry the exact source text to either model. |
+| Gatekeeper | Gatekeeper checklist item `SignalBoard.publish` | It retained the exact lower-case API text, but that text was not forwarded through the scenario-draft boundary. |
+| Tester attempt 1 | Draft state, candidate `4bc009c121ba19659b7b4dcf9945aa0548c962db` | `insufficient_evidence`: it only constructed SignalBoard; its review feedback already referred to `Publish`. |
+| Tester attempt 2 | Draft state, candidate `2c80016a98db8bd94823c86147be36ddf6c066e8` | Structurally valid and intent `approved`, but calls `board.Publish("data", "key1")` and asserts undocumented `board.payloads["key1"]`. |
+| Intent review | Persisted approved disposition/rationale and request construction | The reviewer saw the same lossy ticket and opaque ref, not the exact source clause; approval therefore cannot establish correct source semantics. |
+| Scenario freeze | Approved draft state and immutable microcycle | Freeze occurred only after approval; no freeze-state transition occurred before review. |
+| Frontier and boundary | REQ-002 microcycle boundary evidence | `Publish` first yielded valid missing-capability RED. After a narrow developer change promoted `Publish(data, key)`, the invented `payloads` assertion yielded typed `unsupported_language_boundary`; that classifier behaved correctly. |
+
+The canonical fixture revision `d397d2e60743a4d822cfbd302d6dbe785d2e8046`
+contains the wrong `Publish(data, key)` production method. It was promoted before
+the terminal boundary, so this prior proof remains FAIL and is retained unchanged
+as failure evidence.
+
+### Correction
+
+`ScenarioDraftRequest` now transports ordered, typed `SourceRequirementClause`
+evidence selected by the behavior's source refs. Both `_tester_objective` and the
+independent `_intent_prompt` serialize that same evidence under
+`source_requirements`; the feature executor rejects a behavior whose source refs
+are absent from its contract. This is generic to any contract clause and does not
+special-case SignalBoard, `publish`, casing, payloads, or a model/provider.
+
+`test_author_and_intent_reviewer_receive_exact_source_requirement_evidence` is a
+neutral deterministic reproduction: it asserts exact source evidence reaches both
+the Tester and Reviewer payloads. It would fail on the prior implementation,
+which emitted only `source_requirement_refs`.
+
+Validation before publication: 46 focused tests passed; coding principles passed;
+mypy reported no issues in 29 source files; compileall passed; the complete suite
+passed (`526 passed`). Rack AI source/configuration, JCode tool profile, strict
+test grammar, execution budgets, and the preserved initial run were not changed.

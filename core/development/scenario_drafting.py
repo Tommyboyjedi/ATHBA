@@ -44,6 +44,7 @@ from core.development.scenario_drafting_domain import (
     ScenarioSubmissionMode,
     ScenarioSubmissionOutcome,
 )
+from core.development.specification_domain import SourceRequirementClause
 from core.development.strict_tdd_execution_budget import (
     StrictTddExecutionBudgetPolicy,
     StrictTddWorkKind,
@@ -177,6 +178,7 @@ class ScenarioIntentReviewRequest:
     behavior_summary: str
     expected_result: str
     source_requirement_refs: tuple[str, ...]
+    source_requirement_evidence: tuple[SourceRequirementClause, ...]
     complete_scenario_source: str
     static_fragment_kinds: tuple[str, ...]
     canonical_test_identity: str
@@ -652,6 +654,7 @@ def _review_request(
         behavior_summary=request.ticket.focused_behavior,
         expected_result=request.ticket.expected_result,
         source_requirement_refs=request.source_requirement_refs,
+        source_requirement_evidence=request.source_requirement_evidence,
         complete_scenario_source=draft.source,
         static_fragment_kinds=tuple(item.kind for item in fragments),
         canonical_test_identity=draft.canonical_test_identity,
@@ -724,6 +727,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "planned_canonical_test_identity": request.ticket.test_name,
         },
         "source_requirement_refs": list(request.source_requirement_refs),
+        "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
         "language": request.language_id,
         "test_framework": request.test_framework,
         "allowed_test_path": request.allowed_test_path,
@@ -840,6 +844,7 @@ def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:
             "expected_result": request.expected_result,
         },
         "source_requirement_refs": list(request.source_requirement_refs),
+        "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
         "complete_scenario_source": request.complete_scenario_source,
         "static_scenario_facts": {
             "canonical_test_identity": request.canonical_test_identity,

@@ -15,6 +15,7 @@ from core.development.microcycle_domain import (
     SourceSpan,
 )
 from core.development.tdd_progression import TddStepProposal
+from core.development.specification_domain import SourceRequirementClause
 from core.development.work_unit import WorkerExecutionProvenance
 
 MAX_TESTER_SCENARIO_ATTEMPTS = 4
@@ -276,6 +277,7 @@ class ScenarioDraftRequest:
     allowed_test_path: str
     repository_facts: ScenarioRepositoryFacts
     development_base_revision: str
+    source_requirement_evidence: tuple[SourceRequirementClause, ...] = ()
 
     def __post_init__(self) -> None:
         values = (
@@ -293,6 +295,10 @@ class ScenarioDraftRequest:
             raise ValueError("scenario draft path must match the behavior ticket")
         if self.repository_facts.trusted_revision != self.development_base_revision:
             raise ValueError("repository facts must match the development base")
+        if self.source_requirement_evidence:
+            evidence_refs = tuple(item.ref for item in self.source_requirement_evidence)
+            if evidence_refs != self.source_requirement_refs:
+                raise ValueError("source requirement evidence must match source requirement refs")
 
 
 @dataclass(frozen=True)
