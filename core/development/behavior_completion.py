@@ -6,6 +6,7 @@ from typing import Callable, Protocol
 
 from core.development.microcycle_domain import (
     BehaviorReplanState,
+    BehaviorReviewProtocolFailure,
     BehaviorReviewState,
     BehaviorReviewVerdict,
     MicrocycleState,
@@ -14,6 +15,7 @@ from core.development.microcycle_domain import (
 APPROVED = BehaviorReviewVerdict.APPROVED.value
 REPAIR_REQUIRED = BehaviorReviewVerdict.REPAIR_REQUIRED.value
 REPLAN_REQUIRED = BehaviorReviewVerdict.REPLAN_REQUIRED.value
+PROTOCOL_FAILURE = BehaviorReviewVerdict.PROTOCOL_FAILURE.value
 
 
 @dataclass(frozen=True)
@@ -54,7 +56,7 @@ class BehaviorCompletionCommand:
 
 
 class SeniorBehaviorReviewer(Protocol):
-    async def review(self, request: BehaviorReviewRequest) -> BehaviorReviewResult: ...
+    async def review(self, request: BehaviorReviewRequest) -> BehaviorReviewResult | BehaviorReviewProtocolFailure: ...
 
 
 @dataclass(frozen=True)
@@ -101,7 +103,10 @@ class BehaviorCompletionService:
         if review.verdict != BehaviorReviewVerdict.PENDING.value:
             return state
         result = await self.reviewer.review(self._request(command))
-        reviewed = replace(state, behavior_review=self._state_after_review(BehaviorReviewTransitionRequest(state, result, command.production_diff)))
+        if isinstance(result, BehaviorReviewProtocolFailure):
+            reviewed = replace(state, behavior_review=replace(state.behavior_review, verdict=PROTOCOL_FAILURE, attempts=state.behavior_review.attempts + 1, evidence_refs=result.evidence_refs, protocol_failure=result))
+        else:
+            reviewed = replace(state, behavior_review=self._state_after_review(BehaviorReviewTransitionRequest(state, result, command.production_diff)))
         self._persist(command, reviewed)
         return reviewed
 

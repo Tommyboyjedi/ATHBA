@@ -32,6 +32,7 @@ class BehaviorReviewVerdict(str, Enum):
     APPROVED = "approved"
     REPAIR_REQUIRED = "repair_required"
     REPLAN_REQUIRED = "replan_required"
+    PROTOCOL_FAILURE = "protocol_failure"
     ATTEMPTS_EXHAUSTED = "attempts_exhausted"
 
 
@@ -581,6 +582,24 @@ class BehaviorReplanState:
 
 
 @dataclass(frozen=True)
+class BehaviorReviewProtocolFailure:
+    purpose: str
+    response_attempts: int
+    first_response_digest: str | None
+    repair_response_digest: str | None
+    parse_error: str | None
+    schema_error: str | None
+    evidence_refs: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "BehaviorReviewProtocolFailure":
+        return cls(str(value["purpose"]), int(value["response_attempts"]), value.get("first_response_digest"), value.get("repair_response_digest"), value.get("parse_error"), value.get("schema_error"), tuple(value.get("evidence_refs", ())))
+
+
+@dataclass(frozen=True)
 class BehaviorReviewState:
     """Persistent decision and distinct bounded post-review repair progress."""
 
@@ -594,6 +613,7 @@ class BehaviorReviewState:
     repair: BehaviorRepairProgress = BehaviorRepairProgress()
     replan: BehaviorReplanState | None = None
     production_diff: str = ""
+    protocol_failure: BehaviorReviewProtocolFailure | None = None
 
     def __post_init__(self) -> None:
         if self.verdict not in {item.value for item in BehaviorReviewVerdict}:
@@ -608,6 +628,10 @@ class BehaviorReviewState:
             raise ValueError("behavior repair review requires descriptive findings")
         if self.verdict == BehaviorReviewVerdict.APPROVED.value and self.findings:
             raise ValueError("approved behavior review cannot retain repair findings")
+        if self.verdict == BehaviorReviewVerdict.PROTOCOL_FAILURE.value and self.protocol_failure is None:
+            raise ValueError("behavior review protocol failure requires evidence")
+        if self.verdict != BehaviorReviewVerdict.PROTOCOL_FAILURE.value and self.protocol_failure is not None:
+            raise ValueError("semantic behavior review cannot retain protocol failure")
         if self.reviewed_candidate_revision is not None:
             _text(self.reviewed_candidate_revision, "reviewed candidate revision")
         if self.next_behavior_ticket is not None:
@@ -625,12 +649,14 @@ class BehaviorReviewState:
             "repair": self.repair.to_dict(),
             "replan": asdict(self.replan) if self.replan is not None else None,
             "production_diff": self.production_diff,
+            "protocol_failure": self.protocol_failure.to_dict() if self.protocol_failure is not None else None,
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "BehaviorReviewState":
         repair = value.get("repair", {})
         replan = value.get("replan")
+        protocol_failure = value.get("protocol_failure")
         return cls(
             str(value.get("verdict", BehaviorReviewVerdict.PENDING.value)),
             int(value.get("attempts", 0)),
@@ -642,6 +668,7 @@ class BehaviorReviewState:
             BehaviorRepairProgress.from_dict(dict(repair)),
             BehaviorReplanState.from_dict(dict(replan)) if replan is not None else None,
             str(value.get("production_diff", "")),
+            BehaviorReviewProtocolFailure.from_dict(dict(protocol_failure)) if protocol_failure is not None else None,
         )
 
 

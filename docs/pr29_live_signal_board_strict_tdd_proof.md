@@ -177,3 +177,23 @@ a response that was not valid JSON. The runner surfaced `invalid_input` and the
 durable run/feature state remains `running` at the persisted terminal transition;
 no REQ-002 scenario was created in this attempt. This is unambiguous real-model
 protocol failure evidence, not permission to retry, change prompts or grammar,
+
+## Senior behavior-review structured protocol correction
+
+**Documented generic contract.** Model-backed structured semantic decisions must
+produce a valid typed decision or retain typed fail-closed protocol evidence.
+
+**Observed live violation.** REQ-001 reached the real Senior behavior reviewer,
+whose response was invalid JSON. `ProviderSeniorBehaviorReviewer` raised rather
+than retaining bounded protocol recovery and evidence.
+
+**Existing precedent.** `ScenarioIntentReviewer` permits one format-only repair
+response for malformed structured output.
+
+**Correction.** Senior review performs one semantic request and at most one
+JSON-format repair. Maximum semantic attempts: **1**. Maximum response attempts:
+**2**. A double-invalid response persists a typed protocol failure and leaves the
+behavior blocked. A restart does not automatically rereview it.
+
+Prompt semantic scope changed: **NO**. Strict grammar changed: **NO**. Execution
+budget changed: **NO**. Feature-specific accommodation: **NO**.
