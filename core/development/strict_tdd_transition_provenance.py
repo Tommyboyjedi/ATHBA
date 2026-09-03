@@ -211,6 +211,8 @@ _SCENARIO_EVENTS = {
     ScenarioTransitionKind.DRAFT_CANDIDATE_SUBMITTED: StrictTddLifecycleEventKind.SCENARIO_DRAFTING_COMPLETED,
     ScenarioTransitionKind.INTENT_APPROVED: StrictTddLifecycleEventKind.SCENARIO_INTENT_COMPLETED,
     ScenarioTransitionKind.INTENT_REPAIR_REQUIRED: StrictTddLifecycleEventKind.SCENARIO_INTENT_COMPLETED,
+    ScenarioTransitionKind.INTENT_PROTOCOL_FAILURE: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
+    ScenarioTransitionKind.SCENARIO_HARNESS_FAILURE: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
     ScenarioTransitionKind.REVISION_INITIALISED: StrictTddLifecycleEventKind.WORKING_REF_CREATED,
     ScenarioTransitionKind.MICROCYCLE_ADVANCED: StrictTddLifecycleEventKind.FRONTIER_MATERIALISED,
     ScenarioTransitionKind.PROJECT_SYNCHRONISED: StrictTddLifecycleEventKind.SCENARIO_COMPLETED,
