@@ -83,3 +83,22 @@ No model invocation was made before this gate. No Rack AI source or configuratio
   local-primary, local-coder, ATHBA semantic, or Rack AI routing defect.
 - The run was not retried or resumed. No source/configuration or test-grammar
   change was made to bypass the trusted-root policy.
+
+## Trusted dynamic root proof correction
+
+- Historical failed run/project: `pr29-signal-board-20260903T115600Z`.
+- Its repository was `/srv/ATHBA/state/pr29-signal-board-20260903T115600Z/projects/pr29-signal-board-20260903T115600Z/repository`; Rack AI correctly rejected it as outside trusted dynamic roots.
+- ATHBA derives project repositories from `state_root/projects`; the live Rack AI administrator policy already approves `/srv/ATHBA/state/projects`.
+- The corrected live composition used state root `/srv/ATHBA/state`, without changing Rack AI configuration or static registration.
+- New run/project: `pr29-signal-board-20260903T123300Z`.
+- Its repository is `/srv/ATHBA/state/projects/pr29-signal-board-20260903T123300Z/repository`; its resolved realpath is identical and remains beneath the approved root.
+- The project is ready, Git-initialized, and has trusted base revision `38d17b74dc41e733bdfaf346acabb868dc46d018`.
+
+## Corrected SignalBoard run evidence
+
+- Real behavior planning, independent Gatekeeper atomization, and Rack AI v2 scenario authoring crossed trust admission; scenario submissions selected and were executed by `local-primary` with matching provenance.
+- REQ-001 produced an approved scenario and one accepted narrow `local-coder` change; its canonical test was retained.
+- REQ-002's first scenario was rejected by independent intent review, and its second was structurally accepted but drifted to `SignalBoard.Publish` plus undocumented `payloads` behavior.
+- ATHBA failed closed at `unsupported_language_boundary` after the resulting RED evidence; this is model-originated semantic drift, not a trusted-root or routing defect.
+- A controlled terminal resume returned blocked (exit 2) without repeating submissions, frontiers, scenario attempts, or developer attempts.
+- No ATHBA or Rack AI source, Rack AI trust policy, JCode profile, strict grammar, or execution budget was changed.
