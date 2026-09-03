@@ -308,3 +308,15 @@ SIGNALBOARD_REPLAY_REVIEWS = 3; SIGNALBOARD_REPLAY_UNSAFE_APPROVALS = 3.
 The fixed threshold therefore yields QUALIFICATION_RESULT = NOT_QUALIFIED_FOR_SEMANTIC_INTENT_REVIEW.
 
 Current local-primary is not sufficiently reliable to be the sole independent semantic scenario gate. This qualification does not assess its suitability for planning, scenario drafting, coding, or other reasoning roles. No follow-up SignalBoard proof was launched, and no reviewer-model routing decision was made in this work.
+
+## Intent-review qualification interpretation correction
+
+The production Intent Reviewer asks whether a complete GREEN scenario demonstrates the requested Behavior Planner ticket. The historical SignalBoard `publish` plus `get` scenario had that broad storage-proof intent, so the earlier result does not establish that local-primary failed this narrower reviewer role. It instead measured an unsuitable stronger responsibility: strict product-surface and source-conformance authority. The retained evidence remains useful: local-primary must not be the sole authority for mechanically provable product-surface/specification conformance. That authority is now assigned to deterministic Behavior Contract static lint.
+
+## Behavior Contract static lint boundary
+
+ATHBA keeps the compiled product-surface descriptor private control-plane state. It is derived only from the Behavior Contract's component identity and explicit machine-usable `public_api` entries; it reads neither Gatekeeper payload/checklist data nor final reconciliation state. Tester receives its existing focused ticket and source evidence, and Developer receives only the active frontier. Neither objective, nor the Intent Reviewer prompt, serializes the complete declared product surface.
+
+Before Intent Review, Python AST validation tracks imports, declared production-class constructors, and supported instance aliases. It rejects direct private-state inspection and undeclared public product members, while not treating value/library calls such as `.strip()` or pytest APIs as product interactions. A declared member from a future behavior slice remains allowed; this is a product-boundary subset rule, not an active-ticket exclusivity rule. Rejection feedback names only the offending member and location, not the allowed API list.
+
+Before canonical promotion, Python production candidates are also checked as a subset: public methods, class attributes, and `self.<attribute>` declarations on the declared component may not introduce undeclared surface. Missing future members and private helpers remain allowed. This lint deliberately does not decide semantic transformations, normalisation, Gatekeeper reconciliation, or refactoring. PR21's refactoring lane remains deferred and independent.

@@ -20,6 +20,7 @@ from core.development.scenario_drafting_domain import (
     ScenarioDraftRunState,
 )
 from core.development.tdd_progression import TddStepProposal
+from core.development.behavior_contract_surface import DeclaredProductSurface
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.development.specification_domain import SourceRequirementClause
 from core.execution.reasoning_gateway import ReasoningResult
@@ -934,3 +935,29 @@ async def test_scenario_freeze_failure_retains_generic_diagnostics(monkeypatch):
     assert evidence.backend_status == "ValueError"
     assert evidence.change_id == "draft-1"
     assert evidence.evidence_refs == ("evidence/draft-1.json",)
+
+
+@pytest.mark.asyncio
+async def test_product_surface_rejection_precedes_intent_without_leaking_surface():
+    revision = "z" * 40
+    source = '''from catalog import Catalog
+
+def test_catalog_records_item():
+    catalog = Catalog()
+    catalog.add("a")
+    assert catalog.get("a") == "a"
+'''
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", revision, "surface")],
+        [],
+        {revision: source},
+    )
+    surface = DeclaredProductSurface("Catalog", frozenset({"add", "item_id", "future_lookup"}))
+    outcome = await service.draft(replace(request("catalog"), product_surface=surface), binding())
+    attempt = outcome.state.attempts[-1]
+    assert attempt.status == "candidate_invalid"
+    assert attempt.candidate_assessment is not None
+    assert attempt.candidate_assessment.issues[0].code == "undeclared_product_member"
+    assert "item_id" not in attempt.feedback
+    assert not reasoning.requests
+    assert "future_lookup" not in gateway.calls[0][0].objective

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from core.development.microcycle_revision_lifecycle import MicrocycleRevisionStateNotFound
+from core.development.behavior_contract_surface import DeclaredProductSurface
 from core.development.microcycle_revision_state import (
     MicrocycleRevisionState,
     RevisionBindingRequest,
@@ -84,6 +85,7 @@ async def advance(
             True,
             executor.revisions,
             binding_request,
+            DeclaredProductSurface.compile(request.contract),
         )
     )
     lifecycle = executor.revisions.recover(RevisionRecoveryRequest(scenario_id))
@@ -142,6 +144,7 @@ async def _submit_draft(
             _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
             request.canonical_development_base,
             _source_requirement_evidence(request),
+            DeclaredProductSurface.compile(request.contract),
         ),
         request.project.binding().with_base_sha(request.canonical_development_base),
     )
@@ -173,6 +176,7 @@ async def _review_intent(
             _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
             request.canonical_development_base,
             _source_requirement_evidence(request),
+            DeclaredProductSurface.compile(request.contract),
         )
     )
     status = outcome.state.status
