@@ -42,6 +42,7 @@ from core.development.resource_split import (
     trusted_revision_for_child,
 )
 from core.development.tdd_cycle_coordination import TddStateRepository
+from core.development.tdd_progression_values import ContractPoolStatus
 from core.development.tdd_phase_execution import (
     PhaseExecutionRequest,
     PhaseOutcome,
@@ -382,7 +383,9 @@ class BehaviorContractPlanner:
             return _contract_from_response(
                 result.text,
                 label="behavior contract",
+                project_id=request.project_id,
                 requirement_text=request.requirement_text,
+                source_clauses=source_clauses,
                 allowed_production_paths=normalized_production_paths,
                 allowed_test_paths=normalized_test_paths,
             )
@@ -407,7 +410,9 @@ class BehaviorContractPlanner:
             return _contract_from_response(
                 repair_result.text,
                 label="behavior contract repair",
+                project_id=request.project_id,
                 requirement_text=request.requirement_text,
+                source_clauses=source_clauses,
                 allowed_production_paths=normalized_production_paths,
                 allowed_test_paths=normalized_test_paths,
             )
@@ -1826,18 +1831,8 @@ def _contract_prompt(
 ) -> str:
     schema = {
         "id": "string",
-        "project_id": "string",
         "component_name": "string",
         "capability": "string",
-        "requirement_source": "string",
-        "source_clauses": [
-            {
-                "ref": "string",
-                "text": "string",
-                "kind": "behavior|validation|invariant|constraint|quality",
-                "evidence_kind": "test|mechanical|review",
-            }
-        ],
         "observable_requirements": [
             {
                 "ref": "string",
@@ -1857,7 +1852,6 @@ def _contract_prompt(
         "error_semantics": ["string"],
         "non_goals": ["string"],
         "completion_criteria": ["string"],
-        "status": "tdd_ready",
     }
     return json.dumps(
         {
@@ -1902,10 +1896,8 @@ def _contract_prompt(
                 "each observable requirement must include a non-empty source_refs array",
             ],
             "domain_rules": [
-                "status must be exactly tdd_ready",
                 "public_api must be an array of strings",
                 "error_semantics must be an array of strings",
-                "requirement_source must exactly equal the supplied requirement_text",
                 "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
             ],
         },
@@ -1919,25 +1911,28 @@ def _contract_from_response(
     text: str,
     *,
     label: str,
+    project_id: str,
     requirement_text: str,
+    source_clauses: list[SourceRequirementClause],
     allowed_production_paths: list[str],
     allowed_test_paths: list[str],
 ) -> BehaviorContract:
-    contract = BehaviorContract.from_dict(
-        _json_object(text, label=label),
+    payload = _json_object(text, label=label)
+    payload["project_id"] = project_id
+    payload["requirement_source"] = requirement_text
+    payload["source_clauses"] = [clause.to_dict() for clause in source_clauses]
+    payload["status"] = ContractPoolStatus.TDD_READY.value
+    return BehaviorContract.from_dict(
+        payload,
         BehaviorContractLoadOptions(
             allowed_production_paths=allowed_production_paths,
             allowed_test_paths=allowed_test_paths,
         ),
     )
-    if contract.requirement_source != requirement_text:
-        raise ValueError("requirement_source must preserve the original requirement text exactly")
-    return contract
 
 
 def _is_recoverable_contract_error(error: ValueError) -> bool:
-    message = str(error)
-    return message.startswith("source clauses must be covered by observable requirements:") or message == "requirement_source must preserve the original requirement text exactly"
+    return str(error).startswith("source clauses must be covered by observable requirements:")
 
 
 def _contract_repair_prompt(
@@ -1962,18 +1957,8 @@ def _contract_repair_prompt(
             "validation_error": validation_error,
             "required_json_schema": {
                 "id": "string",
-                "project_id": "string",
                 "component_name": "string",
                 "capability": "string",
-                "requirement_source": "string",
-                "source_clauses": [
-                    {
-                        "ref": "string",
-                        "text": "string",
-                        "kind": "behavior|validation|invariant|constraint|quality",
-                        "evidence_kind": "test|mechanical|review",
-                    }
-                ],
                 "observable_requirements": [
                     {
                         "ref": "string",
@@ -1993,7 +1978,6 @@ def _contract_repair_prompt(
                 "error_semantics": ["string"],
                 "non_goals": ["string"],
                 "completion_criteria": ["string"],
-                "status": "tdd_ready|cycle_active|review_ready|repair_ready|replan_ready|approved|completed|blocked_executor|blocked_environment|blocked_architecture|blocked_ambiguity|blocked_unclassified|split_required",
             },
             "output_rules": [
                 "return raw JSON only",
@@ -2003,10 +1987,8 @@ def _contract_repair_prompt(
             ],
             "repair_rules": [
                 "keep the contract within the supplied repository-relative production and test paths",
-                "preserve valid existing fields where possible",
-                "requirement_source must exactly equal the supplied requirement_text",
-                "every source clause ref must appear in at least one observable_requirements[].source_refs entry",
-                "do not drop source clauses to hide coverage problems",
+                "preserve valid semantic fields where possible",
+                "every supplied source clause ref must appear in at least one observable_requirements[].source_refs entry",
                 "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
             ],
         },

@@ -197,3 +197,23 @@ behavior blocked. A restart does not automatically rereview it.
 
 Prompt semantic scope changed: **NO**. Strict grammar changed: **NO**. Execution
 budget changed: **NO**. Feature-specific accommodation: **NO**.
+
+## Behavior Contract immutable-authority correction
+
+**Observed live blocker.** Fresh SignalBoard run `pr29-signal-board-20260903T142900Z` created its disposable project and then failed closed during Behavior Contract planning with `requirement_source must preserve the original requirement text exactly`. Its immutable original requirement is preserved byte-for-byte in lifecycle metadata and the terminal JSON log is retained. The final mismatch proves the returned `requirement_source` differed from that authoritative input, but neither returned value was persisted, so their exact text is unavailable. Under the then-current recoverable-error path, that terminal mismatch follows one `athba_behavior_contract_repair` call; neither raw provider response nor a separate repair event was persisted. The model-emitted `project_id`, `source_clauses`, and status are likewise unavailable, so their divergence cannot be determined retrospectively.
+
+**Existing design.** The Behavior Contract reasoning model was asked to echo immutable caller, source, and control-plane fields in the final aggregate object.
+
+**Generic defect.** Immutable authoritative state was unnecessarily delegated to model transcription. An LLM must not be given authority over immutable caller-supplied or deterministic workflow state merely because that data appears in the final aggregate object.
+
+**Authoritative fields.** `project_id`, exact `requirement_source`, the exact `source_clauses` emitted by `RequirementClausePlanner`, and initial status `tdd_ready`. ATHBA now installs them deterministically at contract construction before normal typed validation.
+
+**Model semantic authority retained:** YES.
+
+**Source semantic validation retained:** YES.
+
+**Behavior Contract semantic repair retained:** YES, for genuine semantic defects such as missing source-clause coverage.
+
+**Feature-specific accommodation:** NO.
+
+**Rack AI change:** NO.

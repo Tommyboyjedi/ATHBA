@@ -584,26 +584,46 @@ async def test_contract_planner_repairs_uncovered_source_clauses_once():
 
 
 @pytest.mark.asyncio
-async def test_contract_planner_repairs_requirement_source_back_to_exact_original_text():
-    truncated_payload = contract_payload()
-    truncated_payload["requirement_source"] = "Build a small in-memory ReservationBook for reservable resources."
-    gateway = FakeReasoningGateway([source_clause_payload(), truncated_payload, contract_payload()])
-    planner = BehaviorContractPlanner(gateway)
+@pytest.mark.parametrize("mutation", ["altered", "extra", "missing"])
+async def test_contract_planner_installs_immutable_authoritative_fields_before_validation(mutation):
+    payload = contract_payload()
+    exact_requirement = "Component: ExampleWidget\n\n1. Stores exact text: punctuation!\n2. Preserves Case.\n"
+    if mutation == "altered":
+        payload["project_id"] = "renamed-project"
+        payload["requirement_source"] = "changed source"
+        payload["source_clauses"] = [{"ref": "REPLACED", "text": "changed", "kind": "behavior"}]
+        payload["status"] = "approved"
+    elif mutation == "extra":
+        payload["source_clauses"].append({"ref": "INVENTED", "text": "invented", "kind": "behavior"})
+        payload["status"] = "completed"
+    else:
+        for field in ("project_id", "requirement_source", "source_clauses", "status"):
+            payload.pop(field)
+    gateway = FakeReasoningGateway([source_clause_payload(), payload])
 
-    restored = await planner.create_contract(
-        project_id="reservation-book",
-        requirement_text=requirement_text(),
+    restored = await BehaviorContractPlanner(gateway).create_contract(
+        project_id="example-widget",
+        requirement_text=exact_requirement,
         production_paths=["reservation_book.py"],
         test_paths=["tests/test_reservation_book.py"],
     )
 
-    assert restored.requirement_source == requirement_text()
-    assert len(gateway.requests) == 3
-    assert gateway.requests[1].purpose == "athba_behavior_contract"
-    assert gateway.requests[2].purpose == "athba_behavior_contract_repair"
-    assert "requirement_source must exactly equal the supplied requirement_text" in gateway.requests[1].prompt
-    assert "requirement_source must preserve the original requirement text exactly" in gateway.requests[2].prompt
-    assert "requirement_source must exactly equal the supplied requirement_text" in gateway.requests[2].prompt
+    authoritative_clauses = [
+        SourceRequirementClause.from_dict(item) for item in source_clause_payload()["clauses"]
+    ]
+    assert restored.project_id == "example-widget"
+    assert restored.requirement_source == exact_requirement
+    assert restored.source_clauses == authoritative_clauses
+    assert restored.status == "tdd_ready"
+    reloaded = BehaviorContract.from_dict(restored.to_dict())
+    assert reloaded.project_id == "example-widget"
+    assert reloaded.requirement_source == exact_requirement
+    assert reloaded.source_clauses == authoritative_clauses
+    assert reloaded.status == "tdd_ready"
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_source_requirement_clauses",
+        "athba_behavior_contract",
+    ]
 
 
 @pytest.mark.asyncio
@@ -814,7 +834,11 @@ async def test_contract_prompt_explicitly_constrains_raw_json_types_paths_atomic
     assert "return raw JSON only" in prompt
     assert "do not use code fences" in prompt
     assert "do not add commentary before or after the JSON" in prompt
-    assert "\"status\": \"tdd_ready\"" in prompt
+    schema = json.loads(prompt)["required_json_schema"]
+    assert "project_id" not in schema
+    assert "requirement_source" not in schema
+    assert "source_clauses" not in schema
+    assert "status" not in schema
     assert "\"public_api\": [" in prompt
     assert "\"error_semantics\": [" in prompt
     assert "\"source_refs\": [" in prompt
