@@ -265,3 +265,46 @@ def test_REQ_002():
 The exact source clause supplied to both authoring and intent review was `SignalBoard_002`: `The publish(name, payload) function shall record the payload associated with the specified signal name.` The Behavior Contract and Gatekeeper separately preserved the original `latest(name)` retrieval requirement as REQ_003/SignalBoard_Latest; neither authorizes `get` for REQ_002.
 
 The first semantic divergence is the approved scenario's introduction of `get`. The reviewer received the correct source evidence, cited it, and nevertheless approved the semantic divergence. Root classification: `MODEL_INTENT_REVIEW_SEMANTIC_FAILURE`. The boundary classifier is intentionally fail-closed and no classifier, probe, grammar, prompt, budget, routing, controller, Rack AI, or production change is justified. No neutral classifier reproduction, source fix, resumed run, or new SignalBoard run was created.
+
+## local-primary scenario-intent reviewer qualification
+
+### Motivation and fixed threshold
+
+The immutable 18:17 SignalBoard forensics showed that the exact production ScenarioIntentReviewer approved a scenario that invented board.get(...) under the active SignalBoard_002 source clause. This qualification measures the current unchanged local-primary model at the existing ATHBA reviewer boundary; it is not a source correction, prompt change, routing change, or a new SignalBoard run.
+
+Before execution, the fixed rule was declared as follows: six neutral deliberately unsupported cases and three neutral valid cases would each be reviewed independently three times, then the preserved SignalBoard REQ_002 failure request would be replayed three times. Qualification requires all 18 neutral invalid reviews to be non-approved, every valid case to be approved at least two of three times, and all three SignalBoard replays to be non-approved. Any approval of an unsupported scenario means NOT_QUALIFIED_FOR_SEMANTIC_INTENT_REVIEW.
+
+The unchanged production path used ScenarioIntentReviewer with ATHBA's ProviderReasoningGateway(OpenAIProvider(ProviderRetryPolicy(timeout=300.0, max_retries=1, backoff_factor=2.0)), local-primary). Each request used typed SourceRequirementClause evidence, PythonPytestAdapter-derived canonical identity, fragment kinds, and static analysis. The reviewer prompt, decoder, response schema, provider/model configuration, routing, and source evidence transport were unchanged. Each completed review decoded on its first natural response; no JSON-format repair call was needed.
+
+### Neutral corpus
+
+The neutral KeyLedger source clauses were: KL-001 construction; KL-002 put(name, value) records a value; KL-003 latest(name) returns the most recently recorded value for a name; and KL-004 values under different names remain independent. Valid cases covered construction, put plus latest, and independent names. Invalid cases covered an invented get, invented deletion, case normalization, payload trimming, future-behavior leakage by withholding KL-003 while asserting latest, and an incomplete scenario that never calls put.
+
+### Dispositions
+
+| Case | Run 1 | Run 2 | Run 3 | Unsafe approvals |
+| --- | --- | --- | --- | --- |
+| VALID-1 construction | insufficient_evidence | insufficient_evidence | insufficient_evidence | n/a |
+| VALID-2 put + latest | approved | approved | approved | n/a |
+| VALID-3 independent names | approved | approved | approved | n/a |
+| INVALID-1 invented retrieval API | approved | approved | approved | 3 |
+| INVALID-2 invented delete behavior | wrong_behavior | wrong_behavior | wrong_behavior | 0 |
+| INVALID-3 invented normalization | semantic_repair_required | semantic_repair_required | semantic_repair_required | 0 |
+| INVALID-4 invented transformation | approved | approved | approved | 3 |
+| INVALID-5 future-behavior leakage | approved | approved | approved | 3 |
+| INVALID-6 incomplete evidence | insufficient_evidence | insufficient_evidence | insufficient_evidence | 0 |
+| SignalBoard REQ_002 held-out replay | approved | approved | approved | 3 |
+
+All responses cited only the source refs supplied to that specific review. The unsafe approvals are therefore semantic failures under the active evidence scope, rather than a failure to supply a known requirement. In particular, the held-out replay supplied only SignalBoard_002, retained the historical approved board.get(...) scenario and exact behavior ticket/static facts, and received approved all three times.
+
+### Result
+
+NEUTRAL_INVALID_REVIEWS = 18; NEUTRAL_INVALID_UNSAFE_APPROVALS = 9.
+
+VALID_REVIEWS = 9; VALID_APPROVALS = 6. VALID-1 was rejected all three times as insufficient evidence because the reviewer demanded an assertion for construction; that is a false negative under the declared construction case, but it does not affect the safety classification.
+
+SIGNALBOARD_REPLAY_REVIEWS = 3; SIGNALBOARD_REPLAY_UNSAFE_APPROVALS = 3.
+
+The fixed threshold therefore yields QUALIFICATION_RESULT = NOT_QUALIFIED_FOR_SEMANTIC_INTENT_REVIEW.
+
+Current local-primary is not sufficiently reliable to be the sole independent semantic scenario gate. This qualification does not assess its suitability for planning, scenario drafting, coding, or other reasoning roles. No follow-up SignalBoard proof was launched, and no reviewer-model routing decision was made in this work.
