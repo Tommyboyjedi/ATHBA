@@ -228,3 +228,40 @@ Durable state changed: attempt 1 was a real `local-primary` `worker_model_timeou
 Fingerprint equality means no stable persisted workflow progress relevant to the next deterministic transition. Evidence prose, timestamps, random IDs, and transient logging remain excluded; attempts, frontiers, retries, revisions, and actual pending action must not be flattened. The scenario action is now derived from `ScenarioDraftRunState`: no candidate -> draft submission; accepted unreviewed candidate -> intent review; terminal -> blocked; approved without lifecycle -> revision initialisation; active microcycle -> its child action. Scenario fingerprints include attempt/candidate progress and lift microcycle identity; features retain those fields while preserving their outer status.
 
 Neutral ExampleWidget regressions prove timeout->candidate and timeout->timeout do not false-stall, candidate reaches intent review without duplicate submission, nested microcycle progress survives both wrappers, and genuinely unchanged state still stalls. Root cause: wrapper projection discarded nested stable scenario/microcycle identity. Controller safety guard changed: NO. Feature-specific accommodation: NO. Rack AI change: NO.
+
+
+## 18:17 SignalBoard unsupported-language-boundary forensics
+
+The terminal run `pr29-signal-board-20260903T181700Z` is immutable and was not resumed. It blocked at REQ_002, frontier index 3 of 6: active `python-4-assertion`, source line 7, `assert board.get("name") == "payload"`. The probe recorded `pytest_failure`, collection/requested-node/setup/teardown success, call failure, and `AttributeError: 'SignalBoard' object has no attribute 'get'` at `/tmp/athba-frontier-pirr6w6i/tests/test_signal_board.py:7`. The line is inside the active fragment span 7-7.
+
+| Stage | Evidence | Semantically correct? |
+| --- | --- | --- |
+| Source requirement | `publish(name, payload)` records a payload; retrieval is explicitly `latest(name)` in SignalBoard_003. | YES |
+| Behavior Contract | REQ_002 is `Publish payload`, observable outcome `Payload is stored for the given name`, source ref SignalBoard_002. | YES |
+| Gatekeeper | SignalBoard_Publish: `publish(name, payload) records the payload for that signal name.` | YES |
+| Behavior ticket | REQ_002 `Publish payload`; test hint `Verify payload storage for specific name`; paths `signal_board.py` and `tests/test_signal_board.py`. | YES |
+| Approved scenario | `board.publish("name", "payload")` followed by three `board.get("name")` assertions. | NO |
+| Intent review | Approved that exact scenario while citing SignalBoard_002 and asserting that `get` verified stored payload. | NO |
+| Frontier decomposition | Preserved the approved source exactly: the active assertion is line 7 of that source. | YES |
+| Prior production state | Import and constructor were GREEN; `publish` was an active-call valid missing-capability RED, then GREEN after promotion `f66f5ce3c9c109c71dfeda396d7103d5b394e34e`. | YES |
+| Active runtime failure | AttributeError at active assertion span 7-7, for invented `get`, after `publish` had already been GREEN. | Fail-closed correct |
+| Boundary classifier | Assertion-only behavioral RED does not accept AttributeError; it returned `unsupported_language_boundary`. | YES |
+
+The complete approved REQ_002 source was:
+
+```python
+import pytest
+from signal_board import SignalBoard
+
+
+def test_REQ_002():
+    board = SignalBoard()
+    board.publish("name", "payload")
+    assert board.get("name") == "payload"
+    assert board.get("name") == "payload"
+    assert board.get("name") == "payload"
+```
+
+The exact source clause supplied to both authoring and intent review was `SignalBoard_002`: `The publish(name, payload) function shall record the payload associated with the specified signal name.` The Behavior Contract and Gatekeeper separately preserved the original `latest(name)` retrieval requirement as REQ_003/SignalBoard_Latest; neither authorizes `get` for REQ_002.
+
+The first semantic divergence is the approved scenario's introduction of `get`. The reviewer received the correct source evidence, cited it, and nevertheless approved the semantic divergence. Root classification: `MODEL_INTENT_REVIEW_SEMANTIC_FAILURE`. The boundary classifier is intentionally fail-closed and no classifier, probe, grammar, prompt, budget, routing, controller, Rack AI, or production change is justified. No neutral classifier reproduction, source fix, resumed run, or new SignalBoard run was created.
