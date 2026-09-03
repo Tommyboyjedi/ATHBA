@@ -16,6 +16,7 @@ from core.development.scenario_drafting_domain import (
     ScenarioDraftRequest,
     ScenarioDraftStatus,
     ScenarioRepositoryFacts,
+    ScenarioDraftRunState,
 )
 from core.development.tdd_progression import TddStepProposal
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -804,3 +805,105 @@ async def test_four_selected_no_candidate_submissions_are_consumed_from_canonica
     assert all(item.no_candidate_outcome == "disallowed_or_unknown_tool_call" for item in state.attempts)
     assert all(item.selected_worker_id == "local-coder" for item in state.attempts)
     assert all(call[1].base_sha == "a" * 40 for call in gateway.calls)
+
+@pytest.mark.asyncio
+async def test_external_blocker_persists_bounded_diagnostics_without_a_model_attempt(tmp_path):
+    from core.development.work_unit import WorkerExecutionProvenance
+
+    store = ScenarioDraftStateRepo(tmp_path)
+    provenance = WorkerExecutionProvenance(
+        "local-primary", "implementer-tester", "jcode", "local-primary-model",
+        "local-primary", "gpu-4060ti", "jcode", "minimal",
+    )
+    result = WorkUnitExecutionResult(
+        work_unit_id="catalog-ticket--scenario-draft-1",
+        accepted=False,
+        status="transport_failed",
+        change_id="submission-1",
+        selected_worker_id="local-primary",
+        evidence_location="evidence/synthetic-transport.json",
+        error="synthetic workspace transport failure",
+        worker_provenance=provenance,
+    )
+    service, gateway, _reasoning, _reader = components([result], [], {}, store)
+
+    outcome = await service.submit_candidate(request("catalog"), binding())
+
+    assert outcome.state.status == ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value
+    assert outcome.state.attempts == ()
+    assert outcome.state.approved_microcycle is None
+    evidence = outcome.state.harness_failure_evidence
+    assert evidence is not None
+    assert evidence.failure_stage.value == "workspace_result"
+    assert evidence.failure_kind.value == "external_blocker"
+    assert evidence.message == "synthetic workspace transport failure"
+    assert evidence.backend_status == "transport_failed"
+    assert evidence.work_unit_id == "catalog-ticket--scenario-draft-1"
+    assert evidence.change_id == "submission-1"
+    assert evidence.evidence_refs == ("evidence/synthetic-transport.json",)
+    assert evidence.selected_worker_id == "local-primary"
+    assert evidence.worker_provenance == provenance
+    assert ScenarioDraftStateRepo(tmp_path).load(outcome.state.scenario_id) == outcome.state
+    assert len(gateway.calls) == 1
+
+
+def test_historical_scenario_state_without_harness_evidence_remains_readable():
+    state = ScenarioDraftRunState(
+        scenario_id="historical",
+        behavior_ref="behavior",
+        source_requirement_refs=("SRC-1",),
+        language_id="python",
+        test_framework="pytest",
+        allowed_test_path="tests/test_feature.py",
+        development_base_revision="a" * 40,
+    )
+    historical_payload = state.to_dict()
+    historical_payload.pop("harness_failure_evidence")
+
+    restored = ScenarioDraftRunState.from_dict(historical_payload)
+
+    assert restored == state
+    assert restored.harness_failure_evidence is None
+
+
+@pytest.mark.asyncio
+async def test_successful_scenario_has_no_harness_failure_evidence():
+    service, _gateway, _reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "h" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"h" * 40: plain_catalog_candidate()},
+    )
+
+    outcome = await service.draft(request("catalog"), binding())
+
+    assert outcome.approved
+    assert outcome.state.harness_failure_evidence is None
+
+@pytest.mark.asyncio
+async def test_scenario_freeze_failure_retains_generic_diagnostics(monkeypatch):
+    def fail_freeze(_self, _request):
+        raise ValueError("synthetic scenario freeze failure")
+
+    monkeypatch.setattr(
+        "core.development.scenario_drafting.ScenarioFreezeFactory.freeze",
+        fail_freeze,
+    )
+    service, _gateway, _reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "i" * 40, "draft-1")],
+        [approval("SRC-CATALOG")],
+        {"i" * 40: plain_catalog_candidate()},
+    )
+
+    outcome = await service.draft(request("catalog"), binding())
+
+    assert outcome.state.status == ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value
+    assert len(outcome.state.attempts) == 1
+    assert outcome.state.attempts[0].feedback == "synthetic scenario freeze failure"
+    evidence = outcome.state.harness_failure_evidence
+    assert evidence is not None
+    assert evidence.failure_stage.value == "scenario_freeze"
+    assert evidence.failure_kind.value == "exception"
+    assert evidence.message == "synthetic scenario freeze failure"
+    assert evidence.backend_status == "ValueError"
+    assert evidence.change_id == "draft-1"
+    assert evidence.evidence_refs == ("evidence/draft-1.json",)

@@ -27,3 +27,19 @@ Python/pytest fixture. ReservationBook and concurrent work are out of scope.
    returned by the generic workspace port.
 
 No model invocation was made before this gate. No Rack AI source or configuration
+
+## Scenario harness evidence integrity correction
+
+**Documented contract.** Terminal fail-closed transitions must preserve enough evidence to classify the owning failure boundary.
+
+**Observed behavior.** `scenario_harness_failure` persisted without diagnostic evidence.
+
+**Why generic.** This applies to every scenario-draft external or harness failure, independent of feature, model, worker, or fixture.
+
+**Correction.** Persist typed, bounded harness-failure evidence.
+
+**Semantic behavior changed:** NO
+
+**Attempt accounting changed:** NO
+
+**Harness accommodation:** NO

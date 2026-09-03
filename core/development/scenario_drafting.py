@@ -38,6 +38,9 @@ from core.development.scenario_drafting_domain import (
     ScenarioDraftRequest,
     ScenarioDraftRunState,
     ScenarioDraftStatus,
+    ScenarioHarnessFailureEvidence,
+    ScenarioHarnessFailureKind,
+    ScenarioHarnessFailureStage,
     ScenarioSubmissionMode,
     ScenarioSubmissionOutcome,
 )
@@ -332,8 +335,7 @@ class ScenarioDraftingService:
                 ScenarioFreezeRequest(_approved_draft(prepared), intent_outcome.result, self.adapter_catalog, request.development_base_revision)
             )
         except (SyntaxError, ValueError) as error:
-            failed = replace(reviewed, status="scenario_harness_failure", feedback=str(error))
-            blocked = replace(state, attempts=(*state.attempts[:-1], failed), status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value)
+            blocked = _freeze_failure_state(updated, reviewed, error)
             self.state_store.save(blocked)
             return ScenarioDraftOutcome(blocked, False)
         approved = replace(updated, approved_microcycle=frozen, status=ScenarioDraftStatus.APPROVED.value)
@@ -347,7 +349,8 @@ class ScenarioDraftingService:
         accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
         outcome = _submission_outcome(result, accepted)
         if outcome is ScenarioSubmissionOutcome.EXTERNAL_BLOCKER:
-            blocked = replace(state, status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value)
+
+            blocked = replace(state, status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value, harness_failure_evidence=_workspace_failure_evidence(unit, result))
             return ScenarioDraftOutcome(blocked, False)
         status = outcome.value
         feedback = None if accepted else _no_candidate_feedback(result, outcome)
@@ -406,6 +409,16 @@ class ScenarioDraftCompatibilityLoop:
         raise RuntimeError("scenario draft compatibility transition guard exhausted")
 
 
+
+def _freeze_failure_state(
+    state: ScenarioDraftRunState,
+    attempt: ScenarioDraftAttempt,
+    error: SyntaxError | ValueError,
+) -> ScenarioDraftRunState:
+    evidence = _freeze_failure_evidence(attempt, error)
+    failed = replace(attempt, status="scenario_harness_failure", feedback=evidence.message)
+    return replace(state, attempts=(*state.attempts[:-1], failed), status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value, harness_failure_evidence=evidence)
+
 def _is_terminal_draft_state(state: ScenarioDraftRunState) -> bool:
     return state.status in {
         ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value,
@@ -413,6 +426,54 @@ def _is_terminal_draft_state(state: ScenarioDraftRunState) -> bool:
         ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
     }
 
+
+
+def _workspace_failure_evidence(
+    unit: DevelopmentWorkUnit,
+    result: WorkUnitExecutionResult,
+) -> ScenarioHarnessFailureEvidence:
+    return ScenarioHarnessFailureEvidence(
+        ScenarioHarnessFailureStage.WORKSPACE_RESULT,
+        ScenarioHarnessFailureKind.EXTERNAL_BLOCKER,
+        _bounded_failure_text(result.error or result.status),
+        _bounded_failure_text(result.status, 256),
+        _bounded_failure_text(unit.id, 256),
+        _optional_bounded_failure_text(result.change_id, 256),
+        _failure_evidence_refs(result.evidence_location),
+        _optional_bounded_failure_text(result.selected_worker_id, 256),
+        result.worker_provenance,
+    )
+
+
+def _freeze_failure_evidence(
+    attempt: ScenarioDraftAttempt,
+    error: SyntaxError | ValueError,
+) -> ScenarioHarnessFailureEvidence:
+    return ScenarioHarnessFailureEvidence(
+        ScenarioHarnessFailureStage.SCENARIO_FREEZE,
+        ScenarioHarnessFailureKind.EXCEPTION,
+        _bounded_failure_text(str(error)),
+        _bounded_failure_text(type(error).__name__, 256),
+        _bounded_failure_text(attempt.work_unit_id, 256),
+        _optional_bounded_failure_text(attempt.change_id, 256),
+        _failure_evidence_refs(attempt.evidence_location),
+        _optional_bounded_failure_text(attempt.selected_worker_id, 256),
+        attempt.worker_provenance,
+    )
+
+
+def _failure_evidence_refs(location: str | None) -> tuple[str, ...]:
+    bounded = _optional_bounded_failure_text(location, 1024)
+    return () if bounded is None else (bounded,)
+
+
+def _optional_bounded_failure_text(value: str | None, limit: int) -> str | None:
+    return None if value is None else _bounded_failure_text(value, limit)
+
+
+def _bounded_failure_text(value: str, limit: int = 2048) -> str:
+    bounded = value.strip()[:limit]
+    return bounded or "unspecified scenario harness failure"
 
 def _requires_external_repair(state: ScenarioDraftRunState) -> bool:
     return bool(state.attempts and state.attempts[-1].status != "candidate_submitted")

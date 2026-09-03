@@ -19,6 +19,10 @@ from core.development.work_unit import WorkerExecutionProvenance
 
 MAX_TESTER_SCENARIO_ATTEMPTS = 4
 MAX_SCENARIO_CANDIDATE_SOURCE_CHARACTERS = 65536
+MAX_SCENARIO_HARNESS_FAILURE_MESSAGE_CHARACTERS = 2048
+MAX_SCENARIO_HARNESS_FAILURE_STATUS_CHARACTERS = 256
+MAX_SCENARIO_HARNESS_FAILURE_EVIDENCE_REFS = 16
+MAX_SCENARIO_HARNESS_FAILURE_EVIDENCE_REF_CHARACTERS = 1024
 
 class ScenarioSubmissionMode(str, Enum):
     FRESH_DRAFT = "fresh_draft"
@@ -182,6 +186,70 @@ class ScenarioDraftStatus(str, Enum):
     ATTEMPTS_EXHAUSTED = "attempts_exhausted"
     INTENT_PROTOCOL_FAILURE = "intent_protocol_failure"
     SCENARIO_HARNESS_FAILURE = "scenario_harness_failure"
+class ScenarioHarnessFailureStage(str, Enum):
+    WORKSPACE_RESULT = "workspace_result"
+    SCENARIO_FREEZE = "scenario_freeze"
+
+
+class ScenarioHarnessFailureKind(str, Enum):
+    EXTERNAL_BLOCKER = "external_blocker"
+    EXCEPTION = "exception"
+
+
+@dataclass(frozen=True)
+class ScenarioHarnessFailureEvidence:
+    """Bounded, generic diagnostics for a terminal scenario harness failure."""
+
+    failure_stage: ScenarioHarnessFailureStage
+    failure_kind: ScenarioHarnessFailureKind
+    message: str
+    backend_status: str | None = None
+    work_unit_id: str | None = None
+    change_id: str | None = None
+    evidence_refs: tuple[str, ...] = ()
+    selected_worker_id: str | None = None
+    worker_provenance: WorkerExecutionProvenance | None = None
+
+    def __post_init__(self) -> None:
+        if not self.message.strip() or len(self.message) > MAX_SCENARIO_HARNESS_FAILURE_MESSAGE_CHARACTERS:
+            raise ValueError("scenario harness failure message must be bounded and non-empty")
+        values = (self.backend_status, self.work_unit_id, self.change_id, self.selected_worker_id)
+        if any(value is not None and (not value.strip() or len(value) > MAX_SCENARIO_HARNESS_FAILURE_STATUS_CHARACTERS) for value in values):
+            raise ValueError("scenario harness failure text fields must be bounded and non-empty when supplied")
+        if len(self.evidence_refs) > MAX_SCENARIO_HARNESS_FAILURE_EVIDENCE_REFS:
+            raise ValueError("scenario harness failure evidence refs exceed the limit")
+        if any(not ref.strip() or len(ref) > MAX_SCENARIO_HARNESS_FAILURE_EVIDENCE_REF_CHARACTERS for ref in self.evidence_refs):
+            raise ValueError("scenario harness failure evidence refs must be bounded and non-empty")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "failure_stage": self.failure_stage.value,
+            "failure_kind": self.failure_kind.value,
+            "message": self.message,
+            "backend_status": self.backend_status,
+            "work_unit_id": self.work_unit_id,
+            "change_id": self.change_id,
+            "evidence_refs": list(self.evidence_refs),
+            "selected_worker_id": self.selected_worker_id,
+            "worker_provenance": None if self.worker_provenance is None else asdict(self.worker_provenance),
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "ScenarioHarnessFailureEvidence":
+        provenance = value.get("worker_provenance")
+        return cls(
+            failure_stage=ScenarioHarnessFailureStage(str(value["failure_stage"])),
+            failure_kind=ScenarioHarnessFailureKind(str(value["failure_kind"])),
+            message=str(value["message"]),
+            backend_status=value.get("backend_status"),
+            work_unit_id=value.get("work_unit_id"),
+            change_id=value.get("change_id"),
+            evidence_refs=tuple(str(item) for item in value.get("evidence_refs", ())),
+            selected_worker_id=value.get("selected_worker_id"),
+            worker_provenance=None if provenance is None else WorkerExecutionProvenance(**dict(provenance)),
+        )
+
+
 
 
 @dataclass(frozen=True)
@@ -345,6 +413,7 @@ class ScenarioDraftRunState:
     approved_microcycle: MicrocycleState | None = None
     status: str = ScenarioDraftStatus.DRAFTING.value
     project_synchronised: bool = False
+    harness_failure_evidence: ScenarioHarnessFailureEvidence | None = None
 
     def __post_init__(self) -> None:
         values = (
@@ -380,11 +449,13 @@ class ScenarioDraftRunState:
             "approved_microcycle": None if self.approved_microcycle is None else self.approved_microcycle.to_dict(),
             "status": self.status,
             "project_synchronised": self.project_synchronised,
+            "harness_failure_evidence": None if self.harness_failure_evidence is None else self.harness_failure_evidence.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ScenarioDraftRunState":
         approved = value.get("approved_microcycle")
+        harness_failure_evidence = value.get("harness_failure_evidence")
         return cls(
             scenario_id=str(value["scenario_id"]),
             behavior_ref=str(value["behavior_ref"]),
@@ -397,6 +468,7 @@ class ScenarioDraftRunState:
             approved_microcycle=None if approved is None else MicrocycleState.from_dict(dict(approved)),
             status=str(value.get("status", ScenarioDraftStatus.DRAFTING.value)),
             project_synchronised=bool(value.get("project_synchronised", False)),
+            harness_failure_evidence=None if harness_failure_evidence is None else ScenarioHarnessFailureEvidence.from_dict(dict(harness_failure_evidence)),
         )
 
 
