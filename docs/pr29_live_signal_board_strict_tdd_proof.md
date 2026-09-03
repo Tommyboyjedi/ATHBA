@@ -43,3 +43,43 @@ No model invocation was made before this gate. No Rack AI source or configuratio
 **Attempt accounting changed:** NO
 
 **Harness accommodation:** NO
+
+## Local-primary runtime interruption before fresh proof
+
+- ATHBA checkpoint: `d51d9d2925b44ba60f39fb47df2a27e1af99da3e`.
+- Rack AI checkpoint: `56d2c69f1e815acd12fca9065945c5e46de5a36a`.
+- The pre-existing proof handoff reported a stalled `/v1/responses` READY probe
+  despite successful local-primary health and model metadata endpoints. It did
+  not retain a curl exit code, HTTP status, or timing for that earlier stalled
+  request, so those historical details are unavailable rather than inferred.
+- At `2026-09-03T11:50:54Z`, `/health` and `/v1/models` each returned HTTP 200.
+  The advertised model was `local-primary` backed by
+  `cyankiwi/gemma-4-12B-it-AWQ-INT4`.
+- Docker's existing `vllm-primary` service was `Up 11 days (healthy)` on port
+  8017. Its EngineCore held 14,116 MiB on the RTX 4060 Ti at 0% utilization;
+  no active TCP connection to port 8017 remained after probing. No active Rack
+  AI durable work status was found.
+- The current bounded READY probe returned curl exit 0, HTTP 200, and completed
+  response text `READY` in 0.088474 seconds. A second probe after a short wait
+  independently returned curl exit 0, HTTP 200, and `READY` in 0.087607 seconds.
+- No restart was required: the existing service was already generating normally
+  when rechecked. Local-coder `/health` and `/v1/models` also returned HTTP 200.
+- No model identity, endpoint, GPU assignment, context limit, vLLM option,
+  JCode tool profile, ATHBA source, or Rack AI source was changed for this
+  operational check.
+
+## Fresh SignalBoard run: stopped at typed scenario harness failure
+
+- Fresh run and project: `pr29-signal-board-20260903T115600Z`.
+- Real behavior planning and independent Gatekeeper atomization completed before
+  the first selected behavior, `REQ-001` (`SignalBoard.create`).
+- The scenario draft transition stopped at `scenario_harness_failure` with
+  `failure_stage=workspace_result` and `failure_kind=external_blocker`.
+- Durable harness evidence identifies work unit `REQ-001--scenario-draft-1` and
+  reports that the new ATHBA repository is outside Rack AI trusted dynamic roots.
+- Rack AI returned before creating a submission, selection decision, worker
+  provenance, candidate revision, or durable Rack AI state for this work unit.
+- This is a trusted-root operational-policy blocker, not a SignalBoard,
+  local-primary, local-coder, ATHBA semantic, or Rack AI routing defect.
+- The run was not retried or resumed. No source/configuration or test-grammar
+  change was made to bypass the trusted-root policy.
