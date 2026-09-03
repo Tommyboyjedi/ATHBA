@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import ast
 from pathlib import Path
 
@@ -60,7 +61,8 @@ def transition(kind=MicrocycleTransitionKind.FRONTIER_RED_ACCEPTED, available=Tr
 def controller(tmp_path, transitions, lifecycle=None):
     events = lifecycle or StrictTddLifecycleEventRepository(tmp_path / "lifecycle")
     repositories = StrictTddEvidenceRepositories(StrictTddFeatureRepository(tmp_path / "features"), ScenarioDraftStateRepo(tmp_path / "scenarios"), MicrocycleStateRepo(tmp_path / "microcycles"), MicrocycleRevisionRepository(tmp_path / "revisions"), events)
-    return StrictTddRunController(StrictTddRunControllerDependencies(DummyApplication(transitions), StrictTddRunStateRepository(tmp_path / "runs"), events, StrictTddRunEvidenceSnapshotCollector(repositories), StrictTddRunReportWriter(tmp_path / "reports")))
+    return StrictTddRunController(StrictTddRunControllerDependencies(DummyApplication(transitions),  # type: ignore[arg-type]
+         StrictTddRunStateRepository(tmp_path / "runs"), events, StrictTddRunEvidenceSnapshotCollector(repositories), StrictTddRunReportWriter(tmp_path / "reports")))
 
 
 @pytest.mark.asyncio
@@ -106,3 +108,28 @@ def test_controller_is_not_a_feature_router_or_live_executor():
     assert "subprocess" not in source
     assert "pytest" not in source
     assert "git" not in source.lower()
+
+@pytest.mark.asyncio
+async def test_durable_nested_progress_with_same_path_does_not_stall(tmp_path):
+    first = transition()
+    second = replace(first, fingerprint=replace(first.fingerprint, retry_counts=(1,), pending_action="scenario_intent_review"))
+    value = controller(tmp_path, [first, second])
+
+    started = await value.advance(replace(request(), requested_checkpoint=None))
+    resumed = await value.advance(replace(request(StrictTddRunMode.RESUME), requested_checkpoint=None))
+
+    assert started.status == StrictTddRunStatus.RUNNING
+    assert resumed.status == StrictTddRunStatus.RUNNING
+    assert resumed.reason is None
+
+
+@pytest.mark.asyncio
+async def test_identical_nested_state_with_same_path_still_stalls(tmp_path):
+    first = transition()
+    value = controller(tmp_path, [first, first])
+
+    await value.advance(replace(request(), requested_checkpoint=None))
+    repeated = await value.advance(replace(request(StrictTddRunMode.RESUME), requested_checkpoint=None))
+
+    assert repeated.status == StrictTddRunStatus.STALLED
+    assert repeated.reason == "stable_transition_fingerprint_stalled"

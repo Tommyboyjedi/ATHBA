@@ -277,15 +277,16 @@ def _result_for(
     scenario_transition: ScenarioAdvanceResult | None = None,
     project_disposition: ProjectTransitionDisposition | None = None,
 ) -> FeatureAdvanceResult:
+    nested = None if scenario_transition is None else scenario_transition.fingerprint
     fingerprint = TransitionFingerprint(
         state.status,
-        behavior_ref,
-        state.current_scenario_id,
-        None,
-        state.canonical_development_base,
-        state.working_revision,
-        (len(state.completed_behaviors),),
-        _pending_action(state),
+        behavior_ref if nested is None else nested.behavior_ref,
+        state.current_scenario_id if nested is None else nested.scenario_id,
+        None if nested is None else nested.frontier_index,
+        state.canonical_development_base if nested is None else nested.canonical_sha,
+        state.working_revision if nested is None else nested.working_sha,
+        (len(state.completed_behaviors),) if nested is None else (len(state.completed_behaviors), *nested.retry_counts),
+        _pending_action(state) if nested is None else nested.pending_action,
     )
     path = StrictTddTransitionPath(
         kind,

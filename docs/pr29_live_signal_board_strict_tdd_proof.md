@@ -217,3 +217,14 @@ budget changed: **NO**. Feature-specific accommodation: **NO**.
 **Feature-specific accommodation:** NO.
 
 **Rack AI change:** NO.
+
+
+## Nested transition fingerprint correction
+
+The preserved live run `pr29-signal-board-20260903T155905Z` was not resumed or modified. Consecutive occurrences 5 and 6 were both `FEATURE=scenario_advanced`, `SCENARIO=scenario_draft_candidate_submitted`, with no microcycle kind. Their old controller-visible fingerprint was identical: `status=running`, `behavior_ref=REQ_001`, `scenario_id=pr29-signal-board-20260903T155905Z--REQ_001`, `frontier_index=null`, `canonical_sha=006bd556063c8f46bb1fc12253df4a0a6f8773d0`, `working_sha=null`, `retry_counts=(0,)`, `pending_action=scenario_advance`.
+
+Durable state changed: attempt 1 was a real `local-primary` `worker_model_timeout` with no candidate; attempt 2 was real `local-primary` `candidate_submitted` with candidate revision `b7f31585ca7199ad18e4e8d43a2fbeef6a00de39`. The old paths and fingerprints were equal even though persisted attempt count, latest outcome, candidate revision, and actual next action differed.
+
+Fingerprint equality means no stable persisted workflow progress relevant to the next deterministic transition. Evidence prose, timestamps, random IDs, and transient logging remain excluded; attempts, frontiers, retries, revisions, and actual pending action must not be flattened. The scenario action is now derived from `ScenarioDraftRunState`: no candidate -> draft submission; accepted unreviewed candidate -> intent review; terminal -> blocked; approved without lifecycle -> revision initialisation; active microcycle -> its child action. Scenario fingerprints include attempt/candidate progress and lift microcycle identity; features retain those fields while preserving their outer status.
+
+Neutral ExampleWidget regressions prove timeout->candidate and timeout->timeout do not false-stall, candidate reaches intent review without duplicate submission, nested microcycle progress survives both wrappers, and genuinely unchanged state still stalls. Root cause: wrapper projection discarded nested stable scenario/microcycle identity. Controller safety guard changed: NO. Feature-specific accommodation: NO. Rack AI change: NO.
