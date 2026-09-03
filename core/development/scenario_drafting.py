@@ -114,6 +114,7 @@ class ScenarioDraftWorkUnitFactory:
     def build(self, request: ScenarioDraftWorkUnitRequest) -> DevelopmentWorkUnit:
         draft = request.request
         work_unit_id = f"{draft.ticket.step_id}--scenario-draft-{request.attempt_number}"
+        workspace_scope = f"{draft.scenario_id}--scenario-draft"
         work_kind = (
             StrictTddWorkKind.SCENARIO_REPAIR
             if request.repair_attempt is not None
@@ -133,7 +134,7 @@ class ScenarioDraftWorkUnitFactory:
             timeout_seconds=self.budget_policy.timeout_for(work_kind),
             work_kind=work_kind,
             model_work_kind=(AthbaModelWorkKind.SCENARIO_REPAIR if request.repair_attempt is not None else AthbaModelWorkKind.COMPLETE_SCENARIO_AUTHORING),
-            workspace_identity=AthbaWorkspaceIdentity(f"{draft.ticket.step_id}--scenario-draft", work_unit_id, work_unit_id),
+            workspace_identity=AthbaWorkspaceIdentity(workspace_scope, f"{workspace_scope}-{request.attempt_number}", f"{workspace_scope}-{request.attempt_number}"),
             change_key=f"{work_unit_id}--attempt-{request.attempt_number}",
             status=WorkUnitStatus.READY,
         )

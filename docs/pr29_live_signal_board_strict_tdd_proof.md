@@ -145,3 +145,18 @@ Validation before publication: 46 focused tests passed; coding principles passed
 mypy reported no issues in 29 source files; compileall passed; the complete suite
 passed (`526 passed`). Rack AI source/configuration, JCode tool profile, strict
 test grammar, execution budgets, and the preserved initial run were not changed.
+
+### Fresh-project identity collision and correction
+
+The first post-correction fresh project, `pr29-signal-board-20260903T132400Z`,
+reached real planning and Gatekeeper atomization with the corrected lower-case
+`SignalBoard.publish` source ref and exact source clause, but failed before a
+Tester candidate. Rack AI correctly returned `duplicate idempotent submission`
+for the globally reused `REQ-001--scenario-draft-1` submission id.
+
+Forensics located the owner in ATHBA's `ScenarioDraftWorkUnitFactory`: it derived
+all three workspace identities from the unscoped ticket ref. The generic
+correction scopes `work_id` to the durable `scenario_id` (stable across attempts)
+and derives a distinct attempt `submission_id`/idempotency key. The deterministic
+test proves same-scenario retries retain their work id while both retry and a
+different fresh project receive distinct submissions. This does not alter Rack AI,
