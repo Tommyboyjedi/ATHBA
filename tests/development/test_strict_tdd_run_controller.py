@@ -33,7 +33,10 @@ class DummyApplication:
 
     async def advance(self, request):
         self.calls += 1
-        return self.transitions.pop(0)
+        result = self.transitions.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
 
 
 class FailingLifecycle(StrictTddLifecycleEventRepository):
@@ -88,6 +91,24 @@ async def test_failed_event_delivery_replays_receipt_without_application_call(tm
     resumed = await value.advance(request(StrictTddRunMode.RESUME))
     assert resumed.status == StrictTddRunStatus.CHECKPOINTED
     assert value.application.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_application_exception_clears_observed_inflight_marker_for_resume(tmp_path):
+    value = controller(tmp_path, [OSError("bootstrap unavailable"), transition()])
+
+    with pytest.raises(OSError, match="bootstrap unavailable"):
+        await value.advance(request())
+
+    state = value.states.load("run-one")
+    assert state is not None
+    assert state.transition_in_flight is None
+    assert state.pending_transition_receipt is None
+    assert state.reason == "application_transition_exception_before_receipt"
+
+    resumed = await value.advance(request(StrictTddRunMode.RESUME))
+    assert resumed.status == StrictTddRunStatus.CHECKPOINTED
+    assert value.application.calls == 2
 
 
 @pytest.mark.asyncio

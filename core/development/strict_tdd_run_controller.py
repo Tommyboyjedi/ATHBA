@@ -92,7 +92,17 @@ class StrictTddRunController:
         marker = StrictTddTransitionInFlight(state.total_application_transition_count + 1)
         running = replace(state, status=StrictTddRunStatus.RUNNING, reason=None, transition_in_flight=marker)
         self.states.save(running)
-        transition = await self.application.advance(request.feature_request())
+        try:
+            transition = await self.application.advance(request.feature_request())
+        except Exception:
+            self.states.save(
+                replace(
+                    running,
+                    transition_in_flight=None,
+                    reason="application_transition_exception_before_receipt",
+                )
+            )
+            raise
         receipt = self.receipts.create(transition, marker.occurrence)
         pending = replace(running, transition_in_flight=None, pending_transition_receipt=receipt)
         self.states.save(pending)
