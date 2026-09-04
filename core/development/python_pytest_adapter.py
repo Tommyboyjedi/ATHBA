@@ -13,7 +13,6 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
-from core.development.behavior_contract_surface import lint_test_candidate_violations
 from core.development.scenario_drafting_domain import (
     ScenarioAuthoringContract, ScenarioCandidateAssessment, ScenarioCandidateAssessmentRequest, ScenarioCandidateIssue,
     ScenarioCandidateIssueCode,
@@ -249,13 +248,7 @@ class PythonCandidateAssessmentFactory:
     def _assessment(self, request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> ScenarioCandidateAssessment:
         facts = _candidate_facts(request, module)
         assessment = _assessment_from_facts(facts)
-        if request.product_surface is None:
-            return assessment
-        issues = list(assessment.issues)
-        for violation in lint_test_candidate_violations(request.candidate.source, request.product_surface, request.production_path):
-            code = ScenarioCandidateIssueCode.PRIVATE_PRODUCT_MEMBER if violation.member.startswith("_") else ScenarioCandidateIssueCode.UNDECLARED_PRODUCT_MEMBER
-            issues.append(ScenarioCandidateIssue(code.value, violation.detail, violation.span))
-        return replace(assessment, issues=tuple(issues))
+        return assessment
 
 
 def _candidate_facts(request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> _CandidateAssessmentFacts:

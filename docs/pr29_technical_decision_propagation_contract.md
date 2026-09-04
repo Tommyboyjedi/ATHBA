@@ -1,5 +1,7 @@
 # PR29 technical-decision propagation contract
 
+> Historical evidence only. As of `pr29-live-tiny-strict-tdd-v2-proof` cleanup, the typed TechnicalDecision/TechnicalBinding pipeline, resolver implementations, qualification harnesses, and public-api name authority are removed from active behavioral development. This document records the superseded experiment; it is not an active architecture contract.
+
 ## Phase 1 boundary
 
 Technical specificity is allowed above the Tester and Developer layers. A binding technical decision is an explicit typed `TechnicalDecision` record in a `BehaviorContract`; an identifier mentioned in a summary, observable outcome, test hint, non-goal, completion criterion, rationale, or other ordinary prose has no binding authority and is never extracted heuristically.

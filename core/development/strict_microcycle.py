@@ -12,11 +12,6 @@ from typing import Protocol
 
 from core.development.behavior_completion import REPAIR_REQUIRED, BehaviorCompletionCommand, BehaviorCompletionService
 from core.development.behavior_repair import BehaviorRepairRequest, BehaviorRepairService
-from core.development.behavior_contract_surface import (
-    DeclaredProductSurface,
-    production_candidate_source,
-    production_candidate_violations,
-)
 from core.development.deterministic_regression import (
     DeterministicRegressionRequest,
     DeterministicRegressionService,
@@ -218,7 +213,6 @@ class StrictMicrocycleRequest:
     include_accepted_regression_suite: bool = True
     revision_lifecycle: MicrocycleRevisionLifecycle | None = None
     revision_binding_request: RevisionBindingRequest | None = None
-    product_surface: DeclaredProductSurface | None = None
 @dataclass(frozen=True)
 class StrictMicrocycleDependencies:
     state_store: MicrocycleStateStore
@@ -460,7 +454,6 @@ class StrictMicrocycleService:
         result = await self.gateway.execute(work_unit, _working_binding(request, red))
         if result.work_unit_id != work_unit.id:
             raise ValueError("stale Rack AI packet does not match the active Developer frontier")
-        result = _surface_checked_developer_result(request, result)
         state = _record_developer(state, red, result)
         if result.accepted and result.accepted_revision is not None:
             _advance_working_revision(request, result.accepted_revision, RevisionTransitionKind.DEVELOPER_CANDIDATE_ACCEPTED.value, result.evidence_location)
@@ -659,21 +652,6 @@ def _advance(state: MicrocycleState, base: str) -> MicrocycleState:
     )
 
 
-
-def _surface_checked_developer_result(
-    request: StrictMicrocycleRequest,
-    result: WorkUnitExecutionResult,
-) -> WorkUnitExecutionResult:
-    if not result.accepted or result.accepted_revision is None or request.product_surface is None:
-        return result
-    try:
-        source = production_candidate_source(request.repository_root, result.accepted_revision, request.production_path)
-        violations = production_candidate_violations(source, request.product_surface)
-    except (SyntaxError, ValueError) as error:
-        return replace(result, accepted=False, status="production_contract_lint_rejected", error=f"Production contract lint could not validate the candidate: {error}")
-    if not violations:
-        return result
-    return replace(result, accepted=False, status="production_contract_lint_rejected", error=violations[0].detail)
 
 def _working_binding(request: StrictMicrocycleRequest, expected_revision: str) -> RepositoryBinding:
     if request.revision_lifecycle is None or request.revision_binding_request is None:

@@ -200,48 +200,7 @@ def args(mode, state, evidence):
     return [mode,"--run-id","toggle-run","--project-id","toggle-project","--requirement",REQUIREMENT,"--language","python","--test-framework","pytest","--production-path","toggle_switch.py","--test-path","tests/test_toggle_switch.py","--state-root",str(state),"--evidence-root",str(evidence),"--stop-after","first_regression_clear"]
 
 def contract():
-    return {
-        "id": "contract-toggle-switch",
-        "project_id": "toggle-project",
-        "component_name": "ToggleSwitch",
-        "capability": "Toggle in-memory state.",
-        "requirement_source": REQUIREMENT,
-        "source_clauses": [
-            {"ref": "SRC-1", "text": "Instantiate ToggleSwitch.", "kind": "behavior"},
-            {"ref": "SRC-2", "text": "New switch is off.", "kind": "behavior"},
-            {"ref": "SRC-3", "text": "toggle makes switch on.", "kind": "behavior"},
-        ],
-        "technical_decisions": [
-            {"ref": "TECH-1", "kind": "class", "qualified_identifier": "ToggleSwitch", "origin": "behavior_planner", "source_clause_refs": ["SRC-1"], "evidence_refs": [], "source_excerpt": None},
-            {"ref": "TECH-2", "kind": "method", "qualified_identifier": "ToggleSwitch.toggle", "origin": "behavior_planner", "source_clause_refs": ["SRC-3"], "evidence_refs": [], "source_excerpt": None},
-            {"ref": "TECH-3", "kind": "property", "qualified_identifier": "ToggleSwitch.is_on", "origin": "behavior_planner", "source_clause_refs": ["SRC-2"], "evidence_refs": [], "source_excerpt": None},
-        ],
-        "observable_requirements": [
-            {
-                "ref": "B-1",
-                "source_refs": ["SRC-1", "SRC-2", "SRC-3"],
-                "summary": "Create an off ToggleSwitch and toggle it on.",
-                "observable_outcome": "A new switch is off and is on after toggle.",
-                "test_hint": "test_toggle_switch",
-                "error_expectation": "none",
-                "preserves_state_on_failure": False,
-                "technical_bindings": [
-                    {"technical_ref": "TECH-1", "role": "subject"},
-                    {"technical_ref": "TECH-2", "role": "action"},
-                    {"technical_ref": "TECH-3", "role": "state"},
-                ],
-            }
-        ],
-        "invariants": [],
-        "production_paths": ["toggle_switch.py"],
-        "test_paths": ["tests/test_toggle_switch.py"],
-        "public_api": ["ToggleSwitch()", "toggle()", "is_on"],
-        "error_semantics": [],
-        "non_goals": ["no persistence"],
-        "completion_criteria": ["accepted executable proof"],
-        "status": "tdd_ready",
-    }
-
+    return {"id":"contract-toggle-switch","project_id":"toggle-project","component_name":"ToggleSwitch","capability":"Toggle in-memory state.","requirement_source":REQUIREMENT,"source_clauses":[{"ref":"SRC-1","text":"Instantiate ToggleSwitch.","kind":"behavior"},{"ref":"SRC-2","text":"New switch is off.","kind":"behavior"},{"ref":"SRC-3","text":"toggle makes switch on.","kind":"behavior"}],"observable_requirements":[{"ref":"B-1","source_refs":["SRC-1","SRC-2","SRC-3"],"summary":"Create an off ToggleSwitch and toggle it on.","observable_outcome":"A new switch is off and is on after toggle.","test_hint":"test_toggle_switch","error_expectation":"none","preserves_state_on_failure":False}],"invariants":[],"production_paths":["toggle_switch.py"],"test_paths":["tests/test_toggle_switch.py"],"public_api":["ToggleSwitch()","toggle()","is_on"],"error_semantics":[],"non_goals":["no persistence"],"completion_criteria":["accepted executable proof"],"status":"tdd_ready"}
 
 def scenario():
     return """# ATHBA-SCENARIO-RATIONALE: observable in-memory state transition

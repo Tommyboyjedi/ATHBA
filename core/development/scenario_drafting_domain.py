@@ -6,7 +6,6 @@ from enum import Enum
 from typing import Any
 
 from core.development.scenario_intent_review import ScenarioIntentProtocolFailure
-from core.development.behavior_contract_surface import DeclaredProductSurface
 
 from core.development.microcycle_domain import (
     MicrocycleState,
@@ -58,8 +57,6 @@ class ScenarioCandidateIssueCode(str, Enum):
     SKIP_OR_XFAIL = "skip_or_xfail"
     MISSING_CAPABILITY_EVASION = "missing_capability_evasion"
     TEST_FUNCTION_DOCSTRING = "test_function_docstring"
-    UNDECLARED_PRODUCT_MEMBER = "undeclared_product_member"
-    PRIVATE_PRODUCT_MEMBER = "private_product_member"
     STANDALONE_STRING_EXPRESSION = "standalone_string_expression"
     CANDIDATE_UNCHANGED = "candidate_unchanged"
 
@@ -182,7 +179,6 @@ class ScenarioCandidateAssessmentRequest:
     candidate: ScenarioSourceCandidate
     production_path: str
     contract: ScenarioAuthoringContract
-    product_surface: DeclaredProductSurface | None = None
 
 class ScenarioDraftStatus(str, Enum):
     DRAFTING = "drafting"
@@ -282,7 +278,6 @@ class ScenarioDraftRequest:
     development_base_revision: str
     source_requirement_evidence: tuple[SourceRequirementClause, ...] = ()
 
-    product_surface: DeclaredProductSurface | None = None
     def __post_init__(self) -> None:
         values = (
             self.scenario_id,

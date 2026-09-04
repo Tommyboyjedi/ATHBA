@@ -59,27 +59,3 @@ class ChecklistAssessmentStatus(str, Enum):
 class GatekeeperAssessmentStatus(str, Enum):
     COMPLETE = "complete"
     INCOMPLETE = "incomplete"
-
-class TechnicalDecisionKind(str, Enum):
-    CLASS = "class"
-    METHOD = "method"
-    FUNCTION = "function"
-    PROPERTY = "property"
-    FIELD = "field"
-    VARIABLE = "variable"
-    OTHER = "other"
-
-
-class TechnicalDecisionOrigin(str, Enum):
-    SOURCE_REQUIREMENT = "source_requirement"
-    UPSTREAM_DESIGN = "upstream_design"
-    BEHAVIOR_PLANNER = "behavior_planner"
-
-
-class TechnicalBindingRole(str, Enum):
-    SUBJECT = "subject"
-    ACTION = "action"
-    OBSERVATION = "observation"
-    STATE = "state"
-    ERROR = "error"
-    OTHER = "other"

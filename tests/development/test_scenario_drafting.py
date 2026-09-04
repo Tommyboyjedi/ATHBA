@@ -24,7 +24,6 @@ from core.development.behavior_contract_domain import (
     BehaviorContract,
     BehaviorContractRequirement,
 )
-from core.development.behavior_contract_surface import DeclaredProductSurface
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.development.specification_domain import SourceRequirementClause
 from core.execution.reasoning_gateway import ReasoningResult
@@ -232,7 +231,6 @@ def test_REQ_002():
 def signal_board_request(
     scenario_id: str,
     contract: BehaviorContract,
-    surface: DeclaredProductSurface,
 ) -> ScenarioDraftRequest:
     requirement = contract.observable_requirements[0]
     ticket = TddStepProposal(
@@ -262,7 +260,6 @@ def signal_board_request(
         ),
         "a" * 40,
         (contract.source_clauses[0],),
-        surface,
     )
 
 
@@ -1036,123 +1033,28 @@ async def test_scenario_freeze_failure_retains_generic_diagnostics(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_product_surface_rejection_precedes_intent_without_leaking_surface():
-    revision = "z" * 40
-    source = '''from catalog import Catalog
-
-def test_catalog_records_item():
-    catalog = Catalog()
-    catalog.add("a")
-    assert catalog.get("a") == "a"
-'''
-    service, gateway, reasoning, _reader = components(
-        [accepted("catalog-ticket--scenario-draft-1", revision, "surface")],
-        [],
-        {revision: source},
-    )
-    surface = DeclaredProductSurface("Catalog", frozenset({"add", "item_id", "future_lookup"}))
-    outcome = await service.draft(replace(request("catalog"), product_surface=surface), binding())
-    attempt = outcome.state.attempts[-1]
-    assert attempt.status == "candidate_invalid"
-    assert attempt.candidate_assessment is not None
-    assert attempt.candidate_assessment.issues[0].code == "undeclared_product_member"
-    assert "item_id" not in attempt.feedback
-    assert not reasoning.requests
-    assert "future_lookup" not in gateway.calls[0][0].objective
-
-
-
-@pytest.mark.asyncio
-async def test_historical_signal_board_get_is_rejected_before_intent_or_freeze():
+async def test_planner_public_api_names_do_not_reject_behavioral_scenario():
     revision = "s" * 40
     source = historical_signal_board_get_candidate()
     service, gateway, reasoning, reader = components(
-        [accepted("REQ-002--scenario-draft-1", revision, "historical-get")],
-        [],
+        [accepted("REQ-002--scenario-draft-1", revision, "behavioral-get")],
+        [approval("SignalBoard.2")],
         {revision: source},
     )
     contract = signal_board_contract()
-    value = signal_board_request(
-        "historical-signal-board--REQ-002",
-        contract,
-        DeclaredProductSurface.compile(contract),
-    )
+    value = signal_board_request("signal-board--REQ-002", contract)
 
     submitted = await service.submit_candidate(value, binding())
     outcome = await service.review_intent(value)
 
     assert submitted.submitted_attempt
-    assert outcome.state.status == ScenarioDraftStatus.DRAFTING.value
+    assert outcome.approved
     attempt = outcome.state.attempts[0]
-    assert attempt.status == "candidate_invalid"
     assert attempt.candidate_assessment is not None
-    assert attempt.candidate_assessment.syntax_valid
-    assert attempt.candidate_assessment.production_reference_paths == ("signal_board.py",)
-    assert [issue.code for issue in attempt.candidate_assessment.issues] == [
-        "undeclared_product_member",
-        "undeclared_product_member",
-        "undeclared_product_member",
-    ]
-    assert [issue.detail.split("`")[1] for issue in attempt.candidate_assessment.issues] == [
-        "get",
-        "get",
-        "get",
-    ]
-    assert attempt.intent is None
-    assert attempt.intent_review_response_attempts == 0
-    assert outcome.state.approved_microcycle is None
+    assert attempt.candidate_assessment.accepted
+    assert attempt.intent is not None
+    assert attempt.intent_review_response_attempts == 1
+    assert outcome.state.approved_microcycle is not None
     assert len(gateway.calls) == 1
     assert reader.calls == [(revision, "tests/test_signal_board.py")]
-    assert reasoning.requests == []
-
-
-@pytest.mark.asyncio
-async def test_static_rejection_persists_across_restart_with_surface_recompiled_from_contract(tmp_path):
-    first_revision, second_revision = "u" * 40, "v" * 40
-    source = historical_signal_board_get_candidate()
-    store = ScenarioDraftStateRepo(tmp_path)
-    contract_payload = signal_board_contract().to_dict()
-    first_contract = BehaviorContract.from_dict(contract_payload)
-    first_surface = DeclaredProductSurface.compile(first_contract)
-    initial, _first_gateway, first_reasoning, _reader = components(
-        [accepted("REQ-002--scenario-draft-1", first_revision, "first")],
-        [],
-        {first_revision: source},
-        store,
-    )
-    value = signal_board_request(
-        "restart-signal-board--REQ-002", first_contract, first_surface
-    )
-
-    await initial.submit_candidate(value, binding())
-    rejected = await initial.review_intent(value)
-    persisted = store.load(value.scenario_id)
-
-    assert rejected.state.attempts[0].status == "candidate_invalid"
-    assert persisted == rejected.state
-    assert first_reasoning.requests == []
-
-    restored_contract = BehaviorContract.from_dict(contract_payload)
-    resumed_surface = DeclaredProductSurface.compile(restored_contract)
-    resumed, resumed_gateway, resumed_reasoning, _reader = components(
-        [accepted("REQ-002--scenario-draft-2", second_revision, "second")],
-        [],
-        {first_revision: source, second_revision: source + "\n# second attempt\n"},
-        store,
-    )
-    resumed_request = signal_board_request(
-        value.scenario_id, restored_contract, resumed_surface
-    )
-    await resumed.submit_candidate(resumed_request, binding())
-    continued = await resumed.review_intent(resumed_request)
-
-    assert resumed_surface.component_name == "SignalBoard"
-    assert resumed_surface.members == frozenset({"publish", "latest"})
-    assert "get" not in resumed_surface.members
-    assert [item.status for item in continued.state.attempts] == [
-        "candidate_invalid",
-        "candidate_invalid",
-    ]
-    assert continued.state.approved_microcycle is None
-    assert len(resumed_gateway.calls) == 1
-    assert resumed_reasoning.requests == []
+    assert len(reasoning.requests) == 1
