@@ -320,3 +320,130 @@ ATHBA keeps the compiled product-surface descriptor private control-plane state.
 Before Intent Review, Python AST validation tracks imports, declared production-class constructors, and supported instance aliases. It rejects direct private-state inspection and undeclared public product members, while not treating value/library calls such as `.strip()` or pytest APIs as product interactions. A declared member from a future behavior slice remains allowed; this is a product-boundary subset rule, not an active-ticket exclusivity rule. Rejection feedback names only the offending member and location, not the allowed API list.
 
 Before canonical promotion, Python production candidates are also checked as a subset: public methods, class attributes, and `self.<attribute>` declarations on the declared component may not introduce undeclared surface. Missing future members and private helpers remain allowed. This lint deliberately does not decide semantic transformations, normalisation, Gatekeeper reconciliation, or refactoring. PR21's refactoring lane remains deferred and independent.
+
+
+## Contract-lint SignalBoard bounded-attempt forensics
+
+This section closes the investigation of the immutable live run
+`pr29-contract-lint-signal-board-20260903T223456Z`. The feature, scenario, and
+Rack AI review packets were read only; this work did not resume the run, alter
+its fixture, or create a new SignalBoard run.
+
+### Authoritative live contract and private product surface
+
+The persisted feature state's `contract_payload` is authoritative:
+
+- `component_name`: `SignalBoard`.
+- Exact `public_api`: `SignalBoard`, `publish`, `latest`.
+- REQ-002: source ref `SignalBoard.2`; summary `Publishing a signal payload`;
+  observable outcome `Payload is stored for a specific name`; test hint `Call
+  publish and verify the internal state updates`; dependency `REQ-001`.
+- REQ-003: source ref `SignalBoard.3`; summary `Retrieving the latest signal`;
+  observable outcome `Retrieves the most recent payload`; test hint `Publish
+  multiple payloads for the same name and verify the last one is returned`;
+  dependency `REQ-002`.
+- Exact REQ-002 source clause: `publish(name, payload) records the payload for
+  that signal name.`
+- Exact REQ-003 source clause: `latest(name) returns the most recently published
+  payload for that name.`
+
+Compiling `DeclaredProductSurface` from that persisted contract produces
+`LIVE_DECLARED_COMPONENT=SignalBoard`,
+`LIVE_DECLARED_MEMBERS={publish, latest}`, and
+`LIVE_UNSUPPORTED_PUBLIC_API_ENTRIES=()`. Thus `get` is not declared; `signals`
+is not declared; `publish` and `latest` are declared. This is a deterministic
+projection of the contract, not Gatekeeper state, and is intentionally not a
+second persisted mutable object.
+
+### Tester information boundary
+
+Every captured REQ-002 work-unit objective gave the Tester the focused behavior
+`Publishing a signal payload`, expected result `Payload is stored for a specific
+name`, source ref `SignalBoard.2`, and the exact source evidence above. It also
+gave strict-authoring rules, `tests/test_signal_board.py`, the trusted base,
+and repository facts (including the then-current `SignalBoard` excerpt).
+
+It did **not** serialize the complete contract `public_api`, REQ-003 text,
+`latest`, or Gatekeeper payload/checklist data. Attempt 2's repair objective
+contained attempt 1's source and focused semantic feedback; attempt 3 contained
+attempt 2's source and only its focused deterministic `signals` feedback; attempt
+4 contained the bounded no-candidate feedback. None listed allowed members. A
+control-plane value retained in ATHBA state was not model exposure. Therefore
+`FULL_CONTRACT_SURFACE_EXPOSED_TO_TESTER=NO` and
+`REQ003_EXPOSED_TO_REQ002_TESTER=NO`.
+
+### Every REQ-002 authoring attempt
+
+| Attempt | Work unit and selected worker/provenance | Submission and candidate | Static assessment / lint | Intent and returned feedback | Repair lineage | Timeout / unchanged |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | `REQ-002--scenario-draft-1`; `local-primary`; `jcode`, `gemma4-12b-local-primary`, profile/worker `local-primary`, resource `gpu-4060ti`, generic-reasoning-worker | Accepted; `12218b5f3d209ea84496b43bddf698636bb62eba`; source only constructs `SignalBoard` and asserts it is not `None` | Valid grammar; production path `signal_board.py`; no lint issues | YES, `insufficient_evidence`, one response. Feedback: it neither calls `publish(name, payload)` nor verifies storage. | Fresh draft; no repair base. | NO / NO |
+| 2 | `REQ-002--scenario-draft-2`; same selected worker and full provenance | Accepted; `b6c40eb54625becd062080e0e0e220dfe5f474e7`; calls `publish` then `board.signals.get(...)` | Valid grammar and production tracking; `undeclared_product_member` for `signals` at line 6 | NO; zero intent responses. Focused lint feedback names only `signals` and its location. | Repairs attempt 1 from its branch and `12218b5...`; `repair_previous_candidate`. | NO / NO |
+| 3 | `REQ-002--scenario-draft-3`; same selected worker and full provenance | `worker_model_timeout` after 300 seconds; no candidate revision or source | No candidate/static assessment | NO; zero intent responses. Feedback records the timeout and asks for a complete scenario from the unchanged base. | Based on attempt 2 branch and `b6c40e...`; `retry_repair_from_existing_candidate`. | YES / NO |
+| 4 | `REQ-002--scenario-draft-4`; same selected worker and full provenance | Accepted; `a299f8eb6af6d9267a2d0130a4407c9a169859bf`; calls `publish` then `assert True` | Valid grammar; production path `signal_board.py`; no lint issues | YES, `semantic_repair_required`, one response. Feedback says `assert True` does not verify storage and asks for retrieval/assertion evidence. | Follows the timeout from attempt 3; repair lineage retains attempt 2 candidate state; `retry_repair_from_existing_candidate`. | NO / NO |
+
+The durable scenario state ends `attempts_exhausted`: four Rack AI submissions,
+exactly one increment per submission. There was one static undeclared-member
+rejection (`signals`), zero private-member rejections, one timeout/no-candidate
+attempt, no unchanged repair attempt, and two Intent Review calls (attempts 1
+and 4). Static lint made zero semantic Intent calls and no additional model
+submission. The attempt-2 focused feedback is persisted on that attempt and is
+the only lint feedback supplied to the next Tester objective; it did not leak
+the complete allowed surface.
+
+### Classification
+
+`LIVE_REQ002_ROOT_CLASSIFICATION=BEHAVIOR_SLICE_OBSERVABILITY_GAP`.
+
+REQ-002 legitimately asks the Tester to prove an externally meaningful stored
+state, while its minimally scoped REQ-002 context supplies no legal observation
+mechanism. `latest` exists in the full private contract, but it belongs to
+REQ-003 and was not supplied to the REQ-002 Tester. The Tester consequently
+first produced an incomplete test, then attempted private `signals` observation;
+the timeout and later `assert True` are additional bounded execution/semantic
+failures, not evidence that the complete contract was exposed. The static lint
+correctly prevented the undeclared observation route; it is not itself the
+underlying slice-observability cause.
+
+## Contract-lint proof closure
+
+### Historical `get` held-out regression
+
+`test_historical_signal_board_get_is_rejected_before_intent_or_freeze` uses the
+exact historical candidate: import `pytest`, construct `SignalBoard`, publish
+`("name", "payload")`, then make the three `board.get("name")` assertions. It
+runs through the production `ScenarioDraftingService` submission and candidate
+assessment path, not a low-level lint helper.
+
+The candidate has valid Python grammar, the production import/path tracker finds
+`signal_board.py`, and constructor-instance tracking identifies `board` as the
+product instance. `publish` produces no violation. All three `get` references
+produce `undeclared_product_member`; Intent Review has zero calls/responses; no
+approved microcycle is frozen, and consequently no frontier or Developer work
+can be created. This was missing coverage only:
+`HELD_OUT_FAILURE_CLASSIFICATION=TEST_MISSING_ONLY` and no production source
+change was required.
+
+### Restart/resume static-policy regression
+
+`test_static_rejection_persists_across_restart_with_surface_recompiled_from_contract`
+first records a Rack-AI-accepted historical candidate, deterministically rejects
+it for `get`, and saves the rejected attempt with `ScenarioDraftStateRepo`.
+The test restarts with a new service and reloads normal repository serialization.
+It reconstructs the Behavior Contract from its persisted payload and recompiles
+`DeclaredProductSurface`; no Gatekeeper payload is supplied. The resumed surface
+is again `SignalBoard` with exactly `publish` and `latest`.
+
+Continuation makes a new bounded Tester submission and runs it through the same
+recompiled static policy. Both attempts remain `candidate_invalid`; the original
+rejected candidate is never reinterpreted as accepted, neither rejected
+candidate reaches Intent Review, no microcycle is frozen, and no frontier or
+Developer work is reachable. The prior
+`RESTART_RESUME_STATIC_POLICY=FAIL` therefore meant
+`MISSING_PROOF_ONLY`, not a reproduced policy bypass. Persisting
+`DeclaredProductSurface` itself remains unnecessary because it is a deterministic
+projection of the authoritative persisted Behavior Contract.
+
+Focused validation for this closure passed: `63 passed` across behavior-contract
+surface, scenario drafting, feature-execution advance, and persistence tests.
+No production, Rack AI, Tester-information, Intent Review, Gatekeeper, planner,
+routing, budget, grammar, PR21, or refactoring source changed.
