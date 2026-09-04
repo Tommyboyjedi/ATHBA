@@ -1,5 +1,19 @@
 # PR29 live SignalBoard strict-TDD proof
 
+## Observation Resolver experiment reversion
+
+The just-in-time Observation Resolver experiment was introduced in `0505e11` and
+its role-specific fenced-JSON handling was corrected in `c5ac723`. Review later
+determined that this introduced a new LLM semantic decision in the wrong layer.
+Both commits were explicitly reverted on this PR29 branch; their semantic
+qualification results remain historical evidence only.
+
+This does not establish that local-primary is generally unqualified for Behavior
+Planning, Tester work, or other roles. The deterministic Behavior Contract
+public-surface lint and its held-out/restart persistence regressions predate the
+experiment and remain retained. This reversion does not alter Gatekeeper behavior,
+does not resume or create a SignalBoard proof run, and does not affect PR21.
+
 ## Scope
 
 This document records the first real tiny strict-TDD feature attempt through the
