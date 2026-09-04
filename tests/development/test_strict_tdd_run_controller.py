@@ -121,6 +121,24 @@ async def test_inflight_without_receipt_fails_closed(tmp_path):
     assert value.application.calls == 0
 
 
+@pytest.mark.asyncio
+async def test_resume_reopens_transition_limited_run(tmp_path):
+    value = controller(tmp_path, [transition()])
+    state = StrictTddRunState(
+        "run-one",
+        "project-one",
+        request().immutable_identity_hash,
+        StrictTddRunStatus.TRANSITION_LIMIT_REACHED,
+        reason="controller_transition_limit_reached",
+    )
+    value.states.save(state)
+
+    resumed = await value.advance(request(StrictTddRunMode.RESUME))
+
+    assert resumed.status == StrictTddRunStatus.CHECKPOINTED
+    assert value.application.calls == 1
+
+
 def test_controller_is_not_a_feature_router_or_live_executor():
     source = Path("core/development/strict_tdd_run_controller.py").read_text()
     tree = ast.parse(source)

@@ -155,7 +155,20 @@ def _resume(self, request: StrictTddRunRequest, context: StrictTddLifecycleRunCo
     state = _required_state(self, request)
     if state.project_id != request.project_id or state.immutable_identity_hash != request.immutable_identity_hash:
         raise ValueError("strict TDD resume request identity differs")
-    resumed = replace(state, current_invocation_count=state.current_invocation_count + 1)
+    resumed = replace(
+        state,
+        status=(
+            StrictTddRunStatus.RUNNING
+            if state.status == StrictTddRunStatus.TRANSITION_LIMIT_REACHED
+            else state.status
+        ),
+        reason=(
+            None
+            if state.status == StrictTddRunStatus.TRANSITION_LIMIT_REACHED
+            else state.reason
+        ),
+        current_invocation_count=state.current_invocation_count + 1,
+    )
     self.states.save(resumed)
     event = _append_controller_event(self, context, resumed, StrictTddLifecycleEventKind.RUN_RESUMED, StrictTddLifecycleStatus.STARTED)
     updated = replace(resumed, last_lifecycle_event_id=event.event_id)
