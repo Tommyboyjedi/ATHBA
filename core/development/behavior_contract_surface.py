@@ -21,12 +21,10 @@ class DeclaredProductSurface:
     component_name: str
     members: frozenset[str]
     unsupported_public_api_entries: tuple[str, ...] = ()
-    canonical_members: tuple[str, ...] = ()
 
     @classmethod
     def compile(cls, contract: BehaviorContract) -> "DeclaredProductSurface":
         members: set[str] = set()
-        canonical_members: list[str] = []
         unsupported: list[str] = []
         for entry in contract.public_api:
             match = _MEMBER.fullmatch(entry.strip())
@@ -40,13 +38,7 @@ class DeclaredProductSurface:
                 continue
             else:
                 members.add(member)
-                canonical_members.append(entry.strip())
-        return cls(
-            contract.component_name,
-            frozenset(members),
-            tuple(unsupported),
-            tuple(canonical_members),
-        )
+        return cls(contract.component_name, frozenset(members), tuple(unsupported))
 
     @property
     def machine_usable(self) -> bool:
@@ -55,16 +47,12 @@ class DeclaredProductSurface:
     def allows(self, member: str) -> bool:
         return member in self.members
 
-    def allows_canonical(self, member: str) -> bool:
-        return member in self.canonical_members
-
 
 @dataclass(frozen=True)
 class ProductSurfaceViolation:
     member: str
     detail: str
     span: SourceSpan
-    usage_role: str = "unknown"
 
 
 def lint_test_candidate_violations(source: str, surface: DeclaredProductSurface, production_path: str) -> tuple[ProductSurfaceViolation, ...]:
@@ -72,7 +60,6 @@ def lint_test_candidate_violations(source: str, surface: DeclaredProductSurface,
     aliases = _production_class_aliases(module, surface.component_name, production_path)
     instances = _production_instances(module, aliases, surface.component_name)
     violations: list[ProductSurfaceViolation] = []
-    parents = _parents(module)
     for node in ast.walk(module):
         if not isinstance(node, ast.Attribute) or not isinstance(node.value, ast.Name) or node.value.id not in instances:
             continue
@@ -85,9 +72,7 @@ def lint_test_candidate_violations(source: str, surface: DeclaredProductSurface,
             detail = f"Candidate references undeclared product member `{node.attr}` at line {node.lineno}. Product interactions must remain inside the declared product contract. Repair the candidate without introducing undeclared product surface."
         else:
             continue
-        violations.append(
-            ProductSurfaceViolation(node.attr, detail, span, _usage_role(node, parents))
-        )
+        violations.append(ProductSurfaceViolation(node.attr, detail, span))
     return _unique(violations)
 
 
@@ -163,26 +148,3 @@ def _unique(violations: list[ProductSurfaceViolation]) -> tuple[ProductSurfaceVi
     for item in violations:
         values[(item.member, item.span.start_line)] = item
     return tuple(values.values())
-
-def _parents(module: ast.Module) -> dict[int, ast.AST]:
-    return {
-        id(child): parent
-        for parent in ast.walk(module)
-        for child in ast.iter_child_nodes(parent)
-    }
-
-
-def _usage_role(node: ast.Attribute, parents: dict[int, ast.AST]) -> str:
-    """Classify only direct strict-grammar contexts; ambiguous flow stays unknown."""
-    current: ast.AST = node
-    while (parent := parents.get(id(current))) is not None:
-        if isinstance(parent, ast.Assert):
-            return "observation"
-        if isinstance(parent, ast.Expr):
-            return "action"
-        if isinstance(parent, (ast.Assign, ast.AnnAssign)):
-            return "unknown"
-        if isinstance(parent, ast.FunctionDef):
-            break
-        current = parent
-    return "unknown"

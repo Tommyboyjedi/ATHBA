@@ -18,10 +18,6 @@ from core.development.scenario_drafting_domain import (
     ScenarioDraftRunState,
     ScenarioDraftStatus,
 )
-from core.development.scenario_observation_support import (
-    ScenarioObservationContext,
-    ScenarioObservationRequirement,
-)
 from core.development.strict_microcycle import StrictMicrocycleRequest
 from core.development.strict_tdd_feature_application import FeatureScenarioRequest, FeatureScenarioResult
 from core.development.strict_tdd_feature_execution import _evidence, _facts, _ticket_for
@@ -131,22 +127,6 @@ def _source_requirement_evidence(request: FeatureScenarioRequest):
         raise ValueError("behavior source refs are absent from the behavior contract")
     return tuple(clauses[ref] for ref in request.behavior.source_refs)
 
-def _observation_context(request: FeatureScenarioRequest) -> ScenarioObservationContext | None:
-    surface = DeclaredProductSurface.compile(request.contract)
-    if not surface.machine_usable:
-        return None
-    return ScenarioObservationContext(
-        request.behavior.ref,
-        request.behavior.summary,
-        request.behavior.observable_outcome,
-        request.behavior.test_hint,
-        _source_requirement_evidence(request),
-        surface,
-        tuple(
-            ScenarioObservationRequirement(item.ref, item.summary, item.observable_outcome)
-            for item in request.contract.observable_requirements
-        ),
-    )
 async def _submit_draft(
     executor: StrictFeatureScenarioExecutor,
     request: FeatureScenarioRequest,
@@ -165,7 +145,6 @@ async def _submit_draft(
             request.canonical_development_base,
             _source_requirement_evidence(request),
             DeclaredProductSurface.compile(request.contract),
-            _observation_context(request),
         ),
         request.project.binding().with_base_sha(request.canonical_development_base),
     )
@@ -198,7 +177,6 @@ async def _review_intent(
             request.canonical_development_base,
             _source_requirement_evidence(request),
             DeclaredProductSurface.compile(request.contract),
-            _observation_context(request),
         )
     )
     status = outcome.state.status

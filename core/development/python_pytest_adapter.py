@@ -254,7 +254,7 @@ class PythonCandidateAssessmentFactory:
         issues = list(assessment.issues)
         for violation in lint_test_candidate_violations(request.candidate.source, request.product_surface, request.production_path):
             code = ScenarioCandidateIssueCode.PRIVATE_PRODUCT_MEMBER if violation.member.startswith("_") else ScenarioCandidateIssueCode.UNDECLARED_PRODUCT_MEMBER
-            issues.append(ScenarioCandidateIssue(code.value, violation.detail, violation.span, violation.usage_role))
+            issues.append(ScenarioCandidateIssue(code.value, violation.detail, violation.span))
         return replace(assessment, issues=tuple(issues))
 
 
