@@ -22,6 +22,7 @@ from core.development.provider_behavior_reviewer import ProviderSeniorBehaviorRe
 from core.development.python_pytest_adapter import PythonPytestAdapter
 from core.development.scenario_drafting import GitCandidateScenarioSourceReader, ScenarioDraftingDependencies, ScenarioDraftingService, ScenarioIntentReviewer
 from core.development.scenario_drafting import ScenarioDraftWorkUnitFactory
+from core.development.scenario_observation_support import ScenarioObservationResolver
 from core.development.specification_assessment import SpecificationGatekeeper
 from core.development.specification_reconciliation import CompletedMicrocycleEvidenceCollector
 from core.development.strict_microcycle import (
@@ -123,6 +124,7 @@ class StrictTddFeatureCompositionFactory:
                 ScenarioDraftWorkUnitFactory(
                     budget_policy=request.execution_budget_policy
                 ),
+                observation_resolver=ScenarioObservationResolver(request.reasoning_gateway),
             )
         )
         revisions = MicrocycleRevisionLifecycle(RevisionLifecycleDependencies(MicrocycleRevisionRepository(root / "revisions"), MicrocycleGitClient(request.repository_root)))

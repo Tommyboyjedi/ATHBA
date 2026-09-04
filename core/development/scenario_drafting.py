@@ -45,6 +45,11 @@ from core.development.scenario_drafting_domain import (
     ScenarioSubmissionOutcome,
 )
 from core.development.specification_domain import SourceRequirementClause
+from core.development.scenario_observation_support import (
+    ScenarioObservationResolver,
+    ScenarioObservationSupport,
+    ScenarioObservationSupportStatus,
+)
 from core.development.strict_tdd_execution_budget import (
     StrictTddExecutionBudgetPolicy,
     StrictTddWorkKind,
@@ -77,6 +82,7 @@ class ScenarioDraftWorkUnitRequest:
     attempt_number: int
     feedback: str | None
     repair_attempt: ScenarioDraftAttempt | None = None
+    observation_support: ScenarioObservationSupport | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +101,7 @@ class ScenarioDraftingDependencies:
     source_reader: ScenarioCandidateSourceReader
     state_store: ScenarioDraftStateStore
     work_units: ScenarioDraftWorkUnitFactory | None = None
+    observation_resolver: ScenarioObservationResolver | None = None
 
 
 @dataclass(frozen=True)
@@ -124,7 +131,7 @@ class ScenarioDraftWorkUnitFactory:
             id=work_unit_id,
             project_id=draft.ticket.step_id,
             parent_ticket_id=draft.ticket.step_id,
-            objective=_tester_objective(draft, request.feedback, request.repair_attempt),
+            objective=_tester_objective(draft, request.feedback, request.repair_attempt, request.observation_support),
             allowed_paths=[draft.allowed_test_path],
             acceptance=AcceptanceContract(
                 commands=[[self.python_executable, "-B", "-m", "py_compile", draft.allowed_test_path]],
@@ -241,6 +248,7 @@ class ScenarioDraftingService:
         self.source_reader = dependencies.source_reader
         self.state_store = dependencies.state_store
         self.work_units = dependencies.work_units or ScenarioDraftWorkUnitFactory()
+        self.observation_resolver = dependencies.observation_resolver
 
     async def draft(
         self,
@@ -259,6 +267,7 @@ class ScenarioDraftingService:
         if state.approved_microcycle is not None or state.status in {
             ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value,
             ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
+        ScenarioDraftStatus.OBSERVATION_SUPPORT_PROTOCOL_FAILURE.value,
         }:
             return ScenarioDraftOutcome(state, False)
         if len(state.attempts) >= MAX_TESTER_SCENARIO_ATTEMPTS:
@@ -268,7 +277,7 @@ class ScenarioDraftingService:
         attempt_number = len(state.attempts) + 1
         repair = _last_candidate_attempt(state)
         repair_binding = _repair_binding(binding, request, repair, self.source_reader)
-        unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state), repair))
+        unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state), repair, state.observation_support))
         result = await self.execution_gateway.execute(unit, repair_binding)
         outcome = self._record_submission(ScenarioDraftExecutionRecord(state, request, unit, result))
         self.state_store.save(outcome.state)
@@ -294,7 +303,13 @@ class ScenarioDraftingService:
             self.state_store.save(outcome.state)
             return outcome
         if not prepared.assessment.accepted:
-            outcome = _candidate_failure(ScenarioCandidateFailureRequest(state, attempt, source, prepared.assessment.repair_feedback(), prepared))
+            updated_state = state
+            if _static_observation_trigger(prepared) and state.observation_support is None:
+                updated_state = await _with_observation_support(state, request, self.observation_resolver)
+                if _is_terminal_draft_state(updated_state):
+                    self.state_store.save(updated_state)
+                    return ScenarioDraftOutcome(updated_state, False)
+            outcome = _candidate_failure(ScenarioCandidateFailureRequest(updated_state, attempt, source, prepared.assessment.repair_feedback(), prepared))
             self.state_store.save(outcome.state)
             return outcome
         pending = replace(
@@ -330,6 +345,11 @@ class ScenarioDraftingService:
         if intent_outcome.result is None:
             raise RuntimeError("semantic intent outcome requires a result")
         updated = replace(state, attempts=(*state.attempts[:-1], reviewed))
+        if intent_outcome.status == ScenarioIntentReviewStatus.INSUFFICIENT_EVIDENCE and state.observation_support is None:
+            updated = await _with_observation_support(updated, request, self.observation_resolver)
+            if _is_terminal_draft_state(updated):
+                self.state_store.save(updated)
+                return ScenarioDraftOutcome(updated, False)
         if intent_outcome.status != ScenarioIntentReviewStatus.APPROVED:
             self.state_store.save(updated)
             return ScenarioDraftOutcome(updated, False)
@@ -346,48 +366,7 @@ class ScenarioDraftingService:
         return ScenarioDraftOutcome(approved, False)
 
     def _record_submission(self, record: ScenarioDraftExecutionRecord) -> ScenarioDraftOutcome:
-        state = record.state
-        unit = record.unit
-        result = record.result
-        accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
-        outcome = _submission_outcome(result, accepted)
-        if outcome is ScenarioSubmissionOutcome.EXTERNAL_BLOCKER:
-
-            blocked = replace(state, status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value, harness_failure_evidence=_workspace_failure_evidence(unit, result))
-            return ScenarioDraftOutcome(blocked, False)
-        status = outcome.value
-        feedback = None if accepted else _no_candidate_feedback(result, outcome)
-        attempt = replace(
-            _attempt(unit, result, status, feedback),
-            repair_mode=_submission_mode(state).value,
-            no_candidate_outcome=None if accepted else outcome.value,
-        )
-        if state.attempts and attempt.candidate_revision is not None:
-            try:
-                returned_source = self.source_reader.read(attempt.candidate_revision, record.request.allowed_test_path)
-            except ValueError:
-                returned_source = None
-            attempt = replace(attempt, candidate_source=returned_source)
-        if not state.attempts:
-            return _append_attempt(state, attempt)
-        parent = state.attempts[-1]
-        attempt = replace(
-            attempt,
-            repair_base_ref=parent.candidate_branch or parent.candidate_revision,
-            repair_base_sha=parent.candidate_revision,
-        )
-        unchanged = _unchanged_evidence(parent, attempt)
-        if unchanged is None:
-            return _append_attempt(state, attempt)
-        feedback = _unchanged_feedback(parent.feedback)
-        assessment = _unchanged_assessment(parent.candidate_assessment, feedback)
-        rejected = replace(
-            attempt, status="candidate_unchanged", feedback=feedback,
-            candidate=parent.candidate, static_analysis=parent.static_analysis,
-            candidate_assessment=assessment, candidate_source=parent.candidate_source,
-            unchanged_evidence=unchanged,
-        )
-        return _append_attempt(state, rejected)
+        return _record_submission(self.source_reader, record)
 
 
 @dataclass(frozen=True)
@@ -413,6 +392,33 @@ class ScenarioDraftCompatibilityLoop:
 
 
 
+async def _with_observation_support(
+    state: ScenarioDraftRunState,
+    request: ScenarioDraftRequest,
+    resolver: ScenarioObservationResolver | None,
+) -> ScenarioDraftRunState:
+    if resolver is None or request.observation_context is None or state.observation_support is not None:
+        return state
+    support = await resolver.resolve(request.observation_context)
+    if support.status == ScenarioObservationSupportStatus.PROTOCOL_FAILURE.value:
+        return replace(
+            state,
+            observation_support=support,
+            status=ScenarioDraftStatus.OBSERVATION_SUPPORT_PROTOCOL_FAILURE.value,
+        )
+    return replace(state, observation_support=support)
+
+
+def _static_observation_trigger(prepared: ScenarioCandidatePreparation) -> bool:
+    issues = prepared.assessment.issues
+    product_codes = {
+        ScenarioCandidateIssueCode.UNDECLARED_PRODUCT_MEMBER.value,
+        ScenarioCandidateIssueCode.PRIVATE_PRODUCT_MEMBER.value,
+    }
+    return bool(issues) and all(item.code in product_codes for item in issues) and any(
+        item.usage_role == "observation" for item in issues
+    )
+
 def _freeze_failure_state(
     state: ScenarioDraftRunState,
     attempt: ScenarioDraftAttempt,
@@ -427,6 +433,7 @@ def _is_terminal_draft_state(state: ScenarioDraftRunState) -> bool:
         ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value,
         ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value,
         ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
+        ScenarioDraftStatus.OBSERVATION_SUPPORT_PROTOCOL_FAILURE.value,
     }
 
 
@@ -715,7 +722,12 @@ def _authoring_contract(request: ScenarioDraftRequest) -> ScenarioAuthoringContr
     )
 
 
-def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repair: ScenarioDraftAttempt | None) -> str:
+def _tester_objective(
+    request: ScenarioDraftRequest,
+    feedback: str | None,
+    repair: ScenarioDraftAttempt | None,
+    observation_support: ScenarioObservationSupport | None,
+) -> str:
     payload: dict[str, object] = {
         "role": "Tester",
         "task": "REPAIR MODE. Refactor the existing submitted test candidate. The existing test file is present in your base revision. Make the smallest changes required to resolve the listed violations. Preserve correct behavior already expressed. Do not discard it and invent an unrelated test." if repair else ("Your previous Tester submission produced no candidate source or revision. Submit a new complete scenario from the unchanged development base. Use only tools actually exposed by the execution harness." if feedback and feedback.startswith("Your previous Tester submission") else "Draft one complete behavioral scenario conforming to the supplied strict authoring contract."),
@@ -750,6 +762,15 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "do not materialise a frontier or start implementation",
         ],
     }
+    if (
+        observation_support is not None
+        and observation_support.status == ScenarioObservationSupportStatus.SUPPORT_SELECTED.value
+    ):
+        payload["observation_support"] = {
+            "instruction": "The following declared product member may be used only as an observation instrument if required to demonstrate the active behavior. Do not test its independent semantics or broaden the scenario beyond the active ticket.",
+            "members": list(observation_support.selected_members),
+        }
+
     if repair is not None:
         payload["previous_candidate"] = {
             "attempt": repair.attempt_number,
@@ -878,3 +899,58 @@ def _intent_repair_prompt(invalid: str, error: str) -> str:
         },
         sort_keys=True,
     )
+
+
+def _record_submission(
+    source_reader: ScenarioCandidateSourceReader,
+    record: ScenarioDraftExecutionRecord,
+) -> ScenarioDraftOutcome:
+    state = record.state
+    unit = record.unit
+    result = record.result
+    accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
+    outcome = _submission_outcome(result, accepted)
+    if outcome is ScenarioSubmissionOutcome.EXTERNAL_BLOCKER:
+        blocked = replace(
+            state,
+            status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
+            harness_failure_evidence=_workspace_failure_evidence(unit, result),
+        )
+        return ScenarioDraftOutcome(blocked, False)
+    status = outcome.value
+    feedback = None if accepted else _no_candidate_feedback(result, outcome)
+    attempt = replace(
+        _attempt(unit, result, status, feedback),
+        repair_mode=_submission_mode(state).value,
+        no_candidate_outcome=None if accepted else outcome.value,
+    )
+    if state.attempts and attempt.candidate_revision is not None:
+        try:
+            returned_source = source_reader.read(attempt.candidate_revision, record.request.allowed_test_path)
+        except ValueError:
+            returned_source = None
+        attempt = replace(attempt, candidate_source=returned_source)
+    if not state.attempts:
+        return _append_attempt(state, attempt)
+    parent = state.attempts[-1]
+    attempt = replace(
+        attempt,
+        repair_base_ref=parent.candidate_branch or parent.candidate_revision,
+        repair_base_sha=parent.candidate_revision,
+    )
+    unchanged = _unchanged_evidence(parent, attempt)
+    if unchanged is None:
+        return _append_attempt(state, attempt)
+    feedback = _unchanged_feedback(parent.feedback)
+    assessment = _unchanged_assessment(parent.candidate_assessment, feedback)
+    rejected = replace(
+        attempt,
+        status="candidate_unchanged",
+        feedback=feedback,
+        candidate=parent.candidate,
+        static_analysis=parent.static_analysis,
+        candidate_assessment=assessment,
+        candidate_source=parent.candidate_source,
+        unchanged_evidence=unchanged,
+    )
+    return _append_attempt(state, rejected)

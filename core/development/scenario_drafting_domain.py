@@ -7,6 +7,10 @@ from typing import Any
 
 from core.development.scenario_intent_review import ScenarioIntentProtocolFailure
 from core.development.behavior_contract_surface import DeclaredProductSurface
+from core.development.scenario_observation_support import (
+    ScenarioObservationContext,
+    ScenarioObservationSupport,
+)
 
 from core.development.microcycle_domain import (
     MicrocycleState,
@@ -110,18 +114,20 @@ class ScenarioCandidateIssue:
     code: str
     detail: str
     source_span: SourceSpan | None = None
+    usage_role: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
             "code": self.code,
             "detail": self.detail,
             "source_span": None if self.source_span is None else self.source_span.to_dict(),
+            "usage_role": self.usage_role,
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ScenarioCandidateIssue":
         span = value.get("source_span")
-        return cls(str(value["code"]), str(value["detail"]), None if span is None else SourceSpan.from_dict(dict(span)))
+        return cls(str(value["code"]), str(value["detail"]), None if span is None else SourceSpan.from_dict(dict(span)), value.get("usage_role"))
 
 
 @dataclass(frozen=True)
@@ -190,6 +196,7 @@ class ScenarioDraftStatus(str, Enum):
     ATTEMPTS_EXHAUSTED = "attempts_exhausted"
     INTENT_PROTOCOL_FAILURE = "intent_protocol_failure"
     SCENARIO_HARNESS_FAILURE = "scenario_harness_failure"
+    OBSERVATION_SUPPORT_PROTOCOL_FAILURE = "observation_support_protocol_failure"
 class ScenarioHarnessFailureStage(str, Enum):
     WORKSPACE_RESULT = "workspace_result"
     SCENARIO_FREEZE = "scenario_freeze"
@@ -283,6 +290,7 @@ class ScenarioDraftRequest:
     source_requirement_evidence: tuple[SourceRequirementClause, ...] = ()
 
     product_surface: DeclaredProductSurface | None = None
+    observation_context: ScenarioObservationContext | None = None
     def __post_init__(self) -> None:
         values = (
             self.scenario_id,
@@ -424,6 +432,7 @@ class ScenarioDraftRunState:
     status: str = ScenarioDraftStatus.DRAFTING.value
     project_synchronised: bool = False
     harness_failure_evidence: ScenarioHarnessFailureEvidence | None = None
+    observation_support: ScenarioObservationSupport | None = None
 
     def __post_init__(self) -> None:
         values = (
@@ -460,12 +469,14 @@ class ScenarioDraftRunState:
             "status": self.status,
             "project_synchronised": self.project_synchronised,
             "harness_failure_evidence": None if self.harness_failure_evidence is None else self.harness_failure_evidence.to_dict(),
+            "observation_support": None if self.observation_support is None else self.observation_support.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ScenarioDraftRunState":
         approved = value.get("approved_microcycle")
         harness_failure_evidence = value.get("harness_failure_evidence")
+        observation_support = value.get("observation_support")
         return cls(
             scenario_id=str(value["scenario_id"]),
             behavior_ref=str(value["behavior_ref"]),
@@ -479,6 +490,7 @@ class ScenarioDraftRunState:
             status=str(value.get("status", ScenarioDraftStatus.DRAFTING.value)),
             project_synchronised=bool(value.get("project_synchronised", False)),
             harness_failure_evidence=None if harness_failure_evidence is None else ScenarioHarnessFailureEvidence.from_dict(dict(harness_failure_evidence)),
+            observation_support=None if observation_support is None else ScenarioObservationSupport.from_dict(dict(observation_support)),
         )
 
 
