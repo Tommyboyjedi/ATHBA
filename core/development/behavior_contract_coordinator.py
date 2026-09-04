@@ -530,7 +530,7 @@ class DependencyPrerequisitePlanner:
             prompt=json.dumps({
                 "instruction": "Choose exactly one bounded dependency decision as raw JSON. For add_prerequisite, prerequisite_observable must state one externally observable capability, not an implementation, API invocation, test, or patch instruction. Do not redesign.",
                 "blocked_requirement_ref": request.step.requirement_refs[0],
-                "planned_requirements": [item.to_dict() for item in request.contract.observable_requirements],
+                "planned_requirements": [item.to_model_dict() for item in request.contract.observable_requirements],
                 "trusted_revision": request.trusted_revision,
                 "mechanical_failure": request.evidence.to_dict(),
                 "schema": {"disposition": "already_planned|add_prerequisite|reject_dependency", "parent_requirement_ref": "string", "prerequisite_refs": ["string"], "prerequisite_observable": "string|null", "rationale": "string"},
@@ -668,7 +668,7 @@ def _dependency_decision_repair_prompt(
         {
             "instruction": "Repair the invalid ATHBA dependency decision. Return raw JSON only.",
             "blocked_requirement_ref": request.step.requirement_refs[0],
-            "planned_requirements": [item.to_dict() for item in request.contract.observable_requirements],
+            "planned_requirements": [item.to_model_dict() for item in request.contract.observable_requirements],
             "trusted_revision": request.trusted_revision,
             "mechanical_failure": request.evidence.to_dict(),
             "invalid_dependency_decision": invalid_decision_text,
@@ -2006,7 +2006,7 @@ def _step_prompt(
     return json.dumps(
         {
             "instruction": "Act as ATHBA's Tester planner. Return one JSON object only.",
-            "contract": contract.to_dict(),
+            "contract": contract.to_model_dict(),
             "allowed_requirement_refs": [
                 ref
                 for ref in run_state.active_requirement_refs()
@@ -2093,7 +2093,7 @@ def _step_repair_prompt(
     return json.dumps(
         {
             "instruction": "Repair the invalid ATHBA Tester step decision. Return raw JSON only.",
-            "contract": contract.to_dict(),
+            "contract": contract.to_model_dict(),
             "allowed_requirement_refs": run_state.active_requirement_refs(),
             "current_pool": run_state.current_pool,
             "completed_requirement_refs": run_state.completed_requirement_refs,
@@ -2204,7 +2204,7 @@ def _review_prompt(
     return json.dumps(
         {
             "instruction": "Act as ATHBA's Senior Reviewer. Return one JSON object only.",
-            "contract": contract.to_dict(),
+            "contract": contract.to_model_dict(),
             "current_pool": run_state.current_pool,
             "candidate_revision": candidate_revision,
             "step": cycle.step.to_dict(),

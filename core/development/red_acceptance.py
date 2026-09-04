@@ -847,7 +847,7 @@ def _verifier_prompt(
     payload = {
         "instruction": "Assess whether this valid executable test is trustworthy RED evidence. Return raw JSON only.",
         "question": "Did this valid executable test genuinely exercise the planned behavior and fail because that behavior is currently absent or incorrect?",
-        "behavior_contract": request.contract.to_dict(),
+        "behavior_contract": request.contract.to_model_dict(),
         "tdd_step": request.step.to_dict(),
         "generated_test_source": source,
         "artifact_assessment": assessment.to_dict(),

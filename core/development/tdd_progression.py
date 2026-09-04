@@ -4,6 +4,8 @@ from core.development.behavior_contract_domain import (
     BehaviorContract,
     BehaviorContractLoadOptions,
     BehaviorContractRequirement,
+    TechnicalBinding,
+    TechnicalDecision,
 )
 from core.development.contract_run_domain import (
     BehaviorContractRunState,
@@ -41,6 +43,9 @@ from core.development.tdd_progression_values import (
     GatekeeperAssessmentStatus,
     ReviewVerdict,
     StepDecisionStatus,
+    TechnicalBindingRole,
+    TechnicalDecisionKind,
+    TechnicalDecisionOrigin,
 )
 
 CONTRACT_POOL_STATUSES = {item.value for item in ContractPoolStatus}
@@ -79,6 +84,11 @@ __all__ = [
     "TddPhaseState",
     "TddSnapshot",
     "STEP_DECISION_STATUSES",
+    "TechnicalBinding",
+    "TechnicalBindingRole",
+    "TechnicalDecision",
+    "TechnicalDecisionKind",
+    "TechnicalDecisionOrigin",
     "TddStepDecision",
     "TddStepProposal",
     "green_work_unit_id",
