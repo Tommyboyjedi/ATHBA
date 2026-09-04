@@ -26,6 +26,8 @@ from core.development.behavior_contract_coordinator import (
     SemanticReviewRequest,
     SeniorReviewer,
     WorkUnitBuildRequest,
+    BEHAVIOR_PLANNER_CONTRACT_VERSION,
+    BEHAVIOR_PLANNER_SCHEMA_SIGNATURE,
     _assess_accepted_red,
     _first_executable_gap,
 )
@@ -226,6 +228,29 @@ def contract_payload():
         "completion_criteria": ["all source clauses are covered by observable requirements and accepted tests"],
         "status": "tdd_ready",
     }
+
+
+
+def planner_contract_payload() -> dict:
+    payload = contract_payload()
+    payload["technical_decisions"] = [
+        {"ref": "TECH-1", "kind": "class", "qualified_identifier": "ReservationBook", "origin": "behavior_planner", "source_clause_refs": ["SRC-1"], "evidence_refs": [], "source_excerpt": None},
+        {"ref": "TECH-2", "kind": "method", "qualified_identifier": "ReservationBook.add_resource", "origin": "behavior_planner", "source_clause_refs": ["SRC-1"], "evidence_refs": [], "source_excerpt": None},
+        {"ref": "TECH-3", "kind": "method", "qualified_identifier": "ReservationBook.available", "origin": "behavior_planner", "source_clause_refs": ["SRC-1"], "evidence_refs": [], "source_excerpt": None},
+        {"ref": "TECH-4", "kind": "method", "qualified_identifier": "ReservationBook.reserve", "origin": "behavior_planner", "source_clause_refs": ["SRC-3"], "evidence_refs": [], "source_excerpt": None},
+        {"ref": "TECH-5", "kind": "method", "qualified_identifier": "ReservationBook.cancel", "origin": "behavior_planner", "source_clause_refs": ["SRC-3"], "evidence_refs": [], "source_excerpt": None},
+    ]
+    payload["observable_requirements"][0]["technical_bindings"] = [
+        {"technical_ref": "TECH-1", "role": "subject"},
+        {"technical_ref": "TECH-2", "role": "action"},
+        {"technical_ref": "TECH-3", "role": "observation"},
+    ]
+    payload["observable_requirements"][1]["technical_bindings"] = [
+        {"technical_ref": "TECH-1", "role": "subject"},
+        {"technical_ref": "TECH-4", "role": "action"},
+        {"technical_ref": "TECH-5", "role": "action"},
+    ]
+    return payload
 
 
 def contract() -> BehaviorContract:
@@ -492,7 +517,7 @@ def create_review_repo(tmp_path: Path) -> tuple[Path, str, str]:
 
 @pytest.mark.asyncio
 async def test_valid_component_requirement_becomes_valid_behavior_contract():
-    gateway = FakeReasoningGateway([source_clause_payload(), contract_payload()])
+    gateway = FakeReasoningGateway([source_clause_payload(), planner_contract_payload()])
     planner = BehaviorContractPlanner(gateway)
 
     result = await planner.create_contract(
@@ -564,9 +589,9 @@ async def test_malformed_contract_input_fails_closed():
 
 @pytest.mark.asyncio
 async def test_contract_planner_repairs_uncovered_source_clauses_once():
-    invalid_payload = contract_payload()
+    invalid_payload = planner_contract_payload()
     invalid_payload["observable_requirements"] = [invalid_payload["observable_requirements"][0]]
-    gateway = FakeReasoningGateway([source_clause_payload(), invalid_payload, contract_payload()])
+    gateway = FakeReasoningGateway([source_clause_payload(), invalid_payload, planner_contract_payload()])
     planner = BehaviorContractPlanner(gateway)
 
     restored = await planner.create_contract(
@@ -581,12 +606,20 @@ async def test_contract_planner_repairs_uncovered_source_clauses_once():
     assert gateway.requests[1].purpose == "athba_behavior_contract"
     assert gateway.requests[2].purpose == "athba_behavior_contract_repair"
     assert "source clauses must be covered by observable requirements" in gateway.requests[2].prompt
+    repair_prompt = json.loads(gateway.requests[2].prompt)
+    assert repair_prompt["planner_contract_version"] == "technical-decisions-v1"
+    assert repair_prompt["planner_schema_signature"] == "f601e38508a568ddbad10037a3f512120c3f17b87bd9fa9f4074b7a670ce016a"
+    assert "technical_decisions" in repair_prompt["required_json_schema"]
+    assert "technical_bindings" in repair_prompt["required_json_schema"]["observable_requirements"][0]
+    assert "retain technical_decisions and technical_bindings" in " ".join(
+        repair_prompt["repair_rules"]
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mutation", ["altered", "extra", "missing"])
 async def test_contract_planner_installs_immutable_authoritative_fields_before_validation(mutation):
-    payload = contract_payload()
+    payload = planner_contract_payload()
     exact_requirement = "Component: ExampleWidget\n\n1. Stores exact text: punctuation!\n2. Preserves Case.\n"
     if mutation == "altered":
         payload["project_id"] = "renamed-project"
@@ -776,10 +809,10 @@ def test_multiple_source_clauses_can_map_to_one_requirement_when_behavior_is_coh
 
 @pytest.mark.asyncio
 async def test_contract_output_paths_must_match_allowed_path_sets():
-    payload = contract_payload()
+    payload = planner_contract_payload()
     payload["production_paths"] = ["other.py"]
     payload["test_paths"] = ["tests/other_test.py"]
-    planner = BehaviorContractPlanner(FakeReasoningGateway([source_clause_payload(), payload]))
+    planner = BehaviorContractPlanner(FakeReasoningGateway([{"clauses": payload["source_clauses"]}, payload]))
 
     with pytest.raises(ValueError, match="allowed path set"):
         await planner.create_contract(
@@ -814,7 +847,7 @@ def test_dynamic_tdd_step_retains_traceability_back_to_source_clauses():
 
 @pytest.mark.asyncio
 async def test_contract_prompt_explicitly_constrains_raw_json_types_paths_atomicity_and_traceability():
-    gateway = FakeReasoningGateway([source_clause_payload(), contract_payload()])
+    gateway = FakeReasoningGateway([source_clause_payload(), planner_contract_payload()])
     planner = BehaviorContractPlanner(gateway)
 
     await planner.create_contract(
@@ -852,6 +885,212 @@ async def test_contract_prompt_explicitly_constrains_raw_json_types_paths_atomic
     assert "one requirement ref must be completable by one focused semantic TDD slice" in prompt
     assert "do not bundle unrelated failure modes under one requirement ref" in prompt
     assert "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection" in prompt
+
+
+
+def phase_2a_contract_payload() -> dict:
+    payload = planner_contract_payload()
+    payload["source_clauses"] = payload["source_clauses"][:1]
+    payload["observable_requirements"] = [payload["observable_requirements"][0]]
+    payload["observable_requirements"][0]["source_refs"] = ["SRC-1"]
+    payload["public_api"] = ["record(value: str)"]
+    payload["technical_decisions"] = [
+        {
+            "ref": "TECH-RECORD",
+            "kind": "method",
+            "qualified_identifier": "AuditLedger.record",
+            "origin": "behavior_planner",
+            "source_clause_refs": ["SRC-1"],
+            "evidence_refs": [],
+            "source_excerpt": None,
+        }
+    ]
+    payload["observable_requirements"][0]["technical_bindings"] = [
+        {"technical_ref": "TECH-RECORD", "role": "action"}
+    ]
+    return payload
+
+
+async def create_phase_2a_contract(payload: dict, *, source: str | None = None):
+    planner = BehaviorContractPlanner(FakeReasoningGateway([{"clauses": payload["source_clauses"]}, payload]))
+    contract = await planner.create_contract(
+        project_id="reservation-book",
+        requirement_text=source or requirement_text(),
+        production_paths=["reservation_book.py"],
+        test_paths=["tests/test_reservation_book.py"],
+    )
+    return contract, planner.gateway
+
+
+@pytest.mark.asyncio
+async def test_phase_2a_prompt_declares_frozen_typed_technical_contract():
+    _, gateway = await create_phase_2a_contract(phase_2a_contract_payload())
+    prompt = json.loads(gateway.requests[1].prompt)
+    schema = prompt["required_json_schema"]
+
+    assert BEHAVIOR_PLANNER_CONTRACT_VERSION == "technical-decisions-v1"
+    assert BEHAVIOR_PLANNER_SCHEMA_SIGNATURE == "f601e38508a568ddbad10037a3f512120c3f17b87bd9fa9f4074b7a670ce016a"
+    assert prompt["planner_contract_version"] == BEHAVIOR_PLANNER_CONTRACT_VERSION
+    assert prompt["planner_schema_signature"] == BEHAVIOR_PLANNER_SCHEMA_SIGNATURE
+    assert "technical_decisions" in schema
+    assert "technical_bindings" in schema["observable_requirements"][0]
+    assert schema["technical_decisions"][0]["origin"] == "source_requirement|behavior_planner"
+    assert "upstream_design" not in json.dumps(schema)
+    assert "technical_decisions are binding" in " ".join(prompt["technical_decision_rules"])
+    assert "public_api entry must be backed" in " ".join(prompt["technical_decision_rules"])
+
+
+@pytest.mark.asyncio
+async def test_phase_2a_source_mandated_class_decision_parses_with_exact_provenance():
+    source = "The required AuditLedger class records every accepted value."
+    payload = phase_2a_contract_payload()
+    payload["public_api"] = []
+    payload["technical_decisions"] = [
+        {
+            "ref": "TECH-LEDGER",
+            "kind": "class",
+            "qualified_identifier": "AuditLedger",
+            "origin": "source_requirement",
+            "source_clause_refs": ["SRC-1"],
+            "evidence_refs": [],
+            "source_excerpt": "AuditLedger",
+        }
+    ]
+    payload["observable_requirements"][0]["technical_bindings"] = [
+        {"technical_ref": "TECH-LEDGER", "role": "subject"}
+    ]
+
+    contract, _ = await create_phase_2a_contract(payload, source=source)
+    assert contract.technical_decisions[0].origin == "source_requirement"
+
+
+@pytest.mark.asyncio
+async def test_phase_2a_planner_created_identifier_need_not_appear_in_source():
+    payload = phase_2a_contract_payload()
+    contract, _ = await create_phase_2a_contract(
+        payload, source="People can submit a record for later retrieval."
+    )
+    assert contract.technical_decisions[0].qualified_identifier == "AuditLedger.record"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda payload: payload["technical_decisions"][0].update(
+                {"origin": "source_requirement", "source_excerpt": "AuditLedger"}
+            ),
+            "identifier must appear",
+        ),
+        (
+            lambda payload: payload["technical_decisions"][0].update(
+                {"origin": "source_requirement", "source_excerpt": "fabricated excerpt"}
+            ),
+            "exact substring",
+        ),
+    ],
+)
+async def test_phase_2a_source_requirement_decisions_fail_closed_on_bad_provenance(
+    mutate, message
+):
+    payload = phase_2a_contract_payload()
+    mutate(payload)
+    planner = BehaviorContractPlanner(FakeReasoningGateway([{"clauses": payload["source_clauses"]}, payload]))
+
+    with pytest.raises(ValueError, match=message):
+        await planner.create_contract(
+            project_id="reservation-book",
+            requirement_text="The required AuditLedger.record method records values.",
+            production_paths=["reservation_book.py"],
+            test_paths=["tests/test_reservation_book.py"],
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda payload: payload.pop("technical_decisions"), "requires technical_decisions"),
+        (
+            lambda payload: payload["observable_requirements"][0].pop("technical_bindings"),
+            "require technical_bindings",
+        ),
+        (
+            lambda payload: payload["observable_requirements"][0]["technical_bindings"].__setitem__(
+                0, {"technical_ref": "TECH-UNKNOWN", "role": "action"}
+            ),
+            "must exist in technical decisions",
+        ),
+        (
+            lambda payload: payload["observable_requirements"][0].__setitem__(
+                "technical_bindings", []
+            ),
+            "must be bound",
+        ),
+        (
+            lambda payload: payload["technical_decisions"][0].update(
+                {"origin": "upstream_design", "evidence_refs": ["upstream"]}
+            ),
+            "must not emit upstream_design",
+        ),
+    ],
+)
+async def test_phase_2a_new_planner_response_validation_fails_closed(mutate, message):
+    payload = phase_2a_contract_payload()
+    mutate(payload)
+    planner = BehaviorContractPlanner(FakeReasoningGateway([{"clauses": payload["source_clauses"]}, payload]))
+
+    with pytest.raises(ValueError, match=message):
+        await planner.create_contract(
+            project_id="reservation-book",
+            requirement_text=requirement_text(),
+            production_paths=["reservation_book.py"],
+            test_paths=["tests/test_reservation_book.py"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_phase_2a_public_api_requires_exact_typed_decision_backing():
+    payload = phase_2a_contract_payload()
+    payload["public_api"] = ["latest"]
+    planner = BehaviorContractPlanner(FakeReasoningGateway([{"clauses": payload["source_clauses"]}, payload]))
+
+    with pytest.raises(ValueError, match="public_api entries must be backed"):
+        await planner.create_contract(
+            project_id="reservation-book",
+            requirement_text=requirement_text(),
+            production_paths=["reservation_book.py"],
+            test_paths=["tests/test_reservation_book.py"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_phase_2a_public_api_leaf_match_is_supported_and_extra_decisions_are_allowed():
+    payload = phase_2a_contract_payload()
+    payload["public_api"] = ["get_latest"]
+    payload["technical_decisions"][0]["qualified_identifier"] = "SignalBoard.get_latest"
+    payload["technical_decisions"].append(
+        {
+            "ref": "TECH-BOARD",
+            "kind": "class",
+            "qualified_identifier": "SignalBoard",
+            "origin": "behavior_planner",
+            "source_clause_refs": ["SRC-1"],
+            "evidence_refs": [],
+            "source_excerpt": None,
+        }
+    )
+    payload["observable_requirements"][0]["technical_bindings"].append(
+        {"technical_ref": "TECH-BOARD", "role": "subject"}
+    )
+
+    contract, _ = await create_phase_2a_contract(payload)
+    assert [item.qualified_identifier for item in contract.technical_decisions] == [
+        "SignalBoard.get_latest",
+        "SignalBoard",
+    ]
+
 
 
 @pytest.mark.asyncio
@@ -1779,8 +2018,13 @@ async def test_completed_contract_is_not_rerun():
 
 def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     step = proposal()
-    red = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
-    green = ContractDeveloperWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
+    technical_contract = BehaviorContract.from_dict(planner_contract_payload())
+    red = ContractTesterWorkUnitFactory().build(
+        WorkUnitBuildRequest(technical_contract, step)
+    )
+    green = ContractDeveloperWorkUnitFactory().build(
+        WorkUnitBuildRequest(technical_contract, step)
+    )
     repair = ContractRepairWorkUnitFactory().build(
         RepairWorkUnitBuildRequest(
             contract(),
@@ -1807,6 +2051,10 @@ def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     assert "Act in ATHBA's Tester role during RED" in red.objective
     assert "Do not edit tests" in green.objective
     assert "Reviewer instructions" in repair.objective
+    assert "technical_decisions" not in red.objective
+    assert "technical_bindings" not in red.objective
+    assert "technical_decisions" not in green.objective
+    assert "technical_bindings" not in green.objective
 
 
 def test_git_review_material_provider_includes_real_diff_source_and_evidence(tmp_path: Path):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 import subprocess
@@ -1821,18 +1822,25 @@ def _source_clause_prompt(*, project_id: str, requirement_text: str) -> str:
     )
 
 
-def _contract_prompt(
-    *,
-    project_id: str,
-    requirement_text: str,
-    source_clauses: list[SourceRequirementClause],
-    production_paths: list[str],
-    test_paths: list[str],
-) -> str:
-    schema = {
+BEHAVIOR_PLANNER_CONTRACT_VERSION = "technical-decisions-v1"
+
+
+def _behavior_planner_required_schema() -> dict[str, object]:
+    return {
         "id": "string",
         "component_name": "string",
         "capability": "string",
+        "technical_decisions": [
+            {
+                "ref": "string",
+                "kind": "class|method|function|property|field|variable|other",
+                "qualified_identifier": "string",
+                "origin": "source_requirement|behavior_planner",
+                "source_clause_refs": ["source clause ref"],
+                "evidence_refs": ["string"],
+                "source_excerpt": "string|null",
+            }
+        ],
         "observable_requirements": [
             {
                 "ref": "string",
@@ -1843,6 +1851,12 @@ def _contract_prompt(
                 "error_expectation": "string or null",
                 "preserves_state_on_failure": "boolean",
                 "depends_on": ["requirement ref"],
+                "technical_bindings": [
+                    {
+                        "technical_ref": "technical decision ref",
+                        "role": "subject|action|observation|state|error|other",
+                    }
+                ],
             }
         ],
         "invariants": ["string"],
@@ -1853,9 +1867,78 @@ def _contract_prompt(
         "non_goals": ["string"],
         "completion_criteria": ["string"],
     }
+
+
+def _behavior_planner_schema_signature(schema: dict[str, object]) -> str:
+    canonical_schema = json.dumps(schema, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(canonical_schema.encode("utf-8")).hexdigest()
+
+
+BEHAVIOR_PLANNER_SCHEMA_SIGNATURE = _behavior_planner_schema_signature(
+    _behavior_planner_required_schema()
+)
+
+
+def _require_phase_2a_technical_fields(payload: dict[str, object]) -> None:
+    if "technical_decisions" not in payload:
+        raise ValueError("behavior planner response requires technical_decisions")
+    requirements = payload.get("observable_requirements")
+    if not isinstance(requirements, list):
+        return
+    for requirement in requirements:
+        if isinstance(requirement, dict) and "technical_bindings" not in requirement:
+            raise ValueError(
+                "behavior planner observable requirements require technical_bindings"
+            )
+    decisions = payload.get("technical_decisions")
+    if not isinstance(decisions, list):
+        return
+    for decision in decisions:
+        if isinstance(decision, dict) and decision.get("origin") == "upstream_design":
+            raise ValueError(
+                "behavior planner response must not emit upstream_design technical decisions"
+            )
+
+
+def _public_api_entry_is_backed_by_decision(entry: str, qualified_identifier: str) -> bool:
+    public_identifier = entry.split("(", 1)[0].strip()
+    decision_leaf = qualified_identifier.rsplit(".", 1)[-1]
+    return public_identifier in {qualified_identifier, decision_leaf}
+
+
+def _validate_planner_public_api_consistency(contract: BehaviorContract) -> None:
+    decision_identifiers = [
+        decision.qualified_identifier for decision in contract.technical_decisions
+    ]
+    unbacked_entries = [
+        entry
+        for entry in contract.public_api
+        if not any(
+            _public_api_entry_is_backed_by_decision(entry, identifier)
+            for identifier in decision_identifiers
+        )
+    ]
+    if unbacked_entries:
+        raise ValueError(
+            "behavior planner public_api entries must be backed by technical decisions: "
+            f"{unbacked_entries}"
+        )
+
+
+def _contract_prompt(
+    *,
+    project_id: str,
+    requirement_text: str,
+    source_clauses: list[SourceRequirementClause],
+    production_paths: list[str],
+    test_paths: list[str],
+) -> str:
+    schema = _behavior_planner_required_schema()
     return json.dumps(
         {
             "instruction": "Produce one ATHBA PR16 BehaviorContract as raw JSON only.",
+            "planner_contract_version": BEHAVIOR_PLANNER_CONTRACT_VERSION,
+            "planner_schema_signature": BEHAVIOR_PLANNER_SCHEMA_SIGNATURE,
             "output_rules": [
                 "return raw JSON only",
                 "do not wrap the JSON in Markdown",
@@ -1895,6 +1978,16 @@ def _contract_prompt(
                 "do not leave a source clause represented only in invariants, completion_criteria, or error_semantics",
                 "each observable requirement must include a non-empty source_refs array",
             ],
+            "technical_decision_rules": [
+                "technical_decisions are binding code-level decisions; ordinary prose is not binding",
+                "emit decisions only when exact technical identity must survive downstream boundaries; do not invent speculative helpers or local details",
+                "a source-mandated decision uses origin source_requirement, an exact source_excerpt, and applicable source_clause_refs",
+                "a Planner-created decision uses origin behavior_planner and source_excerpt null",
+                "do not emit upstream_design because this Planner has no upstream typed design input",
+                "bind every decision only to the relevant observable requirements using the smallest relevant technical_bindings set",
+                "technical_bindings are not test instructions and must not pre-author Tester steps or frontiers",
+                "every public_api entry must be backed by an explicit technical decision",
+            ],
             "domain_rules": [
                 "public_api must be an array of strings",
                 "error_semantics must be an array of strings",
@@ -1904,7 +1997,6 @@ def _contract_prompt(
         indent=2,
         sort_keys=True,
     )
-
 
 
 def _contract_from_response(
@@ -1918,17 +2010,20 @@ def _contract_from_response(
     allowed_test_paths: list[str],
 ) -> BehaviorContract:
     payload = _json_object(text, label=label)
+    _require_phase_2a_technical_fields(payload)
     payload["project_id"] = project_id
     payload["requirement_source"] = requirement_text
     payload["source_clauses"] = [clause.to_dict() for clause in source_clauses]
     payload["status"] = ContractPoolStatus.TDD_READY.value
-    return BehaviorContract.from_dict(
+    contract = BehaviorContract.from_dict(
         payload,
         BehaviorContractLoadOptions(
             allowed_production_paths=allowed_production_paths,
             allowed_test_paths=allowed_test_paths,
         ),
     )
+    _validate_planner_public_api_consistency(contract)
+    return contract
 
 
 def _is_recoverable_contract_error(error: ValueError) -> bool:
@@ -1948,6 +2043,8 @@ def _contract_repair_prompt(
     return json.dumps(
         {
             "instruction": "Repair the invalid ATHBA behavior contract. Return raw JSON only.",
+            "planner_contract_version": BEHAVIOR_PLANNER_CONTRACT_VERSION,
+            "planner_schema_signature": BEHAVIOR_PLANNER_SCHEMA_SIGNATURE,
             "project_id": project_id,
             "requirement_text": requirement_text,
             "source_clauses": [clause.to_dict() for clause in source_clauses],
@@ -1955,30 +2052,7 @@ def _contract_repair_prompt(
             "test_paths": test_paths,
             "invalid_contract_draft": invalid_contract_text,
             "validation_error": validation_error,
-            "required_json_schema": {
-                "id": "string",
-                "component_name": "string",
-                "capability": "string",
-                "observable_requirements": [
-                    {
-                        "ref": "string",
-                        "source_refs": ["string"],
-                        "summary": "string",
-                        "observable_outcome": "string",
-                        "test_hint": "string",
-                        "error_expectation": "string|null",
-                        "preserves_state_on_failure": "boolean",
-                        "depends_on": ["requirement ref"],
-                    }
-                ],
-                "invariants": ["string"],
-                "production_paths": ["string"],
-                "test_paths": ["string"],
-                "public_api": ["string"],
-                "error_semantics": ["string"],
-                "non_goals": ["string"],
-                "completion_criteria": ["string"],
-            },
+            "required_json_schema": _behavior_planner_required_schema(),
             "output_rules": [
                 "return raw JSON only",
                 "do not wrap the JSON in Markdown",
@@ -1989,6 +2063,11 @@ def _contract_repair_prompt(
                 "keep the contract within the supplied repository-relative production and test paths",
                 "preserve valid semantic fields where possible",
                 "every supplied source clause ref must appear in at least one observable_requirements[].source_refs entry",
+                "retain technical_decisions and technical_bindings; do not drop them merely to satisfy parsing",
+                "technical decisions are binding; source_requirement uses exact source provenance and behavior_planner uses null source_excerpt",
+                "do not emit upstream_design because this Planner has no upstream typed design input",
+                "every public_api entry must be backed by an explicit technical decision",
+                "do not pre-author Tester steps, frontiers, or test instructions",
                 "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
             ],
         },

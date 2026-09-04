@@ -209,5 +209,5 @@ def test_model_serializer_and_behavior_planner_prompt_remain_unchanged_by_phase_
 
     assert "technical_decisions" not in model_payload
     assert "technical_bindings" not in model_payload
-    assert "technical_decisions" not in prompt
-    assert "technical_bindings" not in prompt
+    assert "technical_decisions" in prompt
+    assert "technical_bindings" in prompt

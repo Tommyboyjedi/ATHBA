@@ -13,3 +13,13 @@ Gatekeeper remains independent. Source-mandated identifiers must eventually be i
 ## Deliberately unchanged in Phase 1
 
 The current `public_api` whitelist, static lint, runtime behavior, frontier generation, RED classification, Tester and Developer prompts, Intent Review, Gatekeeper runtime, retry budgets, timeouts, BPQ-V1, and all behavior-planner qualification inputs remain unchanged. BPQ-V1 is permanent, immutable, and unsupersedable. Phase 1 persists and validates optional typed structures only; it neither requests them from an LLM nor applies them during execution.
+
+## Phase 2A Planner contract
+
+The Behavior Contract Planner is now the producer and join point for typed technical decisions. Its frozen source-controlled identity is `technical-decisions-v1`, with canonical required-output-schema SHA-256 `f601e38508a568ddbad10037a3f512120c3f17b87bd9fa9f4074b7a670ce016a`.
+
+A `source_requirement` decision preserves an exact source excerpt and valid source-clause references. A `behavior_planner` decision is a Planner-created technical choice and has no source excerpt. The current Planner never emits `upstream_design`, because it receives no typed upstream-design decisions. Every decision is bound only to the observable behavior(s) where it is relevant; each `public_api` entry is backed by an explicit typed decision, using exact qualified or leaf-identifier matching only.
+
+The Planner persists `technical_decisions` and requirement `technical_bindings`; the existing `to_model_dict()` boundary keeps both dormant in Tester, Developer, and other current downstream model prompts. This phase does not change static lint, the public-api lint authority, frontiers, RED classification, Gatekeeper runtime, or BPQ-V1.
+
+BPQ qualification has not run in Phase 2A. Phase 2B will use exactly the three permanent BPQ-V1 inputs, three repetitions each, with no prompt or schema tuning between runs.
