@@ -12,6 +12,12 @@ from core.development.scenario_drafting import (
     ScenarioDraftingService,
     ScenarioIntentReviewer,
 )
+from core.development.scenario_observation_support import (
+    ScenarioObservationContext,
+    ScenarioObservationRequirement,
+    ScenarioObservationResolver,
+)
+
 from core.development.scenario_drafting_domain import (
     MAX_TESTER_SCENARIO_ATTEMPTS,
     ScenarioDraftRequest,
@@ -1156,3 +1162,99 @@ async def test_static_rejection_persists_across_restart_with_surface_recompiled_
     assert continued.state.approved_microcycle is None
     assert len(resumed_gateway.calls) == 1
     assert resumed_reasoning.requests == []
+
+
+def observation_trigger_request(kind: str, source: str) -> ScenarioDraftRequest:
+    ticket = TddStepProposal(
+        f"entry-{kind}",
+        ["SRC-ENTRY"],
+        "Records the supplied value for the supplied name.",
+        "tests/test_entry_store.py::test_entry_store_records_value",
+        "The stored value is observable for the supplied name.",
+        "tests/test_entry_store.py",
+        "entry_store.py",
+        "Record the supplied value.",
+        "Record the supplied value.",
+        "entry-store observation trigger fixture",
+    )
+    surface = DeclaredProductSurface(
+        "EntryStore", frozenset({"record"}), canonical_members=("record(name, value)",)
+    )
+    context = ScenarioObservationContext(
+        "REQ-ENTRY",
+        ticket.focused_behavior,
+        ticket.expected_result,
+        ticket.red_objective,
+        (SourceRequirementClause("SRC-ENTRY", "record stores the supplied value", "behavior"),),
+        surface,
+        (ScenarioObservationRequirement("REQ-ENTRY", ticket.focused_behavior, ticket.expected_result),),
+    )
+    return ScenarioDraftRequest(
+        f"observation-trigger-{kind}", ticket, ("SRC-ENTRY",), "python", "pytest",
+        ticket.test_path,
+        ScenarioRepositoryFacts("a" * 40, (ticket.production_path, ticket.test_path), "", ""),
+        "a" * 40,
+        (SourceRequirementClause("SRC-ENTRY", "record stores the supplied value", "behavior"),),
+        surface,
+        context,
+    )
+
+
+def observation_trigger_candidate(statement: str) -> str:
+    return f'''# ATHBA-SCENARIO-RATIONALE: This fixture isolates product member usage classification.
+# ATHBA-SOURCE-REFS: SRC-ENTRY
+from entry_store import EntryStore
+
+def test_entry_store_records_value():
+    store = EntryStore()
+    store.record("x", "value")
+    {statement}
+'''
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "statement", "role", "response_count"),
+    [
+        ("action", 'store.erase("x")', "action", 0),
+        ("unknown", 'value = store.lookup("x")', "unknown", 0),
+        ("observation", 'assert store.lookup("x") == "value"', "observation", 1),
+    ],
+)
+async def test_static_product_usage_controls_observation_support_eligibility(
+    kind, statement, role, response_count,
+):
+    revision = f"{kind[0]}" * 40
+    source = observation_trigger_candidate(statement)
+    gateway = FakeGateway([accepted(f"entry-{kind}--scenario-draft-1", revision, kind)])
+    reasoning = FakeReasoningGateway([
+        json.dumps({
+            "status": "support_selected",
+            "selected_members": ["record(name, value)"],
+            "evidence_refs": ["REQ-ENTRY"],
+        })
+    ] if response_count else [])
+    dependencies = ScenarioDraftingDependencies(
+        gateway,
+        ScenarioIntentReviewer(reasoning),
+        LanguageAdapterCatalog((PythonPytestAdapter(),)),
+        CandidateSourceReader({revision: source}),
+        MemoryStateStore(),
+        observation_resolver=ScenarioObservationResolver(reasoning),
+    )
+    outcome = await ScenarioDraftingService(dependencies).draft(
+        observation_trigger_request(kind, source), binding(),
+    )
+
+    attempt = outcome.state.attempts[-1]
+    assert not outcome.approved
+    assert attempt.status == "candidate_invalid"
+    assert attempt.candidate_assessment is not None
+    assert attempt.candidate_assessment.issues[0].usage_role == role
+    assert len(reasoning.requests) == response_count
+    if role == "observation":
+        assert outcome.state.observation_support is not None
+        assert outcome.state.observation_support.selected_members == ("record(name, value)",)
+        assert reasoning.requests[0].purpose == "athba_scenario_observation_support"
+    else:
+        assert outcome.state.observation_support is None

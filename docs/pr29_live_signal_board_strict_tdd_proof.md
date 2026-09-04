@@ -447,3 +447,13 @@ Focused validation for this closure passed: `63 passed` across behavior-contract
 surface, scenario drafting, feature-execution advance, and persistence tests.
 No production, Rack AI, Tester-information, Intent Review, Gatekeeper, planner,
 routing, budget, grammar, PR21, or refactoring source changed.
+
+## Observation Resolver Markdown fence protocol correction
+
+The initial Observation Resolver qualification stopped at a protocol failure; its raw qualification responses were not retained. One unchanged neutral forensic reproduction was then run against `local-primary`. The semantic response was one valid ordinary `json` Markdown fence, and the format-only repair response was also one valid ordinary `json` Markdown fence. The resolver's raw `json.loads(text.strip())` rejected both responses, although the first semantic decision was recoverable.
+
+The root cause is therefore the generic rejection of bounded Markdown JSON fences, not a semantic-selection failure. The correction reuses ATHBA's established `ScenarioIntentReviewer` structured-response normalisation: it accepts either one raw JSON object or exactly one ordinary `json` or plain Markdown fence, and continues to reject prose, multiple objects, and arbitrary extraction. The resolver still makes one semantic decision and at most one format-only repair.
+
+No semantic prompt, model, provider routing, execution budget, qualification corpus, threshold, or SignalBoard state changed. Canonical member validation and evidence-reference validation remain fail-closed and unchanged.
+
+The direct normal ScenarioDraftingService trigger regression uses neutral `EntryStore` fixtures. An undeclared ordinary action (`store.erase("x")`) and an undeclared assignment-shaped use (`value = store.lookup("x")`) are each statically invalid with roles `action` and `unknown`, make zero Observation Resolver calls, and retain no observation support. The observation control (`assert store.lookup("x") == "value"`) is statically invalid with role `observation` and makes the resolver eligible. Thus the prior action and unknown findings were missing-proof-only, not trigger defects.

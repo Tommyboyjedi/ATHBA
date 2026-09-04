@@ -9,6 +9,7 @@ from typing import Any
 
 from core.development.behavior_contract_surface import DeclaredProductSurface
 from core.development.specification_domain import SourceRequirementClause
+from core.development.scenario_intent_review import _normalise_json_object
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 
 MAX_OBSERVATION_EVIDENCE_REFS = 16
@@ -149,7 +150,7 @@ class ScenarioObservationResolver:
 
 def _decode(text: str) -> _Resolution:
     try:
-        payload = json.loads(text.strip())
+        payload = json.loads(_normalise_json_object(text))
     except json.JSONDecodeError as error:
         raise ValueError(f"observation resolver response is not JSON: {error.msg}") from error
     if not isinstance(payload, dict):
