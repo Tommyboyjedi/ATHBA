@@ -37,3 +37,117 @@ Post-cleanup gates at `2f15db1`: focused 166 passed; full ATHBA suite 550 passed
 REQ-001 attempt evidence: attempts 1 and 2 were real local-primary JCode worker timeouts after 300 seconds with no candidate. Attempt 3 produced a syntactically valid scenario but independent Intent Review returned `semantic_repair_required`: it asserted only that the module existed, not that a board started empty. Attempt 4, the bounded repair of that candidate, timed out after 300 seconds with no candidate. The persisted scenario state and Rack AI review packets retain exact paths and provenance.
 
 The terminal state is `blocked`, reason `attempts_exhausted`; no Gatekeeper verdict exists. The Gatekeeper checklist was independently created before the block but no final assessment was invoked.
+
+
+## Fresh corrected-boundary live run: 2026-09-05
+
+This section records one new run at ATHBA `df164c339894bbb0b29f3505149fd1c30937b555`. Historical runs above are unchanged. The corrected pre-Intent boundary worked live: one mechanically valid scenario using an undeclared member reached Intent, was approved, frozen and fragmented. The end-to-end proof remains **incomplete**: REQ-001 stopped at assertion Frontier 2 with `unsupported_language_boundary`. No repair, resume, second proof, or harness correction was performed.
+
+### Identity and readiness
+
+- Run and project: `pr29-fresh-signalboard-20260905T105000Z`; actual controller start `2026-09-05T10:47:57.779736+00:00`.
+- Branch: `pr29-live-tiny-strict-tdd-v2-proof`; expected starting head verified; tracked working tree clean. Existing untracked `evidence/` retained.
+- Generated repository: `/srv/ATHBA/state/projects/pr29-fresh-signalboard-20260905T105000Z/repository`, resolved beneath the already-approved `/srv/ATHBA/state/projects` trusted dynamic root.
+- Initial project SHA: `4d43e81184cd2ba7c23043a038c5843ec4e42269`.
+- Final accepted project `main`: `20fa1eea109ffef49cb5cadbaf71a1fd009ef939`.
+- Rack AI provenance version: `56d2c69f1e815acd12fca9065945c5e46de5a36a`.
+- Evidence root (E below): `/srv/ATHBA/evidence/pr29-fresh-signalboard-20260905T105000Z`.
+- Immutable BPQ-V1-B source used verbatim; canonical corpus hash `523dc088007cdcd10484daa7cb272fdbdab4a37a306a5369bbeac1ff676d85cb`; fixture file SHA256 `3b1c2deec2369d5edc7dba79af76b5c90ea3a9b7f70b895f78237c1184300352`; requirement SHA256 `c46ce04d165b64d2459fdd821475289925496dc7541584230d60f4858ec9aa88`.
+- Both local health and model metadata endpoints returned HTTP 200. One bounded 60-second local-primary readiness request returned `READY` in 0.0994 seconds, response `resp_9d411af89435f756`. No services were restarted or configuration changed.
+- Unmodified `scripts/run_pr23_strict_tdd_feature.py start` ran once with the above IDs, `E/requirement.txt`, Python/pytest, `signal_board.py`, `tests/test_signal_board.py`, state root `/srv/ATHBA/state`, and evidence root E. Runner exit was 2 after 19 application transitions.
+
+### Real Behavior Planner and independent checklist
+
+The real local Planner produced five requirements. Its full unedited contract is `E/behavior-contract.json`. Advisory `public_api` was `publish(name: str, payload: any)` and `get_signal(name: str) -> any`. No API names were supplied as a manual correction.
+
+| REQ | Summary | Observable outcome | test_hint | Dependencies | Source refs |
+| --- | --- | --- | --- | --- | --- |
+| REQ-001 | Initial state is empty | SignalBoard starts with no published signals | Verify board is empty upon instantiation | none | PR16-001 |
+| REQ-002 | Publish and retrieve a signal | Payload is successfully published and retrievable | Publish a payload and verify retrieval matches | REQ-001 | PR16-002, PR16-006 |
+| REQ-003 | Update existing signal | New payload replaces old payload for the same name | Publish twice to same name and verify the second value is returned | REQ-002 | PR16-003, PR16-004 |
+| REQ-004 | Isolation of signal names | Publishing a new name does not affect existing names | Publish to name A, then name B, verify A remains unchanged | REQ-002 | PR16-005 |
+| REQ-005 | Architectural constraints | Component adheres to mechanical and quality constraints | Verify no persistence, deletion, or subscription logic exists | none | PR16-007, PR16-008, PR16-009, PR16-010, PR16-011, PR16-012 |
+
+The independent Specification Gatekeeper atomization used the original requirement and persisted its own checklist before scenario drafting. Existing composition kept this checklist out of Planner, Tester, Intent, Developer and Senior inputs. `E/gatekeeper-checklist-state.json` retains all twelve obligations. Final reconciliation was not invoked: every item below is **NOT_REACHED**, with no YES/NO judgment or implied coverage.
+
+| Ref | Kind | Original checklist obligation |
+| --- | --- | --- |
+| initial_state | behavior | The SignalBoard must start with no published signals. |
+| publish_signal | behavior | The system must allow users to publish a payload under a specific signal name. |
+| replace_signal | behavior | Publishing a payload under an existing signal name must replace the previous value for that name. |
+| isolate_signals | behavior | Publishing a payload for one signal name must not affect the values of other signal names. |
+| get_latest_payload | behavior | The system must allow users to request the latest payload for a specific signal name. |
+| return_latest_value | behavior | The system must return the most recently published value when a signal is requested. |
+| in_memory_storage | constraint | The SignalBoard must be an in-memory component. |
+| no_persistence | constraint | The system must not persist data to any external storage. |
+| no_subscriptions | constraint | The system must not support subscriptions. |
+| no_concurrency | constraint | The system does not need to handle concurrency. |
+| no_validation | constraint | The system does not need to enforce validation rules. |
+| small_and_direct | quality | The component must be small, direct, and dependency-free. |
+
+### Tester attempt and Intent
+
+REQ-001 had exactly one Tester submission, selected local-primary / `gemma4-12b-local-primary`, `generic-reasoning-worker`, JCode on `gpu-4060ti`. Its configured timeout remained 300 seconds and its only allowed/changed path was `tests/test_signal_board.py`. Rack AI returned `checks_passed`, acceptance `approved`, `last_error: null`; accepted candidate revision was `cc27dc68c2fcfcda676b85584c16ae226fbcd1eb`. The exact objective, requirements, routing and limits are retained in the original submitted v2 JSON under `E/execution-inputs/`; the packet preserves task, diff, commands, implementer output and selection/provenance. No timeout occurred.
+
+The candidate, canonical and frozen complete scenario are identical:
+
+```python
+import pytest
+from signal_board import SignalBoard
+
+def test_REQ_001():
+    board = SignalBoard()
+    assert len(board.get_signals()) == 0
+```
+
+Mechanical assessment had valid syntax, a production reference and zero issues: undeclared `get_signals` did not block Intent. No repair feedback was needed or generated. Independent Intent approved with evidence `PR16-001` and rationale:
+
+> The test correctly instantiates the SignalBoard and asserts that the length of the signals list is zero, directly verifying that the board starts with no published signals as required.
+
+The scenario froze and produced three ordered fragments. It was not executed in full as the first RED.
+
+| Frontier | Fragment | Evidence and result |
+| --- | --- | --- |
+| 0 | production import, source line 2 | Missing `SignalBoard` import admitted as `valid_missing_capability_red`; one production-only Developer submission; GREEN; regression clear; promoted. |
+| 1 | constructor, source line 5 | Already GREEN after the preceding minimal class implementation; existing passing-frontier path ran regression and promoted without another Developer call. |
+| 2 | assertion, source line 6 | Collection, exact-node discovery, setup and teardown passed. Call failed with `AttributeError: 'SignalBoard' object has no attribute 'get_signals'` at the active span. Classified `unsupported_language_boundary`; no accepted RED or Developer call for this Frontier. |
+
+The single Developer submission selected local-coder / `eqaq-v2-local-coder`, `generic-coding-worker`, JCode `minimal` on `gpu-2060`, with unchanged 300-second timeout. Selection was `least_scarce_sufficient`. Only `signal_board.py` was allowed and changed. The objective contained the active import Frontier, not future complete-scenario assertions. The accepted candidate was `195f64a112670f677233972e77325527d6763d6a`; packet status `checks_passed`, acceptance `approved`, `last_error: null`. Worker tool errors (an attempted commit against sandbox read-only Git metadata and a missing `python` alias) were nonterminal; its subsequent `python3` test command passed. They are not the terminal blocker.
+
+Trusted revision progression was initial `4d43e81184cd2ba7c23043a038c5843ec4e42269`, accepted import RED `e34a283f6e9bf7ade0d99a391525c822bbc6fbbb` on the isolated chain, validated Developer GREEN/CAS `195f64a112670f677233972e77325527d6763d6a`, then passing constructor/CAS `20fa1eea109ffef49cb5cadbaf71a1fd009ef939`. Two `regression_clear` transitions precede the promotions (lifecycle sequences 12 and 16). Current assertion regression remains pending, and there are no previously completed Behavior Requirements. Do not interpret these partial checks as full-scenario regression success. The failing assertion was not promoted. Revision lifecycle, feature canonical base and actual project main agree on the final accepted SHA; some intermediate lifecycle envelopes retain the initial canonical SHA, and the run summary's canonical fields are null.
+
+REQ-001: approved/frozen scenario, 2/3 Frontiers complete, overall behavior pending/blocked, Senior Review not reached (zero attempts). REQ-002 through REQ-005 were not reached. REQ-006 was not planned in this run. Zero Behavior Requirements completed. Final Gatekeeper was not reached; its assessment history is empty.
+
+### Terminal classification and contract gap
+
+**ATHBA_HARNESS_DEFECT**, generic RED-classification coverage gap; runtime status `blocked`, reason `unsupported_language_boundary`.
+
+Owning component: `PythonBoundaryClassifier.classify` in `core/development/python_pytest_adapter.py`, particularly the missing-capability and assertion branches around lines 632-642. Missing `AttributeError` capability is accepted only for production-import, constructor or call fragments. An assertion fragment accepts `AssertionError`/structured assertion-message shape, so this active assertion's missing member falls through to unsupported. The parser accepted and froze the same statement as an ordinary assertion.
+
+The architectural contract is the corrected mechanical-only boundary followed by Intent approval, deterministic atomization and strict TDD. The existing implementation ledger (`docs/pr23_strict_tdd_implementation_ledger.md`, Sessions 3 and 5) permits ordinary assertions and states that within-scenario member capability failures remain valid RED. Here the production capability fails at the active approved assertion span with a GREEN prior Frontier, yet cannot enter the Developer RED path. This is a generic gap between accepted scenario grammar and RED support; the classifier contains no SignalBoard/name-specific condition. This classification does not establish that arbitrary AttributeErrors should all be accepted or prescribe a fix. It is not a public-api rejection, Tester mechanical failure, Intent rejection, Developer failure, or timeout. No source correction was made.
+
+### Model accounting and retained evidence
+
+Six top-level local invocations: readiness, Behavior Planner, independent checklist atomization, Tester workspace submission, Intent Review, and Developer workspace submission. Four direct successful generations plus 16 Tester and 6 Developer JCode token-response records give **26 observed generation records**. This is not a wire-level HTTP audit; unrecorded transport retries cannot be ruled out. Cloud/OpenRouter calls: zero. No subsequent model calls or rerun were made. `E/model-accounting.json` records the count and limitation.
+
+Evidence locations relative to E:
+
+- `identity.json`, `initial-project.json`, `requirement.txt`, `readiness-http.json`, `ready-request.json`, `ready-response.json`, `ready-summary.json`, plus both workers' health/metadata files.
+- `behavior-contract.json`, `gatekeeper-checklist-state.json`, `REQ-001-scenario-snapshot.json`.
+- `runner-start.log`, `runner-start.exit`, and `pr29-fresh-signalboard-20260905T105000Z/proof-report.json` / `proof-report.md` (persisted lifecycle, draft, microcycle and revision evidence).
+- `execution-inputs/`: exact original v2 input JSON for the only Tester and Developer submissions, including literal objective/prompt and 300-second limits. A read-only observer copied these temporary inputs without wrapping or changing execution.
+- `packet-index.json` and `rack-ai-packets/`: exact packet copies, including original source paths, implementer output, provenance, selection, changed paths, commands and candidate revisions.
+- `terminal-snapshots/`: final run/feature/scenario/microcycle JSON, exact frozen scenario and accepted final project production/test source. Temporary pytest worktree paths in diagnostics are historical locations; persisted diagnostics are authoritative.
+
+Original Rack AI packets:
+
+- `/srv/rack-ai/state/changes/pr29-fresh-signalboard-20260905T105000Z--REQ-001--frontier-0--pr29-fresh-signalboard-20260905T105000Z--REQ-001--frontier-0--developer-1--submission-4928841240484814585/review-packet.json`
+- `/srv/rack-ai/state/changes/pr29-fresh-signalboard-20260905T105000Z--REQ-001--scenario-draft--pr29-fresh-signalboard-20260905T105000Z--REQ-001--scenario-draft-1--submission-3869046333795984551/review-packet.json`
+
+Authoritative scenario state: `/srv/ATHBA/state/scenario-drafts/pr29-fresh-signalboard-20260905T105000Z--REQ-001.json`; microcycle: `/srv/ATHBA/state/microcycles/pr29-fresh-signalboard-20260905T105000Z--REQ-001.json`; feature: `/srv/ATHBA/state/features/pr29-fresh-signalboard-20260905T105000Z.json`; run: `/srv/ATHBA/state/runs/pr29-fresh-signalboard-20260905T105000Z.json`. Original execution input filenames are `pr29-fresh-signalboard-20260905T105000Z--REQ-001--scenario-draft-1.json` and `pr29-fresh-signalboard-20260905T105000Z--REQ-001--frontier-0--developer-1.json` under E/execution-inputs.
+
+### Scope and validation
+
+ATHBA source code, prompts, adapter, grammar, Frontier machinery, Planner, Developer, Gatekeeper, accounting, timeouts, execution budgets and routing were unchanged. BPQ-V1, Rack AI, JCode and PR21 were unchanged; PR21 was not started. All existing TODOs, including test_hint and evidence_refs plumbing, remain intact. The real Developer changed production source **only in the generated project**, producing a minimal `SignalBoard` class; accepted final source is retained in E/terminal-snapshots. No production implementation was manually authored.
+
+Only this documentation file is committed; generated state and runtime evidence remain outside the commit. Validation for the documentation change: `git diff --check`; no source-test suite was rerun for this documentation-only update. The live proof's partial test evidence and terminal outcome above are not a full end-to-end PASS.
