@@ -83,7 +83,6 @@ class _Parsed:
 @dataclass(frozen=True)
 class _MockAnalysisRequest:
     module: ast.Module
-    production_name: str
     production_module: str
 
 
@@ -247,7 +246,14 @@ class PythonCandidateAssessmentFactory:
 
     def _assessment(self, request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> ScenarioCandidateAssessment:
         facts = _candidate_facts(request, module)
-        return _assessment_from_facts(facts)
+        assessment = _assessment_from_facts(facts)
+        if assessment.accepted:
+            try:
+                PythonScenarioParser().parse(request.candidate.source)
+            except ValueError as error:
+                issue = _issue(ScenarioCandidateIssueCode.UNUSABLE_ARTIFACT, str(error))
+                return replace(assessment, issues=(issue,))
+        return assessment
 
 
 def _candidate_facts(request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> _CandidateAssessmentFacts:
@@ -266,7 +272,7 @@ def _candidate_facts(request: ScenarioCandidateAssessmentRequest, module: ast.Mo
     production_name = production_module.rsplit(".", 1)[-1]
     references = (request.production_path,) if PythonCandidateAnalyzer._references(module, production_module) else ()
     substitutes = PythonCandidateAnalyzer._substitutes(module, production_name)
-    mocked = PythonCandidateAnalyzer._mocked_targets(_MockAnalysisRequest(module, production_name, production_module))
+    mocked = PythonCandidateAnalyzer._mocked_targets(_MockAnalysisRequest(module, production_module))
     evasions = PythonCandidateAnalyzer._evasions(module)
     test_function_docstrings = tuple(
         _TestFunctionDocstring(test.name, test.body[0])
@@ -353,6 +359,38 @@ def _candidate_issues(facts: _CandidateAssessmentFacts) -> list[ScenarioCandidat
     return issues
 
 
+def _patch_targets_production(call: ast.Call, production_module: str) -> bool:
+    target = call.args[0] if call.args else next(
+        (keyword.value for keyword in call.keywords if keyword.arg == "target"), None,
+    )
+    if target is None:
+        return False
+    spelling = target.value if isinstance(target, ast.Constant) and isinstance(target.value, str) else ast.unparse(target)
+    return spelling == production_module or spelling.startswith(production_module + ".")
+
+
+def _framework_reference(module: ast.Module, expression: ast.AST) -> str:
+    """Recognise imported test-framework operations, never product member policy."""
+    if not isinstance(expression, (ast.Name, ast.Attribute)):
+        return ""
+    spelling = ast.unparse(expression)
+    root, _, suffix = spelling.partition(".")
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if root == (alias.asname or alias.name.split(".")[0]):
+                    imported = alias.name if alias.asname else root
+                    return ".".join(part for part in (imported, suffix) if part)
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if root == (alias.asname or alias.name):
+                    return ".".join(part for part in (node.module, alias.name, suffix) if part)
+        if isinstance(node, ast.FunctionDef) and root == "monkeypatch":
+            if any(argument.arg == root for argument in node.args.args):
+                return "pytest." + spelling
+    return ""
+
+
 class PythonCandidateAnalyzer:
     """Owns Python candidate validity and production-reference integrity facts."""
 
@@ -372,7 +410,7 @@ class PythonCandidateAnalyzer:
         reference_paths = (production_path,) if self._references(module, production_module) else ()
         substitutes = self._substitutes(module, production_name)
         mocked_targets = self._mocked_targets(
-            _MockAnalysisRequest(module, production_name, production_module)
+            _MockAnalysisRequest(module, production_module)
         )
         evasions = self._evasions(module)
         analysis = ScenarioStaticAnalysis(
@@ -411,27 +449,28 @@ class PythonCandidateAnalyzer:
 
     @staticmethod
     def _mocked_targets(request: _MockAnalysisRequest) -> tuple[str, ...]:
-        lowered = request.production_name.lower()
         matches = []
         for node in ast.walk(request.module):
-            if isinstance(node, ast.ClassDef) and "mock" in node.name.lower() and lowered in node.name.lower():
-                matches.append(node.name)
-            if isinstance(node, ast.Call):
-                call_source = ast.unparse(node)
-                if isinstance(node.func, ast.Attribute):
-                    owner = ast.unparse(node.func.value)
-                    if node.func.attr in {"patch", "setattr"} and request.production_module in call_source:
-                        matches.append(owner)
-                if isinstance(node.func, ast.Name) and node.func.id == "patch" and request.production_module in call_source:
-                    matches.append(node.func.id)
+            if not isinstance(node, ast.Call):
+                continue
+            operation = _framework_reference(request.module, node.func)
+            if operation in {
+                "unittest.mock.patch", "unittest.mock.patch.object",
+                "pytest.monkeypatch.setattr", "pytest.monkeypatch.setitem",
+            } and _patch_targets_production(node, request.production_module):
+                matches.append(ast.unparse(node.func))
         return tuple(dict.fromkeys(matches))
 
     @staticmethod
     def _evasions(module: ast.Module) -> tuple[str, ...]:
         matches = []
         for node in ast.walk(module):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"skip", "xfail"}:
-                matches.append(node.func.attr)
+            expression = node.func if isinstance(node, ast.Call) else node
+            operation = _framework_reference(module, expression)
+            if operation in {"pytest.skip", "pytest.xfail", "pytest.mark.skip", "pytest.mark.skipif", "pytest.mark.xfail"}:
+                matches.append("xfail" if operation.endswith("xfail") else "skip")
+            if operation == "pytest.importorskip":
+                matches.append("missing_capability_evasion")
             if isinstance(node, ast.Try):
                 catches_import = any(
                     isinstance(handler.type, ast.Tuple)
@@ -536,7 +575,7 @@ class PytestStructuredExecutor:
         if syntax is not None:
             return syntax
         node = request.artifact.canonical_test_identity
-        command = [sys.executable, "-m", "core.development.python_pytest_probe", str(root), node]
+        command = [sys.executable, "-m", "core.development.python_pytest_probe", str(root), node, request.production_path or ""]
         environment = os.environ | {"PYTHONPATH": str(Path(__file__).resolve().parents[2])}
         completed = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=30)
         try:
@@ -590,7 +629,18 @@ class PythonBoundaryClassifier:
             return BoundaryAssessment(outcome.value, request.active_fragment.fragment_id, request.diagnostic)
         exception = facts.get("exception_type", "")
         active_kind = request.active_fragment.kind
-        if exception in {"ImportError", "ModuleNotFoundError", "NameError", "AttributeError"} and active_kind in {item.value for item in (PythonFragmentKind.PRODUCTION_IMPORT, PythonFragmentKind.CONSTRUCTOR, PythonFragmentKind.CALL)}:
+        if exception == "AttributeError":
+            proven = facts.get("missing_production_member") == "True" and all(
+                facts.get(name) == expected for name, expected in (
+                    ("collection_succeeded", "True"), ("requested_node_found", "True"),
+                    ("requested_node_executed", "True"), ("setup_outcome", "passed"),
+                    ("call_outcome", "failed"), ("teardown_outcome", "passed"),
+                )
+            )
+            supported = active_kind in {item.value for item in PythonFragmentKind}
+            outcome = BoundaryOutcome.VALID_MISSING_CAPABILITY_RED if proven and supported else BoundaryOutcome.UNSUPPORTED_LANGUAGE_BOUNDARY
+            return BoundaryAssessment(outcome.value, request.active_fragment.fragment_id, request.diagnostic)
+        if exception in {"ImportError", "ModuleNotFoundError", "NameError"} and active_kind in {item.value for item in (PythonFragmentKind.PRODUCTION_IMPORT, PythonFragmentKind.CONSTRUCTOR, PythonFragmentKind.CALL)}:
             return BoundaryAssessment(BoundaryOutcome.VALID_MISSING_CAPABILITY_RED.value, request.active_fragment.fragment_id, request.diagnostic)
         if active_kind == PythonFragmentKind.ASSERTION and (
             exception == "AssertionError" or request.diagnostic.message.lstrip().startswith("assert ")

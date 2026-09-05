@@ -12,7 +12,11 @@ from core.development.microcycle_revision_state import (
     RevisionInitialisationRequest,
     RevisionRecoveryRequest,
 )
-from core.development.scenario_drafting_domain import ScenarioDraftRequest, ScenarioDraftRunState
+from core.development.scenario_drafting_domain import (
+    ScenarioDraftRequest,
+    ScenarioDraftRunState,
+    ScenarioDraftStatus,
+)
 from core.development.strict_microcycle import StrictMicrocycleRequest
 from core.development.strict_tdd_feature_application import FeatureScenarioRequest, FeatureScenarioResult
 from core.development.strict_tdd_feature_execution import _evidence, _facts, _ticket_for
@@ -65,6 +69,7 @@ async def advance(
             request,
             lifecycle,
             _outcome(request, scenario_id, "revision_initialised", lifecycle),
+            draft_state=draft_state,
         )
     if lifecycle.status == "behavior_complete":
         return _after_behavior_completion(executor, request, draft_state, lifecycle)
@@ -99,6 +104,8 @@ async def advance(
         regression=microcycle.deterministic_regression_invoked,
         microcycle_kind=microcycle.kind,
         candidate_revision=microcycle.candidate_revision,
+        draft_state=draft_state,
+        microcycle_fingerprint=microcycle.fingerprint,
     )
 
 
@@ -110,6 +117,13 @@ def _intent_review_is_pending(state: ScenarioDraftRunState) -> bool:
         and state.attempts[-1].intent is None
     )
 
+
+def _source_requirement_evidence(request: FeatureScenarioRequest):
+    clauses = {item.ref: item for item in request.contract.source_clauses}
+    missing = [ref for ref in request.behavior.source_refs if ref not in clauses]
+    if missing:
+        raise ValueError("behavior source refs are absent from the behavior contract")
+    return tuple(clauses[ref] for ref in request.behavior.source_refs)
 
 async def _submit_draft(
     executor: StrictFeatureScenarioExecutor,
@@ -127,6 +141,7 @@ async def _submit_draft(
             ticket.test_path,
             _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
             request.canonical_development_base,
+            _source_requirement_evidence(request),
         ),
         request.project.binding().with_base_sha(request.canonical_development_base),
     )
@@ -137,6 +152,7 @@ async def _submit_draft(
         None,
         result,
         rack_ai=outcome.submitted_attempt,
+        draft_state=outcome.state,
     )
 
 
@@ -156,17 +172,18 @@ async def _review_intent(
             ticket.test_path,
             _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
             request.canonical_development_base,
+            _source_requirement_evidence(request),
         )
     )
     status = outcome.state.status
     if status == "intent_protocol_failure":
-        return _result(ScenarioTransitionKind.INTENT_PROTOCOL_FAILURE, request, None, _blocked_draft_outcome(request, scenario_id, status), reasoning=True)
+        return _result(ScenarioTransitionKind.INTENT_PROTOCOL_FAILURE, request, None, _blocked_draft_outcome(request, scenario_id, status), reasoning=True, draft_state=outcome.state)
     if status == "scenario_harness_failure":
-        return _result(ScenarioTransitionKind.SCENARIO_HARNESS_FAILURE, request, None, _blocked_draft_outcome(request, scenario_id, status), reasoning=True)
+        return _result(ScenarioTransitionKind.SCENARIO_HARNESS_FAILURE, request, None, _blocked_draft_outcome(request, scenario_id, status), reasoning=True, draft_state=outcome.state)
     approved = outcome.approved
     kind = ScenarioTransitionKind.INTENT_APPROVED if approved else ScenarioTransitionKind.INTENT_REPAIR_REQUIRED
     result_status = "intent_approved" if approved else "intent_repair_required"
-    return _result(kind, request, None, _draft_outcome(request, scenario_id, result_status), reasoning=True)
+    return _result(kind, request, None, _draft_outcome(request, scenario_id, result_status), reasoning=True, draft_state=outcome.state)
 
 
 def _after_behavior_completion(
@@ -184,6 +201,7 @@ def _after_behavior_completion(
             request,
             lifecycle,
             _outcome(request, scenario_id, "project_synchronised", lifecycle),
+            draft_state=replace(draft_state, project_synchronised=True),
         )
     microcycle = draft_state.approved_microcycle
     if microcycle is None:
@@ -199,6 +217,7 @@ def _after_behavior_completion(
             lifecycle,
             _evidence(microcycle),
         ),
+        draft_state=draft_state,
     )
 
 
@@ -293,17 +312,10 @@ def _result(
     regression: bool = False,
     microcycle_kind: MicrocycleTransitionKind | None = None,
     candidate_revision: str | None = None,
+    draft_state: ScenarioDraftRunState | None = None,
+    microcycle_fingerprint: TransitionFingerprint | None = None,
 ) -> ScenarioAdvanceResult:
-    fingerprint = TransitionFingerprint(
-        outcome.status,
-        request.behavior.ref,
-        outcome.scenario_id,
-        None,
-        outcome.canonical_development_base,
-        outcome.working_revision,
-        (),
-        _next_action(kind, outcome),
-    )
+    fingerprint = _fingerprint(outcome, request, draft_state, microcycle_fingerprint)
     return ScenarioAdvanceResult(
         kind,
         outcome.status,
@@ -327,13 +339,45 @@ def _result(
     )
 
 
-def _next_action(kind: ScenarioTransitionKind, outcome: FeatureScenarioResult) -> str:
+def _fingerprint(
+    outcome: FeatureScenarioResult,
+    request: FeatureScenarioRequest,
+    draft_state: ScenarioDraftRunState | None,
+    microcycle_fingerprint: TransitionFingerprint | None,
+) -> TransitionFingerprint:
+    latest = None if draft_state is None or not draft_state.attempts else draft_state.attempts[-1]
+    nested = () if microcycle_fingerprint is None else microcycle_fingerprint.retry_counts
+    return TransitionFingerprint(
+        outcome.status,
+        request.behavior.ref if microcycle_fingerprint is None else microcycle_fingerprint.behavior_ref,
+        outcome.scenario_id if microcycle_fingerprint is None else microcycle_fingerprint.scenario_id,
+        None if microcycle_fingerprint is None else microcycle_fingerprint.frontier_index,
+        outcome.canonical_development_base if microcycle_fingerprint is None else microcycle_fingerprint.canonical_sha,
+        outcome.working_revision or (None if latest is None else latest.candidate_revision) or (None if microcycle_fingerprint is None else microcycle_fingerprint.working_sha),
+        (() if draft_state is None else (len(draft_state.attempts),)) + nested,
+        _pending_action(draft_state, outcome, microcycle_fingerprint),
+    )
+
+
+def _pending_action(
+    draft_state: ScenarioDraftRunState | None,
+    outcome: FeatureScenarioResult,
+    microcycle_fingerprint: TransitionFingerprint | None,
+) -> str:
     if outcome.status == "behavior_complete":
         return "complete"
-    if kind == ScenarioTransitionKind.DRAFT_CANDIDATE_SUBMITTED:
+    if draft_state is None:
+        return "blocked" if outcome.blocked_reason is not None else "scenario_advance"
+    if draft_state.status in {
+        ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value,
+        ScenarioDraftStatus.INTENT_PROTOCOL_FAILURE.value,
+        ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
+    }:
+        return "blocked"
+    if draft_state.approved_microcycle is not None:
+        return "revision_initialisation" if microcycle_fingerprint is None else microcycle_fingerprint.pending_action
+    if not draft_state.attempts or draft_state.attempts[-1].candidate_revision is None:
+        return "scenario_draft_submission"
+    if draft_state.attempts[-1].intent is None:
         return "scenario_intent_review"
-    if kind == ScenarioTransitionKind.INTENT_APPROVED:
-        return "revision_initialisation"
-    if kind == ScenarioTransitionKind.PROJECT_SYNCHRONISED:
-        return "scenario_completion"
-    return "microcycle_advance"
+    return "scenario_draft_repair"

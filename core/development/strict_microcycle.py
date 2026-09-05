@@ -213,8 +213,6 @@ class StrictMicrocycleRequest:
     include_accepted_regression_suite: bool = True
     revision_lifecycle: MicrocycleRevisionLifecycle | None = None
     revision_binding_request: RevisionBindingRequest | None = None
-
-
 @dataclass(frozen=True)
 class StrictMicrocycleDependencies:
     state_store: MicrocycleStateStore
@@ -403,7 +401,7 @@ class StrictMicrocycleService:
         artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, base))
         candidate = self.candidates.materialise(FrontierCandidateRequest(artifact, request.repository_root, state.model.test_path))
         try:
-            diagnostic = adapter.execute_frontier(FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path))
+            diagnostic = adapter.execute_frontier(FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path))
             prior = BoundaryOutcome.GREEN.value if state.frontier.index else None
             assessment = adapter.classify_boundary(BoundaryClassificationRequest(diagnostic, candidate.artifact, state.fragments[state.frontier.index], prior))
             state = _record_execution(state, base, assessment)
@@ -630,6 +628,8 @@ def _record_execution(state: MicrocycleState, base: str, assessment: BoundaryAss
 def _record_developer(state: MicrocycleState, base: str, result: WorkUnitExecutionResult) -> MicrocycleState:
     counts = _counts_for(state, base)
     attempt = DeveloperAttempt(
+
+
         counts.developer_attempts + 1, state.frontier.index, base, result.accepted_revision,
         tuple(item for item in (result.evidence_location, result.error) if item),
     )
@@ -650,6 +650,7 @@ def _advance(state: MicrocycleState, base: str) -> MicrocycleState:
         regression=RegressionState("pending", state.regression.command),
         candidate_chain_revision=base,
     )
+
 
 
 def _working_binding(request: StrictMicrocycleRequest, expected_revision: str) -> RepositoryBinding:

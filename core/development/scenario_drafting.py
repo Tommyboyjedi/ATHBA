@@ -38,9 +38,13 @@ from core.development.scenario_drafting_domain import (
     ScenarioDraftRequest,
     ScenarioDraftRunState,
     ScenarioDraftStatus,
+    ScenarioHarnessFailureEvidence,
+    ScenarioHarnessFailureKind,
+    ScenarioHarnessFailureStage,
     ScenarioSubmissionMode,
     ScenarioSubmissionOutcome,
 )
+from core.development.specification_domain import SourceRequirementClause
 from core.development.strict_tdd_execution_budget import (
     StrictTddExecutionBudgetPolicy,
     StrictTddWorkKind,
@@ -99,6 +103,7 @@ class ScenarioDraftExecutionRecord:
     request: ScenarioDraftRequest
     unit: DevelopmentWorkUnit
     result: WorkUnitExecutionResult
+    binding: RepositoryBinding
 
 @dataclass(frozen=True)
 class ScenarioDraftWorkUnitFactory:
@@ -110,6 +115,7 @@ class ScenarioDraftWorkUnitFactory:
     def build(self, request: ScenarioDraftWorkUnitRequest) -> DevelopmentWorkUnit:
         draft = request.request
         work_unit_id = f"{draft.ticket.step_id}--scenario-draft-{request.attempt_number}"
+        workspace_scope = f"{draft.scenario_id}--scenario-draft"
         work_kind = (
             StrictTddWorkKind.SCENARIO_REPAIR
             if request.repair_attempt is not None
@@ -129,7 +135,7 @@ class ScenarioDraftWorkUnitFactory:
             timeout_seconds=self.budget_policy.timeout_for(work_kind),
             work_kind=work_kind,
             model_work_kind=(AthbaModelWorkKind.SCENARIO_REPAIR if request.repair_attempt is not None else AthbaModelWorkKind.COMPLETE_SCENARIO_AUTHORING),
-            workspace_identity=AthbaWorkspaceIdentity(f"{draft.ticket.step_id}--scenario-draft", work_unit_id, work_unit_id),
+            workspace_identity=AthbaWorkspaceIdentity(workspace_scope, f"{workspace_scope}-{request.attempt_number}", f"{workspace_scope}-{request.attempt_number}"),
             change_key=f"{work_unit_id}--attempt-{request.attempt_number}",
             status=WorkUnitStatus.READY,
         )
@@ -174,6 +180,7 @@ class ScenarioIntentReviewRequest:
     behavior_summary: str
     expected_result: str
     source_requirement_refs: tuple[str, ...]
+    source_requirement_evidence: tuple[SourceRequirementClause, ...]
     complete_scenario_source: str
     static_fragment_kinds: tuple[str, ...]
     canonical_test_identity: str
@@ -184,7 +191,7 @@ class ScenarioIntentReviewRequest:
 class ScenarioCandidateFailureRequest:
     state: ScenarioDraftRunState
     attempt: ScenarioDraftAttempt
-    source: str
+    source: str | None
     feedback: str
     prepared: "ScenarioCandidatePreparation | None" = None
 
@@ -264,7 +271,7 @@ class ScenarioDraftingService:
         repair_binding = _repair_binding(binding, request, repair, self.source_reader)
         unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state), repair))
         result = await self.execution_gateway.execute(unit, repair_binding)
-        outcome = self._record_submission(ScenarioDraftExecutionRecord(state, request, unit, result))
+        outcome = _record_submission(ScenarioDraftExecutionRecord(state, request, unit, result, repair_binding), self.source_reader)
         self.state_store.save(outcome.state)
         return outcome
 
@@ -278,10 +285,14 @@ class ScenarioDraftingService:
         if not state.attempts:
             raise ValueError("scenario intent review requires a submitted draft attempt")
         attempt = state.attempts[-1]
+        if attempt.status in {"candidate_invalid", "candidate_unchanged"}:
+            return ScenarioDraftOutcome(state, False)
         if attempt.candidate_revision is None or attempt.intent is not None:
             raise ValueError("scenario intent review requires an unreviewed accepted draft")
-        source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
+        source = None
         try:
+            _safe_test_path(request.allowed_test_path)
+            source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
             prepared = _prepare_candidate(request, attempt, source, self.adapter_catalog)
         except (SyntaxError, ValueError) as error:
             outcome = _candidate_failure(ScenarioCandidateFailureRequest(state, attempt, source, str(error)))
@@ -332,56 +343,12 @@ class ScenarioDraftingService:
                 ScenarioFreezeRequest(_approved_draft(prepared), intent_outcome.result, self.adapter_catalog, request.development_base_revision)
             )
         except (SyntaxError, ValueError) as error:
-            failed = replace(reviewed, status="scenario_harness_failure", feedback=str(error))
-            blocked = replace(state, attempts=(*state.attempts[:-1], failed), status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value)
+            blocked = _freeze_failure_state(updated, reviewed, error)
             self.state_store.save(blocked)
             return ScenarioDraftOutcome(blocked, False)
         approved = replace(updated, approved_microcycle=frozen, status=ScenarioDraftStatus.APPROVED.value)
         self.state_store.save(approved)
         return ScenarioDraftOutcome(approved, False)
-
-    def _record_submission(self, record: ScenarioDraftExecutionRecord) -> ScenarioDraftOutcome:
-        state = record.state
-        unit = record.unit
-        result = record.result
-        accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
-        outcome = _submission_outcome(result, accepted)
-        if outcome is ScenarioSubmissionOutcome.EXTERNAL_BLOCKER:
-            blocked = replace(state, status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value)
-            return ScenarioDraftOutcome(blocked, False)
-        status = outcome.value
-        feedback = None if accepted else _no_candidate_feedback(result, outcome)
-        attempt = replace(
-            _attempt(unit, result, status, feedback),
-            repair_mode=_submission_mode(state).value,
-            no_candidate_outcome=None if accepted else outcome.value,
-        )
-        if state.attempts and attempt.candidate_revision is not None:
-            try:
-                returned_source = self.source_reader.read(attempt.candidate_revision, record.request.allowed_test_path)
-            except ValueError:
-                returned_source = None
-            attempt = replace(attempt, candidate_source=returned_source)
-        if not state.attempts:
-            return _append_attempt(state, attempt)
-        parent = state.attempts[-1]
-        attempt = replace(
-            attempt,
-            repair_base_ref=parent.candidate_branch or parent.candidate_revision,
-            repair_base_sha=parent.candidate_revision,
-        )
-        unchanged = _unchanged_evidence(parent, attempt)
-        if unchanged is None:
-            return _append_attempt(state, attempt)
-        feedback = _unchanged_feedback(parent.feedback)
-        assessment = _unchanged_assessment(parent.candidate_assessment, feedback)
-        rejected = replace(
-            attempt, status="candidate_unchanged", feedback=feedback,
-            candidate=parent.candidate, static_analysis=parent.static_analysis,
-            candidate_assessment=assessment, candidate_source=parent.candidate_source,
-            unchanged_evidence=unchanged,
-        )
-        return _append_attempt(state, rejected)
 
 
 @dataclass(frozen=True)
@@ -406,6 +373,16 @@ class ScenarioDraftCompatibilityLoop:
         raise RuntimeError("scenario draft compatibility transition guard exhausted")
 
 
+
+def _freeze_failure_state(
+    state: ScenarioDraftRunState,
+    attempt: ScenarioDraftAttempt,
+    error: SyntaxError | ValueError,
+) -> ScenarioDraftRunState:
+    evidence = _freeze_failure_evidence(attempt, error)
+    failed = replace(attempt, status="scenario_harness_failure", feedback=evidence.message)
+    return replace(state, attempts=(*state.attempts[:-1], failed), status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value, harness_failure_evidence=evidence)
+
 def _is_terminal_draft_state(state: ScenarioDraftRunState) -> bool:
     return state.status in {
         ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value,
@@ -414,8 +391,120 @@ def _is_terminal_draft_state(state: ScenarioDraftRunState) -> bool:
     }
 
 
+
+def _workspace_failure_evidence(
+    unit: DevelopmentWorkUnit,
+    result: WorkUnitExecutionResult,
+) -> ScenarioHarnessFailureEvidence:
+    return ScenarioHarnessFailureEvidence(
+        ScenarioHarnessFailureStage.WORKSPACE_RESULT,
+        ScenarioHarnessFailureKind.EXTERNAL_BLOCKER,
+        _bounded_failure_text(result.error or result.status),
+        _bounded_failure_text(result.status, 256),
+        _bounded_failure_text(unit.id, 256),
+        _optional_bounded_failure_text(result.change_id, 256),
+        _failure_evidence_refs(result.evidence_location),
+        _optional_bounded_failure_text(result.selected_worker_id, 256),
+        result.worker_provenance,
+    )
+
+
+def _freeze_failure_evidence(
+    attempt: ScenarioDraftAttempt,
+    error: SyntaxError | ValueError,
+) -> ScenarioHarnessFailureEvidence:
+    return ScenarioHarnessFailureEvidence(
+        ScenarioHarnessFailureStage.SCENARIO_FREEZE,
+        ScenarioHarnessFailureKind.EXCEPTION,
+        _bounded_failure_text(str(error)),
+        _bounded_failure_text(type(error).__name__, 256),
+        _bounded_failure_text(attempt.work_unit_id, 256),
+        _optional_bounded_failure_text(attempt.change_id, 256),
+        _failure_evidence_refs(attempt.evidence_location),
+        _optional_bounded_failure_text(attempt.selected_worker_id, 256),
+        attempt.worker_provenance,
+    )
+
+
+def _failure_evidence_refs(location: str | None) -> tuple[str, ...]:
+    bounded = _optional_bounded_failure_text(location, 1024)
+    return () if bounded is None else (bounded,)
+
+
+def _optional_bounded_failure_text(value: str | None, limit: int) -> str | None:
+    return None if value is None else _bounded_failure_text(value, limit)
+
+
+def _bounded_failure_text(value: str, limit: int = 2048) -> str:
+    bounded = value.strip()[:limit]
+    return bounded or "unspecified scenario harness failure"
+
 def _requires_external_repair(state: ScenarioDraftRunState) -> bool:
     return bool(state.attempts and state.attempts[-1].status != "candidate_submitted")
+
+
+def _record_submission(
+    record: ScenarioDraftExecutionRecord, source_reader: ScenarioCandidateSourceReader,
+) -> ScenarioDraftOutcome:
+    state = record.state
+    unit = record.unit
+    result = record.result
+    accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
+    outcome = _submission_outcome(result, accepted)
+    if outcome is ScenarioSubmissionOutcome.EXTERNAL_BLOCKER:
+
+        blocked = replace(state, status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value, harness_failure_evidence=_workspace_failure_evidence(unit, result))
+        return ScenarioDraftOutcome(blocked, False)
+    status = outcome.value
+    feedback = None if accepted else _no_candidate_feedback(result, outcome)
+    attempt = replace(
+        _attempt(unit, result, status, feedback),
+        repair_mode=_submission_mode(state).value,
+        no_candidate_outcome=None if accepted else outcome.value,
+        repair_base_ref=record.binding.base_ref if state.attempts else None,
+        repair_base_sha=record.binding.base_sha if state.attempts else None,
+    )
+    path_failure = _path_violation_attempt(record, attempt)
+    if path_failure is not None:
+        return _append_attempt(state, path_failure)
+    if state.attempts and attempt.candidate_revision is not None:
+        try:
+            returned_source = source_reader.read(attempt.candidate_revision, record.request.allowed_test_path)
+        except ValueError:
+            returned_source = None
+        attempt = replace(attempt, candidate_source=returned_source)
+    if not state.attempts:
+        return _append_attempt(state, attempt)
+    parent = state.attempts[-1]
+    unchanged = _unchanged_evidence(parent, attempt)
+    if unchanged is None:
+        return _append_attempt(state, attempt)
+    feedback = _unchanged_feedback(parent.feedback)
+    assessment = _unchanged_assessment(parent.candidate_assessment, feedback)
+    rejected = replace(
+        attempt, status="candidate_unchanged", feedback=feedback,
+        candidate=parent.candidate, static_analysis=parent.static_analysis,
+        candidate_assessment=assessment, candidate_source=parent.candidate_source,
+        unchanged_evidence=unchanged,
+    )
+    return _append_attempt(state, rejected)
+
+
+def _path_violation_attempt(
+    record: ScenarioDraftExecutionRecord, attempt: ScenarioDraftAttempt,
+) -> ScenarioDraftAttempt | None:
+    evidence = record.result.policy_evidence
+    if evidence is None:
+        return None
+    outside = tuple(path for path in evidence.changed_paths if path != record.request.allowed_test_path)
+    if not outside:
+        return None
+    detail = f"Candidate edits outside the permitted test path: {', '.join(outside)}. Submit only the permitted test artifact."
+    issue = ScenarioCandidateIssue(ScenarioCandidateIssueCode.UNUSABLE_ARTIFACT.value, detail)
+    return replace(
+        attempt, status="candidate_invalid", feedback=detail,
+        candidate_assessment=ScenarioCandidateAssessment(False, (), issues=(issue,)),
+    )
 
 
 def _candidate_failure(request: ScenarioCandidateFailureRequest) -> ScenarioDraftOutcome:
@@ -426,7 +515,11 @@ def _candidate_failure(request: ScenarioCandidateFailureRequest) -> ScenarioDraf
         feedback=request.feedback,
         candidate=None if prepared is None else prepared.candidate,
         static_analysis=None if prepared is None else prepared.static_analysis,
-        candidate_assessment=None if prepared is None else prepared.assessment,
+        candidate_assessment=ScenarioCandidateAssessment(
+            False, (), issues=(ScenarioCandidateIssue(
+                ScenarioCandidateIssueCode.UNUSABLE_ARTIFACT.value, request.feedback,
+            ),),
+        ) if prepared is None else prepared.assessment,
         candidate_source=request.source,
     )
     updated = replace(request.state, attempts=(*request.state.attempts[:-1], invalid))
@@ -591,6 +684,7 @@ def _review_request(
         behavior_summary=request.ticket.focused_behavior,
         expected_result=request.ticket.expected_result,
         source_requirement_refs=request.source_requirement_refs,
+        source_requirement_evidence=request.source_requirement_evidence,
         complete_scenario_source=draft.source,
         static_fragment_kinds=tuple(item.kind for item in fragments),
         canonical_test_identity=draft.canonical_test_identity,
@@ -663,6 +757,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "planned_canonical_test_identity": request.ticket.test_name,
         },
         "source_requirement_refs": list(request.source_requirement_refs),
+        "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
         "language": request.language_id,
         "test_framework": request.test_framework,
         "allowed_test_path": request.allowed_test_path,
@@ -779,6 +874,7 @@ def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:
             "expected_result": request.expected_result,
         },
         "source_requirement_refs": list(request.source_requirement_refs),
+        "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
         "complete_scenario_source": request.complete_scenario_source,
         "static_scenario_facts": {
             "canonical_test_identity": request.canonical_test_identity,

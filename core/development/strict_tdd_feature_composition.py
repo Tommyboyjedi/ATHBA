@@ -1,6 +1,5 @@
 """Reusable composition root for the strict-TDD feature path."""
 from __future__ import annotations
-from typing import cast
 from dataclasses import dataclass, field
 from pathlib import Path
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -36,7 +35,10 @@ from core.development.strict_tdd_execution_budget import StrictTddExecutionBudge
 from core.development.strict_tdd_feature_application import StrictTddFeatureApplicationService, StrictTddFeatureDependencies
 from core.development.strict_tdd_feature_execution import CompletedFeatureReconciler, StrictFeatureScenarioDependencies, StrictFeatureScenarioExecutor
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
-from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
+from core.development.athba_workspace_routing import AthbaExecutionProfileResolver
+from core.execution.profiled_workspace_gateway import ProfiledWorkspaceExecutionGateway, ProfiledWorkspaceGatewayDependencies
+from core.execution.rack_ai_workspace_cli_transport import RackAiWorkspaceCliConfig, RackAiWorkspaceCliTransport
+from core.execution.rack_ai_workspace_connector import RackAiWorkspaceConnector
 from core.execution.reasoning_gateway import ReasoningGateway
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway
 
@@ -72,7 +74,11 @@ class StrictTddFeatureCompositionFactory:
     def build(self, request: StrictTddCompositionRequest) -> StrictTddFeatureComposition:
         root = request.state_root.resolve()
         if request.execution_gateway is None:
-            gateway: WorkUnitExecutionGateway = cast(WorkUnitExecutionGateway, RackAiCliExecutionGateway(request.workload_id))
+            gateway: WorkUnitExecutionGateway = ProfiledWorkspaceExecutionGateway(
+                ProfiledWorkspaceGatewayDependencies(
+                    RackAiWorkspaceConnector(RackAiWorkspaceCliTransport(RackAiWorkspaceCliConfig())), AthbaExecutionProfileResolver()
+                )
+            )
         else:
             gateway = request.execution_gateway
         environment = ProjectEnvironmentService(root / "projects")

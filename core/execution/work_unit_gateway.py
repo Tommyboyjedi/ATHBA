@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol
-from core.development.work_unit import WorkerExecutionProvenance
+from core.development.work_unit import DevelopmentWorkUnit, WorkerExecutionProvenance
 from core.execution.rack_ai_contract import RepositoryBinding
 
 @dataclass(frozen=True)
@@ -47,6 +47,6 @@ class WorkUnitExecutionResult:
 
 class WorkUnitExecutionGateway(Protocol):
     """Port implemented by Rack AI adapters and deterministic test fakes."""
-    async def execute(self, work_unit: object, repository_binding: RepositoryBinding) -> WorkUnitExecutionResult:
+    async def execute(self, work_unit: DevelopmentWorkUnit, repository_binding: RepositoryBinding) -> WorkUnitExecutionResult:
         """Execute one ready bounded work unit and return structured evidence."""
         ...

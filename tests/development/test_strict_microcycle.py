@@ -561,3 +561,33 @@ async def test_regression_repair_submission_regression_and_promotion_are_isolate
     assert promoted.development_base_revision == regressed.candidate_chain_revision
     assert len(gateway.units) == 1
     assert len(runtime.requests) == runtime_count
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expression", ["widget.entries()", "assert len(widget.entries()) == 0"])
+async def test_missing_member_red_transition_is_fragment_independent(tmp_path, monkeypatch, expression):
+    monkeypatch.setattr(__import__(__name__, fromlist=["SOURCE"]), "SOURCE",
+                        "from widget import Widget\ndef test_widget():\n    widget = Widget()\n    " + expression + "\n")
+    state = initial_state()
+    state = replace(state, frontier=ScenarioFrontier(
+        state.model.scenario_id, 2, state.fragments[2].fragment_id,
+        tuple(item.fragment_id for item in state.fragments),
+    ))
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": "class Widget: pass\n"})
+    gateway = Gateway([])
+    service = StrictMicrocycleService(StrictMicrocycleDependencies(
+        store, candidates, gateway,
+        type("Catalog", (), {"for_language": lambda self, language: PythonPytestAdapter()})(),
+        regression(),
+    ))
+    initial = await service.advance(request(tmp_path, state))
+    assert initial.kind == MicrocycleTransitionKind.STATE_INITIALISED
+    result = await service.advance(request(tmp_path, state))
+    assert result.kind == MicrocycleTransitionKind.FRONTIER_RED_ACCEPTED
+    saved = store.load(state.model.scenario_id)
+    assert saved.boundary_evidence[-1].outcome == "valid_missing_capability_red"
+    assert saved.current_accepted_red_revision == "frontier-0-base"
+    assert saved.pending_action == "submit_developer"
+    assert saved.frontier.index == 2
+    assert gateway.units == []

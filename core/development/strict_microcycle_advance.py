@@ -61,6 +61,8 @@ async def advance(
     if state.completion.status == "behavior_complete":
         return _result(MicrocycleTransitionKind.BEHAVIOR_COMPLETED, prior_status, state, request, more=False)
     action = MicrocyclePendingAction(state.pending_action)
+    if action == MicrocyclePendingAction.BLOCKED and state.behavior_review.verdict == "protocol_failure":
+        return _result(MicrocycleTransitionKind.BLOCKED, prior_status, state, request, blocker="behavior_review_protocol_failure", more=False)
     if action == MicrocyclePendingAction.BLOCKED and state.behavior_review.verdict == REPLAN_REQUIRED:
         return _result(
             MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED,
@@ -120,7 +122,7 @@ def _observe_frontier(
     )
     try:
         diagnostic = adapter.execute_frontier(
-            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path)
+            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path)
         )
         previous = BoundaryOutcome.GREEN.value if state.frontier.index else None
         assessment = adapter.classify_boundary(
@@ -210,7 +212,7 @@ def _verify_developer_green(
     )
     try:
         diagnostic = adapter.execute_frontier(
-            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path)
+            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path)
         )
         previous = BoundaryOutcome.GREEN.value if state.frontier.index else None
         assessment = adapter.classify_boundary(
@@ -430,7 +432,7 @@ async def _review_behavior(
     else:
         updated = replace(updated, pending_action=MicrocyclePendingAction.BLOCKED.value)
         kind = MicrocycleTransitionKind.BLOCKED
-        blocker = updated.behavior_review.verdict
+        blocker = "behavior_review_protocol_failure" if updated.behavior_review.verdict == "protocol_failure" else updated.behavior_review.verdict
     service.state_store.save(updated)
     return _result(kind, prior_status, updated, request, reasoning=True, blocker=blocker)
 

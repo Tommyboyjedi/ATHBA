@@ -46,6 +46,8 @@ from core.development.strict_tdd_feature_execution import (
     StrictFeatureScenarioExecutor,
 )
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
+from core.development.strict_tdd_feature_composition import StrictTddCompositionRequest, StrictTddFeatureCompositionFactory
+from core.execution.profiled_workspace_gateway import ProfiledWorkspaceExecutionGateway
 from core.execution.reasoning_gateway import ReasoningResult
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
@@ -131,6 +133,13 @@ class Gatekeeper:
         item = SpecificationChecklistItem("CHK-1", "Widget exposes value 1.", "behavior")
         checklist = SpecificationChecklist(request.contract.project_id, request.contract.requirement_source, [item])
         return SpecificationGatekeeperRunState(checklist)
+
+
+def test_default_composition_uses_profiled_v2_workspace_gateway(tmp_path):
+    composition = StrictTddFeatureCompositionFactory().build(StrictTddCompositionRequest(tmp_path / "state", tmp_path / "repository", "feature", DeterministicReasoning()))
+    assert isinstance(composition.rack_ai, ProfiledWorkspaceExecutionGateway)
+    assert composition.rack_ai.port.__class__.__name__ == "RackAiWorkspaceConnector"
+    assert composition.rack_ai.port.transport.__class__.__name__ == "RackAiWorkspaceCliTransport"
 
 
 def feature_request():

@@ -92,7 +92,17 @@ class StrictTddRunController:
         marker = StrictTddTransitionInFlight(state.total_application_transition_count + 1)
         running = replace(state, status=StrictTddRunStatus.RUNNING, reason=None, transition_in_flight=marker)
         self.states.save(running)
-        transition = await self.application.advance(request.feature_request())
+        try:
+            transition = await self.application.advance(request.feature_request())
+        except Exception:
+            self.states.save(
+                replace(
+                    running,
+                    transition_in_flight=None,
+                    reason="application_transition_exception_before_receipt",
+                )
+            )
+            raise
         receipt = self.receipts.create(transition, marker.occurrence)
         pending = replace(running, transition_in_flight=None, pending_transition_receipt=receipt)
         self.states.save(pending)
@@ -145,7 +155,20 @@ def _resume(self, request: StrictTddRunRequest, context: StrictTddLifecycleRunCo
     state = _required_state(self, request)
     if state.project_id != request.project_id or state.immutable_identity_hash != request.immutable_identity_hash:
         raise ValueError("strict TDD resume request identity differs")
-    resumed = replace(state, current_invocation_count=state.current_invocation_count + 1)
+    resumed = replace(
+        state,
+        status=(
+            StrictTddRunStatus.RUNNING
+            if state.status == StrictTddRunStatus.TRANSITION_LIMIT_REACHED
+            else state.status
+        ),
+        reason=(
+            None
+            if state.status == StrictTddRunStatus.TRANSITION_LIMIT_REACHED
+            else state.reason
+        ),
+        current_invocation_count=state.current_invocation_count + 1,
+    )
     self.states.save(resumed)
     event = _append_controller_event(self, context, resumed, StrictTddLifecycleEventKind.RUN_RESUMED, StrictTddLifecycleStatus.STARTED)
     updated = replace(resumed, last_lifecycle_event_id=event.event_id)

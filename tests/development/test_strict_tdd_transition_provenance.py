@@ -142,3 +142,17 @@ def test_projector_has_no_persistence_or_external_effect_dependencies():
     assert "StrictTddLifecycleEventRepository" not in source
     assert "StrictTddLifecycleEventSink" not in source
     assert ".record(" not in source
+
+@pytest.mark.parametrize(
+    "scenario",
+    (
+        ScenarioTransitionKind.INTENT_PROTOCOL_FAILURE,
+        ScenarioTransitionKind.SCENARIO_HARNESS_FAILURE,
+    ),
+)
+def test_projector_maps_terminal_scenario_failures_to_blocked_events(scenario):
+    path = StrictTddTransitionPath(FeatureTransitionKind.BLOCKED, scenario)
+    draft = StrictTddTransitionEventProjector().project(
+        StrictTddTransitionProjectionRequest(_context(), _transition(path, blocker="failure"), 4)
+    )[0]
+    assert draft.event_kind == StrictTddLifecycleEventKind.TRANSITION_BLOCKED
