@@ -64,7 +64,7 @@ class ReconciliationResponse:
     @classmethod
     def decode(cls, text: str) -> ReconciliationResponse:
         try:
-            payload = json.loads(text)
+            payload = json.loads(_normalise_json_object(text))
         except json.JSONDecodeError as error:
             raise ReconciliationFailure(
                 ReconciliationFailureKind.MALFORMED, "response was not valid JSON"
@@ -83,3 +83,11 @@ class ReconciliationResponse:
         if answer == "NO" and selected:
             raise ReconciliationFailure(ReconciliationFailureKind.SEMANTIC, "NO cannot claim accepted evidence")
         return cls(answer, tuple(selected), rationale)
+
+
+def _normalise_json_object(text: str) -> str:
+    source = text.strip()
+    lines = source.splitlines()
+    if len(lines) < 3 or lines[0] not in {"```", "```json"} or lines[-1] != "```":
+        return source
+    return "\n".join(lines[1:-1])

@@ -8,7 +8,6 @@ from core.development.specification_reconciliation import (
     AcceptedTestEvidence, ChecklistItemReconciler, ChecklistReconciliationRequest, GitAcceptedTestCatalog,
 )
 from core.development.reconciliation_response import ReconciliationFailure, ReconciliationFailureKind
-from core.development.reconciliation_submission import REPAIR_PURPOSE
 from core.execution.reasoning_gateway import ReasoningResult
 
 
@@ -61,21 +60,43 @@ async def test_valid_response_records_verified_result(answer):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('text', ['```json\n' + output() + '\n```', '```\n' + output() + '\n```'])
 async def test_one_format_repair_succeeds_without_new_checklist_or_evidence(text):
-    gateway = Gateway([text, output()])
+    gateway = Gateway([text])
     result = await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog())).reconcile(item())
     assert result.answer == 'NO'
+    assert len(gateway.requests) == 1
+    assert [attempt.format_repair for attempt in result.response_attempts] == [False]
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('text', [
+    'before\n```json\n' + output() + '\n```',
+    '```json\n' + output() + '\n```\nafter',
+])
+async def test_surrounding_prose_is_rejected(text):
+    gateway = Gateway([text, '{'])
+    with pytest.raises(ReconciliationFailure) as caught:
+        await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog())).reconcile(item())
+    assert caught.value.kind == ReconciliationFailureKind.MALFORMED
     assert len(gateway.requests) == 2
-    repair = gateway.requests[1]
-    assert repair.purpose == REPAIR_PURPOSE
-    payload = json.loads(repair.prompt)
-    assert payload['previous_response'] == text
-    assert 'Independent item' not in repair.prompt
-    assert item().accepted[0].test_name not in repair.prompt
-    assert 'Do not reconsider' in repair.prompt
-    assert 'Do not add evidence' in repair.prompt
-    assert [a.format_repair for a in result.response_attempts] == [False, True]
 
 
+@pytest.mark.asyncio
+async def test_malformed_fenced_json_remains_malformed():
+    gateway = Gateway(['```json\n{\n```', '{'])
+    with pytest.raises(ReconciliationFailure) as caught:
+        await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog())).reconcile(item())
+    assert caught.value.kind == ReconciliationFailureKind.MALFORMED
+    assert len(gateway.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_fenced_wrong_schema_fails_without_format_repair():
+    gateway = Gateway(['```\n{"answer": "NO", "selected_test_names": []}\n```'])
+    with pytest.raises(ReconciliationFailure) as caught:
+        await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog())).reconcile(item())
+    assert caught.value.kind == ReconciliationFailureKind.SCHEMA
+    assert len(gateway.requests) == 1
 @pytest.mark.asyncio
 async def test_second_malformed_output_stops_typed_without_third_submission():
     gateway = Gateway(['prose', '{', output()])
@@ -138,7 +159,6 @@ async def test_provider_failure_is_distinct_and_never_retried(failure, kind, rep
 @pytest.mark.parametrize('first,second', [
     ('prose', output()),
     ('{', output()),
-    ('```json\n' + output() + '\n```', output('YES', [item().accepted[0].test_name])),
 ])
 async def test_repair_cannot_invent_or_change_a_decision(first, second):
     gateway = Gateway([first, second])
