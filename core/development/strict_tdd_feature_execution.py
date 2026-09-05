@@ -96,6 +96,8 @@ def _ticket_for(request: FeatureScenarioRequest) -> TddStepProposal:
     test_path = request.contract.test_paths[min(index, len(request.contract.test_paths) - 1)]
     production_path = request.contract.production_paths[0]
     name = "test_" + "".join(char if char.isalnum() else "_" for char in request.behavior.ref).strip("_")
+    # TODO(cleanup): Behavior Planner test_hint is stored as red_objective here, but the
+    # strict-TDD Tester payload does not consume red_objective. Wire the advisory hint through or remove the dead handoff.
     return TddStepProposal(
         request.behavior.ref, [request.behavior.ref], request.behavior.summary,
         f"{test_path}::{name}", request.behavior.observable_outcome, test_path, production_path,

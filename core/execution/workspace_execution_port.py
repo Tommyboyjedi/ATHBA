@@ -30,6 +30,8 @@ class WorkspaceExecutionRequest:
     acceptance_commands: tuple[tuple[str, ...], ...]
     required_artifacts: tuple[str, ...]
     objective: str
+    # TODO(cleanup): The profiled gateway does not populate request evidence_refs and
+    # the Rack AI v2 serializer does not transport them. Wire them through deliberately or remove the dead field.
     evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
