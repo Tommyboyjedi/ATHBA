@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from core.development.python_pytest_isolation import TargetPytestEnvironment
 from core.development.python_missing_member import MissingMemberContext, missing_production_member
 
 
@@ -95,11 +95,12 @@ class _Plugin:
 
 def main() -> int:
     root, node, production_path = sys.argv[1:4]
-    os.chdir(root)
-    sys.path.insert(0, root)
+    target = Path(root).resolve()
+    environment = TargetPytestEnvironment()
+    environment.prepare(target)
     import pytest
     plugin = _Plugin(node, production_path)
-    exit_code = pytest.main(["-q", "-p", "no:cacheprovider", node], plugins=[plugin])
+    exit_code = pytest.main(environment.arguments(target, node), plugins=[plugin])
     print(json.dumps(asdict(plugin.finish(int(exit_code)))), flush=True)
     return 0
 

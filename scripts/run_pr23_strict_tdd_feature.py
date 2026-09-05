@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from typing import NoReturn, Sequence
 
+from core.development.python_pytest_preflight import PythonProbePreflightError
 from core.development.strict_tdd_live_run_composition import (
     StrictTddLiveRunCompositionFactory,
     StrictTddLiveRunCompositionRequest,
@@ -187,6 +188,10 @@ def main(
         result = asyncio.run(
             execute(parse(arguments), factory or StrictTddLiveRunCompositionFactory())
         )
+    except PythonProbePreflightError as error:
+        print(json.dumps({"status": "blocked", "blocked_reason": "python_pytest_preflight_failed",
+                          "diagnostic": error.diagnostic.to_dict()}, sort_keys=True))
+        return int(StrictTddRunnerExitCode.BLOCKED)
     except StrictTddReceiptDeliveryError as error:
         print(json.dumps({"status": "receipt_delivery_failed", "error": str(error)}, sort_keys=True))
         return int(StrictTddRunnerExitCode.RECEIPT_DELIVERY_FAILED)
