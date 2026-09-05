@@ -7,6 +7,8 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
+from core.development.reconciliation_response import ReconciliationFailure
+
 
 class StrictTddFeatureStatus(str, Enum):
     PLANNING = "planning"
@@ -91,6 +93,7 @@ class StrictTddFeatureState:
     blocked_reason: str | None = None
     final_reconciliation: tuple[dict[str, object], ...] = ()
     evidence_refs: tuple[str, ...] = ()
+    reconciliation_failure: ReconciliationFailure | None = None
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -109,6 +112,7 @@ class StrictTddFeatureState:
     def to_dict(self) -> dict[str, object]:
         return {
             **asdict(self),
+            "reconciliation_failure": None if self.reconciliation_failure is None else self.reconciliation_failure.to_dict(),
             "completed_behaviors": [asdict(item) for item in self.completed_behaviors],
         }
 
@@ -131,6 +135,7 @@ class StrictTddFeatureState:
             payload.get("working_ref"), payload.get("working_revision"),
             payload.get("blocked_reason"), tuple(payload.get("final_reconciliation", ())),
             tuple(str(item) for item in payload.get("evidence_refs", ())),
+            None if payload.get("reconciliation_failure") is None else ReconciliationFailure.from_dict(payload["reconciliation_failure"]),
         )
 
 

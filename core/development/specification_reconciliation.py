@@ -6,9 +6,11 @@ import ast
 import hashlib
 import json
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 
+from core.development.reconciliation_response import ReconciliationAttempt, ReconciliationFailure
+from core.development.reconciliation_submission import ReconciliationSubmission
 from core.development.microcycle_domain import MicrocycleState
 from core.development.tdd_progression import BehaviorContractRunState, SpecificationChecklist
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
@@ -40,6 +42,8 @@ class ChecklistTestReconciliation:
     answer: str
     accepted_test_names: list[str]
     rationale: str
+    response_attempts: tuple[ReconciliationAttempt, ...] = ()
+    supplied_test_names: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.answer not in {"YES", "NO"}:
@@ -55,6 +59,8 @@ class ChecklistTestReconciliation:
             "answer": self.answer,
             "accepted_test_names": list(self.accepted_test_names),
             "rationale": self.rationale,
+            "supplied_test_names": list(self.supplied_test_names),
+            "response_attempts": [asdict(attempt) for attempt in self.response_attempts],
         }
 
 
@@ -178,16 +184,19 @@ class ChecklistItemReconciler:
         self.catalog = catalog
 
     async def reconcile(self, request: ChecklistReconciliationRequest) -> ChecklistTestReconciliation:
-        result = await self.gateway.reason(_reasoning_request(request))
-        payload = _json_object(result.text)
-        answer = str(payload.get("answer", ""))
-        selected = payload.get("selected_test_names", [])
-        rationale = str(payload.get("rationale", ""))
-        if answer not in {"YES", "NO"} or not isinstance(selected, list):
-            raise ValueError("reconciler response must contain YES or NO and a selected_test_names list")
-        if answer == "NO":
-            return ChecklistTestReconciliation(request.checklist_ref, "NO", [], rationale)
-        return _verified_yes_or_no(request.checklist_ref, rationale, request.accepted, selected, self.catalog)
+        try:
+            submission = await ReconciliationSubmission(self.gateway).submit(_reasoning_request(request))
+        except ReconciliationFailure as error:
+            raise replace(error, checklist_ref=request.checklist_ref,
+                          accepted_test_names=tuple(item.test_name for item in request.accepted)) from error
+        response = submission.response
+        if response.answer == "NO":
+            result = ChecklistTestReconciliation(request.checklist_ref, "NO", [], response.rationale)
+        else:
+            result = _verified_yes_or_no(request.checklist_ref, response.rationale,
+                                         request.accepted, list(response.selected_test_names), self.catalog)
+        return replace(result, response_attempts=submission.attempts,
+                       supplied_test_names=tuple(item.test_name for item in request.accepted))
 
 
 class TestEvidenceReconciler:
@@ -284,13 +293,3 @@ def _reconciliation_prompt(
         },
         sort_keys=True,
     )
-
-
-def _json_object(text: str) -> dict[str, object]:
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise ValueError("reconciler response was not valid JSON") from error
-    if not isinstance(payload, dict):
-        raise ValueError("reconciler response must be a JSON object")
-    return payload

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -23,6 +23,7 @@ from core.development.specification_reconciliation import (
     CompletedMicrocycleEvidenceCollector,
     GitAcceptedTestCatalog,
 )
+from core.development.reconciliation_response import ReconciliationFailure
 from core.development.microcycle_domain import MicrocycleState
 from core.development.strict_microcycle import StrictMicrocycleRequest, StrictMicrocycleService
 from core.development.strict_tdd_feature_application import (
@@ -78,9 +79,12 @@ class CompletedFeatureReconciler:
         item_reconciler = ChecklistItemReconciler(self.reasoning_gateway, catalog)
         results: list[dict[str, object]] = []
         for item in gatekeeper.checklist.items:
-            result = await item_reconciler.reconcile(
-                ChecklistReconciliationRequest(request.contract.project_id, item.ref, item.text, accepted)
-            )
+            try:
+                result = await item_reconciler.reconcile(
+                    ChecklistReconciliationRequest(request.contract.project_id, item.ref, item.text, accepted)
+                )
+            except ReconciliationFailure as error:
+                raise replace(error, completed_results=tuple(results)) from error
             results.append(result.to_dict())
         return tuple(results)
 

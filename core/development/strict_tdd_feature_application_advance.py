@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from core.development.reconciliation_response import ReconciliationFailure
+
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
 from core.development.project_environment import DevelopmentProject
 from core.development.behavior_contract_coordinator import ContractPlanningRequest
@@ -134,14 +136,19 @@ async def _reconcile(
     project: DevelopmentProject,
     contract: BehaviorContract,
 ) -> FeatureAdvanceResult:
-    reconciliation = await service.reconciler.reconcile(
-        FeatureReconciliationRequest(
-            contract,
-            state.completed_behaviors,
-            dict(state.gatekeeper_payload or {}),
-            str(state.canonical_development_base),
+    try:
+        reconciliation = await service.reconciler.reconcile(
+            FeatureReconciliationRequest(
+                contract, state.completed_behaviors, dict(state.gatekeeper_payload or {}),
+                str(state.canonical_development_base),
+            )
         )
-    )
+    except ReconciliationFailure as error:
+        blocked = replace(state, status=StrictTddFeatureStatus.BLOCKED.value,
+                          blocked_reason=error.kind.value, reconciliation_failure=error)
+        service.states.save(blocked)
+        return _result_for(FeatureTransitionKind.BLOCKED, blocked, project,
+                           error.kind.value, reasoning=bool(error.attempts))
     updated = replace(state, final_reconciliation=reconciliation)
     service.states.save(updated)
     return _result_for(FeatureTransitionKind.RECONCILIATION_COMPLETED, updated, project, reasoning=True)
