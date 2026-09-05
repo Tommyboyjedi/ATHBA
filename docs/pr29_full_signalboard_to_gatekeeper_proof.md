@@ -251,3 +251,123 @@ own working directory while keeping all temporary files inside ATHBA.
   (`historical-hashes.json`). Evidence logs remain untracked and outside the commit.
 
 Log paths above are relative to `evidence/pr29-assertion-red-correction/`.
+
+
+## Fresh assertion-correction qualification: pr29-fresh-signalboard-20260905T162901Z
+
+This new run is **incomplete**, stopped at the first typed terminal blocker before any Tester model attempt was recorded. It does not exercise the corrected assertion RED classifier. Historical sections above and historical runtime state are unchanged. No resume, post-terminal retry, alternate fresh run, architecture fix, or PR21 work was performed.
+
+### Identity and readiness
+
+- Run ID and project ID: `pr29-fresh-signalboard-20260905T162901Z`.
+- ATHBA branch: `pr29-live-tiny-strict-tdd-v2-proof`; starting head: `a4ff78e268fcc3a12f38da88d939724dfac5be7c`. GitHub PR29 had that same head.
+- Tracked working tree was clean. `git status --short` also showed pre-existing untracked `evidence/`, preserved and left unstaged; the entire tree was therefore not literally empty of untracked files.
+- Generated project repository: `/srv/ATHBA/state/projects/pr29-fresh-signalboard-20260905T162901Z/repository`. Its new, previously nonexistent path was resolved beneath the already-approved `/srv/ATHBA/state/projects` dynamic root. The returned Rack AI packet confirms the same registered root and successful worktree preparation before executor failure.
+- Initial and final accepted project SHA: `084f592b0a6796fcc68c38fbd3d296c2f6ce2278`. Project `main`, metadata, feature canonical base, and retained packet base/head agree. Final project status is clean; initial-to-final Git diff is empty.
+- Rack AI head and controller provenance: `56d2c69f1e815acd12fca9065945c5e46de5a36a`.
+- Evidence root (E below): `/srv/ATHBA/evidence/pr29-fresh-signalboard-20260905T162901Z`.
+- Immutable fixture: BPQ-V1-B. Corpus SHA256 `523dc088007cdcd10484daa7cb272fdbdab4a37a306a5369bbeac1ff676d85cb`; fixture file SHA256 `3b1c2deec2369d5edc7dba79af76b5c90ea3a9b7f70b895f78237c1184300352`; original requirement SHA256 `c46ce04d165b64d2459fdd821475289925496dc7541584230d60f4858ec9aa88`. The loader output was written verbatim to `E/requirement.txt`.
+- Both workers' `/health` and `/v1/models` returned HTTP 200. One local-primary `POST /v1/responses`, bounded to 60 seconds, returned exactly `READY` in 0.087381 seconds, response `resp_aaa52f42afdffe60`. Raw readiness request/response and endpoint metadata are retained. No service restart occurred.
+
+The first CLI process failed during provider construction because the fresh SSH shell lacked `OPENAI_API_KEY`; it created no run or project and made zero proof model calls. Its error/exit are preserved in `E/preflight-launch-error.log` and `.exit`. The documented local invocation environment was then supplied: `OPENAI_API_BASE=http://127.0.0.1:8017/v1` and the documented non-secret local-primary bearer label. No configuration file was edited. The same unused identity was started, not resumed.
+
+The evidence setup also set `TMPDIR=/srv/ATHBA/evidence/pr29-fresh-signalboard-20260905T162901Z/tmp` (63 bytes) to confine temporary files to ATHBA. This was a task-created process-environment choice and is explicitly disclosed: it may have contributed to the subsequent socket-path failure. It must not be described as an identical execution environment to the historical proof. No attempt was made to shorten it and retry after the terminal failure.
+
+The unchanged `scripts/run_pr23_strict_tdd_feature.py start` used the above IDs, original requirement file, `--language python --test-framework pytest --production-path signal_board.py --test-path tests/test_signal_board.py --state-root /srv/ATHBA/state --evidence-root E`, with no checkpoint or budget override. Controller start was `2026-09-05T16:30:17.945163+00:00`; it stopped at `2026-09-05T16:31:35.121883+00:00`, exit 2, after six application transitions. A passive observer copied temporary v2 submission inputs; it did not wrap or alter a gateway.
+
+### Real Behavior Contract
+
+The real configured local-primary source-clause planner and Behavior Planner ran. The accepted, unedited contract contains **exactly seven Behavior Requirements**, not six. Full contract and source clauses are retained in `E/behavior-contract.json`. Advisory API names are `publish` and `get_signal`; no model-selected API was renamed or manually corrected. Planner output is recorded as evidence without endorsing its extra error semantics or interpreting it as final source conformance.
+
+| Ref | Source refs | Summary | Observable outcome | test_hint | Dependencies |
+| --- | --- | --- | --- | --- | --- |
+| REQ-001 | PR16-001 | Initial state is empty | The board starts with no published signals. | Verify that a new SignalBoard instance returns no values for any query. | none |
+| REQ-002 | PR16-002 | Publishing a signal | A payload can be published under a specific name. | Publish a value and verify it can be retrieved by name. | REQ-001 |
+| REQ-003 | PR16-003, PR16-004 | Update existing signal | Publishing to an existing name replaces the previous value. | Publish a value, then publish a different value for the same name and verify the second value is returned. | REQ-002 |
+| REQ-004 | PR16-005 | Isolation of signal updates | Publishing to one name does not affect other names. | Publish values for two different names and verify that updating one does not change the other. | REQ-002 |
+| REQ-005 | PR16-006 | Retrieve latest payload | The latest payload for a given name is retrieved. | Verify that the retrieval mechanism returns the correct payload for a known name. | REQ-002 |
+| REQ-006 | PR16-007 | Architectural constraints | The component is small, direct, and dependency-free. | Verify the source code has no external dependencies and is concise. | none |
+| REQ-007 | PR16-008 | In-memory constraint | The component is in-memory with no persistence. | Verify that data is lost when the SignalBoard instance is destroyed. | none |
+
+### Independent Gatekeeper checklist
+
+The configured checklist planner independently used the original requirement, not the Behavior Requirement list, and persisted twelve items before scenario submission. The composition's `SpecificationGatekeeper.ensure_state` supplies only project ID and original requirement text to checklist creation. Checklist state is not passed into Planner, scenario execution, Intent, Developer, or Senior Review; the captured Tester objective confirms its absence. `E/gatekeeper-checklist-state.json` preserves the complete state.
+
+Final reconciliation was **not invoked**. `latest_assessment` is null and `assessment_history` and feature `final_reconciliation` are empty. All item results are NOT_REACHED; no YES/NO coverage judgment exists. The lifecycle event named `gatekeeper_completed` at sequence 3 denotes checklist creation only, not final Gatekeeper success.
+
+| Ref | Kind | Independently generated obligation | Final result |
+| --- | --- | --- | --- |
+| initial_state | behavior | The SignalBoard must start with no published signals. | NOT_REACHED |
+| publish_signal | behavior | The system must allow users to publish a payload under a specific signal name. | NOT_REACHED |
+| replace_signal | behavior | Publishing a payload under an existing signal name must replace the previous payload for that name. | NOT_REACHED |
+| isolate_signals | behavior | Publishing a payload for one signal name must not affect the values of other signal names. | NOT_REACHED |
+| get_latest_payload | behavior | The system must allow users to request the latest payload for a specific signal name. | NOT_REACHED |
+| return_latest_value | behavior | The system must return the most recently published value when a signal is requested. | NOT_REACHED |
+| in_memory_storage | constraint | The SignalBoard must be an in-memory data structure. | NOT_REACHED |
+| no_persistence | constraint | The system must not persist data to any external storage. | NOT_REACHED |
+| no_subscriptions | constraint | The system must not support subscriptions. | NOT_REACHED |
+| no_validation | constraint | The system must not implement validation rules. | NOT_REACHED |
+| no_concurrency | constraint | The system must not handle concurrency. | NOT_REACHED |
+| small_and_direct | quality | The component must be small, direct, and dependency-free. | NOT_REACHED |
+
+### Behavior Requirement execution and revision progression
+
+| Ref | Status | Counted Tester attempts | Intent | Frozen fragments | Frontiers completed | RED | GREEN | Regression | Senior Review | Canonical revision |
+| --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | --- | --- |
+| REQ-001 | blocked: scenario_harness_failure | 0 | NOT_REACHED | 0 | 0 | NOT_REACHED | NOT_REACHED | NOT_REACHED | NOT_REACHED (0 attempts) | initial SHA unchanged |
+| REQ-002 | NOT_REACHED | 0 | NOT_REACHED | 0 | 0 | NOT_REACHED | NOT_REACHED | NOT_REACHED | NOT_REACHED (0 attempts) | no progression |
+| REQ-003 | NOT_REACHED | 0 | NOT_REACHED | 0 | 0 | NOT_REACHED | NOT_REACHED | NOT_REACHED | NOT_REACHED (0 attempts) | no progression |
+| REQ-004 | NOT_REACHED | 0 | NOT_REACHED | 0 | 0 | NOT_REACHED | NOT_REACHED | NOT_REACHED | NOT_REACHED (0 attempts) | no progression |
+| REQ-005 | NOT_REACHED | 0 | NOT_REACHED | 0 | 0 | NOT_REACHED | NOT_REACHED | NOT_REACHED | NOT_REACHED (0 attempts) | no progression |
+| REQ-006 | NOT_REACHED | 0 | NOT_REACHED | 0 | 0 | NOT_REACHED | NOT_REACHED | NOT_REACHED | NOT_REACHED (0 attempts) | no progression |
+| REQ-007 | NOT_REACHED | 0 | NOT_REACHED | 0 | 0 | NOT_REACHED | NOT_REACHED | NOT_REACHED | NOT_REACHED (0 attempts) | no progression |
+
+REQ-001 reached a generic Rack AI submission but returned an external launch failure. Durable `attempts` is empty, `approved_microcycle` is null, and there is no candidate source or revision. Mechanical validation, independent Intent, freeze, deterministic fragment creation, RED, Developer, GREEN, regression, CAS promotion and Senior Review were not reached. Neither corrected boundary was live-qualified. No Behavior Requirement completed; execution stopped instead of selecting another independent requirement after the blocker. No microcycle or revision-lifecycle state was created.
+
+### Submission, worker and packet evidence
+
+Exactly one Rack AI workspace submission exists:
+
+- Logical work ID: `pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft`.
+- Submission/idempotency ID: `pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft-1`.
+- Selection decision ID: `selection-pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft-1`.
+- Physical change identity: `pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft--pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft-1--submission-8484878532335806390`.
+- ATHBA work-unit ID: `REQ-001--scenario-draft-1`.
+- Selected worker: `local-primary`; model: `gemma4-12b-local-primary`; provider profile: `local-primary`; backend/worker kind: `jcode`; worker role: `generic-reasoning-worker`; resource: `gpu-4060ti`. Selection and returned provenance agree. This is selected execution identity, not proof that a model generation happened.
+- Selection: `only_eligible`; required capabilities reasoning and coding; medium complexity/priority; no large-context request. local-coder was ineligible for this request (`capability_unsupported`).
+- Allowed path: `tests/test_signal_board.py`; immutable 300-second timeout, one backend implementation attempt, network disabled. No limits or routing were changed.
+- Packet status `failed`; acceptance `rejected`; `last_error: path must be shorter than SUN_LEN`. ATHBA records `failure_kind=external_blocker`, `failure_stage=workspace_result`, `backend_status=rejected`.
+- Candidate revision/source: **none**. Packet `head_sha` equals the initial base and must not be reported as a generated candidate. `changed_paths`, `commands`, diff and implementer output are empty.
+- Original Rack AI packet: `/srv/rack-ai/state/changes/pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft--pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft-1--submission-8484878532335806390/review-packet.json`.
+- Exact retained copy: `/srv/ATHBA/evidence/pr29-fresh-signalboard-20260905T162901Z/rack-ai-packets/pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft--pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft-1--submission-8484878532335806390.json`.
+- Complete objective, generic routing envelope and acceptance constraints: `E/execution-inputs/pr29-fresh-signalboard-20260905T162901Z--REQ-001--scenario-draft-1.json`. The packet also retains the objective under `task`. It contains only the focused REQ-001 ticket, source clause, strict mechanical authoring rules and initial repository facts; no Gatekeeper checklist or complete Behavior Contract was exposed.
+
+All direct reasoning stages used the unchanged live composition's `ProviderReasoningGateway`, configured model `local-primary`, at the loopback endpoint. Metadata identifies `cyankiwi/gemma-4-12B-it-AWQ-INT4`. These direct stages do not have Rack AI submission IDs or packet paths: source-clause planning, Behavior Contract planning and independent checklist creation retain accepted structured output but not raw request/response IDs. Their prompt builders are unchanged source at the starting SHA. Raw historical prompts were not reconstructed and misrepresented as captured wire evidence. Intent, Developer, Senior Review and final Gatekeeper have no submissions.
+
+### First terminal blocker and qualification limit
+
+**EXTERNAL_BLOCKER**: executor launch failed with `path must be shorter than SUN_LEN`; outer run status `blocked`, typed scenario reason `scenario_harness_failure`.
+
+The retained evidence establishes a socket-path-length execution failure, not a model timeout, malformed model reply, bad scenario, semantic rejection or RED-classifier defect. The task-specific temporary directory is a plausible contributor introduced during this task; the offending socket pathname and executor stack are not retained, so a causal attribution to that variable or to a particular Rack AI/JCode source line is not proven. No external source inspection or modification was performed to resolve that uncertainty. The owning boundary is local execution-environment/socket initialization behind the Rack AI/JCode execution path; exact component attribution remains unavailable.
+
+The generic execution contract failed before producing a candidate: an admitted bounded workspace request selected a worker but could not initialize execution. ATHBA preserved the backend failure and correctly kept counted model attempts at zero. This is environment/path-sensitive, with no evidence that SignalBoard behavior or an API name caused it. No new ATHBA source defect is established. Because the task added a temporary-directory environment setting, this run cannot establish that the unchanged historical execution environment would fail. It provides **no conclusion** about the corrected architecture's ability to complete behavioral development and no model-incapability conclusion. No recovery or second proof followed.
+
+### Model-call accounting
+
+`MODEL_CALLS_MADE=AT_LEAST_4`: one retained READY generation plus at least one generation each for source-clause planning, Behavior Contract planning and checklist creation. There were three completed direct proof reasoning stages. A Behavior Contract format-repair call and low-level provider retries are not individually persisted by this path, so the exact wire-level count is unavailable; four is a lower bound, not an exact audit. The one Rack AI submission is separately counted and is **not** added as a confirmed model generation: zero Tester model attempts, zero worker model-output records. Cloud/OpenRouter calls: **0**. No post-terminal model calls were made.
+
+### Evidence, preservation and validation
+
+Authoritative state paths:
+
+- Run: `/srv/ATHBA/state/runs/pr29-fresh-signalboard-20260905T162901Z.json`.
+- Feature: `/srv/ATHBA/state/features/pr29-fresh-signalboard-20260905T162901Z.json`.
+- Scenario: `/srv/ATHBA/state/scenario-drafts/pr29-fresh-signalboard-20260905T162901Z--REQ-001.json`.
+- Microcycle/revision state: absent (not reached).
+- Generated project metadata: `/srv/ATHBA/state/projects/pr29-fresh-signalboard-20260905T162901Z/project.json`.
+
+E also contains `identity.json`, `initial-project.json`, immutable `requirement.txt`, health/model metadata, readiness request/response/summary, `execution-environment.json`, startup logs/exits, `capture.log`, `packet-index.json`, the full contract/checklist, and `terminal-snapshots/` of run, feature, scenario, lifecycle and final initial-only production source. Controller JSON/Markdown reports are `E/pr29-fresh-signalboard-20260905T162901Z/proof-report.json` and `proof-report.md`. `model-accounting.json` records the lower bound and uncertainty. `evidence-manifest.json` hashes retained files. Historical evidence/state was not resumed or edited; the previous documentation bytes are an exact prefix of this file.
+
+ATHBA source, Tester/Intent prompts, Planner, Python adapter, scenario grammar, RED classifier, Frontier machinery, Developer, Senior Review, Gatekeeper, attempt/execution budgets, timeout values, worker routing, BPQ-V1, Rack AI, JCode and PR21 are unchanged. No TODO was addressed. No persistent configuration or service was changed. The process environment setup is disclosed above, including the temporary-directory deviation. The generated project's initial production placeholder was created by the ordinary environment service; no generated production or test candidate modified it thereafter.
+
+Only this documentation file is staged and committed with `docs: record fresh SignalBoard end-to-end proof`; evidence remains untracked. Validation: `git diff --check` and documentation-prefix/source-scope checks. No source test suite is needed for this documentation-only change, and no target tests ran in this blocked proof. Push remains on PR29; no merge.
