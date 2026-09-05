@@ -560,6 +560,63 @@ class PythonFrontierMaterialiser:
         buffer.spans.append(FragmentSourceSpan(emission.fragment.fragment_id, SourceSpan(start, len(buffer.rows))))
 
 
+class PytestProbeOutput:
+    """Validate the isolated probe protocol before interpreting test outcomes."""
+
+    def parse(self, stdout: str) -> dict[str, object] | None:
+        lines = stdout.splitlines()
+        if not lines or not lines[-1].strip():
+            return None
+        try:
+            facts = json.loads(lines[-1])
+        except (ValueError, RecursionError):
+            return None
+        if not isinstance(facts, dict) or not self._valid(facts):
+            return None
+        return facts
+
+    @staticmethod
+    def _valid(facts: dict[str, object]) -> bool:
+        boolean_fields = (
+            "collection_succeeded", "requested_node_found", "requested_node_executed",
+            "was_xfail", "was_xpass", "missing_production_member",
+        )
+        if any(type(facts.get(name)) is not bool for name in boolean_fields):
+            return False
+        outcomes = ("not_run", "passed", "failed", "error", "xfailed", "xpassed")
+        if facts.get("outcome") not in outcomes:
+            return False
+        if any(facts.get(name) not in ("not_run", "passed", "failed", "skipped")
+               for name in ("setup_outcome", "call_outcome", "teardown_outcome")):
+            return False
+        for name in ("exception_type", "failure_message", "traceback_location"):
+            if name not in facts or (facts[name] is not None and not isinstance(facts[name], str)):
+                return False
+        line = facts.get("source_line")
+        if "source_line" not in facts or (line is not None and (type(line) is not int or line < 0)):
+            return False
+        if any(not isinstance(facts.get(name), str) for name in ("stdout", "stderr")):
+            return False
+        evidence = facts.get("evidence_refs")
+        if not isinstance(evidence, list) or any(not isinstance(ref, str) or not ref.strip() for ref in evidence):
+            return False
+        # DiagnosticFact requires nonblank text; reject unusable protocol values here.
+        return all(name.strip() and (not isinstance(value, str) or not value or value.strip())
+                   for name, value in facts.items())
+
+    @staticmethod
+    def failure(completed: subprocess.CompletedProcess[str], command: list[str]) -> BoundaryDiagnostic:
+        return BoundaryDiagnostic(
+            "infrastructure", "structured pytest probe failed to provide a trustworthy result",
+            ("pytest-probe",), (
+                DiagnosticFact("probe_returncode", str(completed.returncode)),
+                DiagnosticFact("probe_stdout", json.dumps(completed.stdout)),
+                DiagnosticFact("probe_stderr", json.dumps(completed.stderr)),
+                DiagnosticFact("probe_command", json.dumps(command)),
+            ),
+        )
+
+
 class PytestStructuredExecutor:
     """Runs pytest through hooks and converts facts without trusting console wording."""
 
@@ -578,10 +635,9 @@ class PytestStructuredExecutor:
         command = [sys.executable, "-m", "core.development.python_pytest_probe", str(root), node, request.production_path or ""]
         environment = os.environ | {"PYTHONPATH": str(Path(__file__).resolve().parents[2])}
         completed = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=30)
-        try:
-            facts = json.loads(completed.stdout.splitlines()[-1])
-        except json.JSONDecodeError:
-            return BoundaryDiagnostic("infrastructure", "structured pytest probe did not return JSON", ("pytest-probe",))
+        facts = PytestProbeOutput().parse(completed.stdout) if completed.returncode == 0 else None
+        if facts is None:
+            return PytestProbeOutput().failure(completed, command)
         return self._diagnostic(facts)
 
     @staticmethod

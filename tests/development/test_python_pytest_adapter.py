@@ -221,3 +221,119 @@ def test_fixture_attribute_error_cannot_supply_missing_capability_red(tmp_path, 
 def test_invalid_or_unsupported_scenario_cannot_reach_red(body):
     with pytest.raises(ValueError, match="unsupported|invalid"):
         prepared(body)
+
+
+@pytest.mark.parametrize("probe_stdout", [
+    pytest.param("", id="empty"),
+    pytest.param(" \n\t\n", id="whitespace"),
+    pytest.param("pytest startup failed\n", id="non-json"),
+    pytest.param('{"outcome":', id="truncated-json"),
+    pytest.param("null", id="null"),
+    pytest.param("[]", id="array"),
+    pytest.param('{"outcome": "passed"}', id="incomplete-green"),
+])
+@pytest.mark.parametrize("returncode", [0, 1])
+def test_invalid_probe_output_is_typed_infrastructure_failure(tmp_path, monkeypatch, probe_stdout, returncode):
+    import json
+    import subprocess
+    from unittest.mock import Mock
+
+    stderr = "ImportError: startup configuration unavailable\n"
+    run = Mock(return_value=subprocess.CompletedProcess([], returncode, probe_stdout, stderr))
+    monkeypatch.setattr("core.development.python_pytest_adapter.subprocess.run", run)
+    adapter, model, fragments = prepared("assert True")
+    value = artifact(adapter, model, fragments, 0)
+    diagnostic = execute(adapter, tmp_path, model, value)
+
+    assert isinstance(diagnostic, BoundaryDiagnostic)
+    assert diagnostic.kind == "infrastructure"
+    facts = {item.name: item.value for item in diagnostic.facts}
+    assert facts["probe_returncode"] == str(returncode)
+    assert json.loads(facts["probe_stdout"]) == probe_stdout
+    assert json.loads(facts["probe_stderr"]) == stderr
+    assert json.loads(facts["probe_command"]) == run.call_args.args[0]
+    assert "core.development.python_pytest_probe" in json.loads(facts["probe_command"])
+    assert BoundaryDiagnostic.from_dict(diagnostic.to_dict()) == diagnostic
+    assert adapter.classify_boundary(BoundaryClassificationRequest(
+        diagnostic, value, fragments[0], None,
+    )).outcome == "infrastructure_failure"
+    run.assert_called_once()
+
+
+def structured_probe_facts():
+    return {
+        "collection_succeeded": True, "requested_node_found": True,
+        "requested_node_executed": True, "outcome": "passed",
+        "setup_outcome": "passed", "call_outcome": "passed", "teardown_outcome": "passed",
+        "was_xfail": False, "was_xpass": False, "missing_production_member": False,
+        "exception_type": None, "failure_message": None, "source_line": None,
+        "traceback_location": None, "stdout": "", "stderr": "",
+        "evidence_refs": ["tests/test_widget.py::test_widget"],
+    }
+
+
+@pytest.mark.parametrize("change", [
+    {"source_line": "not-a-line"}, {"source_line": True},
+    {"collection_succeeded": "True"}, {"outcome": {}},
+    {"evidence_refs": [None]}, {"failure_message": "   "}, {"": 1},
+])
+def test_malformed_structured_probe_fields_fail_closed(tmp_path, monkeypatch, change):
+    import json
+    test_invalid_probe_output_is_typed_infrastructure_failure(
+        tmp_path, monkeypatch, json.dumps(structured_probe_facts() | change), 0,
+    )
+
+
+def test_nonzero_probe_exit_cannot_report_green(tmp_path, monkeypatch):
+    import json
+    test_invalid_probe_output_is_typed_infrastructure_failure(
+        tmp_path, monkeypatch, json.dumps(structured_probe_facts()), 1,
+    )
+
+
+def test_valid_structured_probe_parsing_with_pytest_preamble(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    from unittest.mock import Mock
+
+    facts = structured_probe_facts()
+    monkeypatch.setattr("core.development.python_pytest_adapter.subprocess.run", Mock(
+        return_value=subprocess.CompletedProcess([], 0, "pytest summary\n" + json.dumps(facts) + "\n", ""),
+    ))
+    adapter, model, fragments = prepared("assert True")
+    value = artifact(adapter, model, fragments, 0)
+    diagnostic = execute(adapter, tmp_path, model, value)
+    assert diagnostic == BoundaryDiagnostic("green", "passed", tuple(facts["evidence_refs"]), (
+        DiagnosticFact("collection_succeeded", "True"), DiagnosticFact("requested_node_found", "True"),
+        DiagnosticFact("requested_node_executed", "True"), DiagnosticFact("outcome", "passed"),
+        DiagnosticFact("setup_outcome", "passed"), DiagnosticFact("call_outcome", "passed"),
+        DiagnosticFact("teardown_outcome", "passed"), DiagnosticFact("evidence_refs", str(facts["evidence_refs"])),
+    ))
+
+
+@pytest.mark.parametrize("body,change,expected", [
+    ("from absent_widget import Widget", {"outcome": "error", "collection_succeeded": False,
+     "exception_type": "ImportError"}, "valid_missing_capability_red"),
+    ("assert widget.entries()", {"outcome": "failed", "call_outcome": "failed",
+     "exception_type": "AttributeError", "missing_production_member": True}, "valid_missing_capability_red"),
+    ("assert 1 == 2", {"outcome": "failed", "call_outcome": "failed",
+     "exception_type": "AssertionError"}, "valid_behavioral_red"),
+    ("assert True", {}, "green"),
+    ("assert widget.entries()", {"outcome": "failed", "call_outcome": "failed",
+     "exception_type": "TypeError"}, "unsupported_language_boundary"),
+])
+def test_valid_probe_outcomes_remain_unchanged(tmp_path, monkeypatch, body, change, expected):
+    import json
+    import subprocess
+    from unittest.mock import Mock
+
+    adapter, model, fragments = prepared(body)
+    value = artifact(adapter, model, fragments, 0)
+    facts = structured_probe_facts() | change | {"source_line": value.fragment_source_spans[0].span.start_line}
+    monkeypatch.setattr("core.development.python_pytest_adapter.subprocess.run", Mock(
+        return_value=subprocess.CompletedProcess([], 0, json.dumps(facts) + "\n", ""),
+    ))
+    diagnostic = execute(adapter, tmp_path, model, value)
+    assert adapter.classify_boundary(BoundaryClassificationRequest(
+        diagnostic, value, fragments[0], None,
+    )).outcome == expected

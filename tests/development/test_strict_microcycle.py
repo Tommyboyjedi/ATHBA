@@ -591,3 +591,44 @@ async def test_missing_member_red_transition_is_fragment_independent(tmp_path, m
     assert saved.pending_action == "submit_developer"
     assert saved.frontier.index == 2
     assert gateway.units == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stdout", ["", " \n\t", "not JSON", '{"outcome": "passed"}'])
+async def test_invalid_probe_blocks_microcycle_without_progression(tmp_path, monkeypatch, stdout):
+    from unittest.mock import Mock
+
+    probe = Mock(return_value=subprocess.CompletedProcess([], 1, stdout, "startup failure"))
+    monkeypatch.setattr("core.development.python_pytest_adapter.subprocess.run", probe)
+    promote = Mock(side_effect=AssertionError("probe failure must not promote"))
+    advance_revision = Mock(side_effect=AssertionError("probe failure must not advance revision"))
+    monkeypatch.setattr("core.development.strict_microcycle_advance._promote_canonical_revision", promote)
+    monkeypatch.setattr("core.development.strict_microcycle_advance._advance_working_revision", advance_revision)
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": ""})
+    gateway = Gateway([])
+    regression_runtime = PassingRuntime()
+    service = StrictMicrocycleService(StrictMicrocycleDependencies(
+        store, candidates, gateway,
+        type("Catalog", (), {"for_language": lambda self, language: PythonPytestAdapter()})(),
+        DeterministicRegressionService(regression_runtime),
+    ))
+    initial = initial_state()
+    outcome = await service.run(request(tmp_path, initial))
+    saved = store.load(initial.scenario_draft.scenario_id)
+    assert outcome.status == "infrastructure_failure"
+    assert saved.pending_action == "blocked"
+    assert saved.frontier == initial.frontier
+    assert saved.current_accepted_red_revision is None
+    assert saved.candidate_chain_revision == initial.candidate_chain_revision
+    assert saved.development_base_revision == initial.development_base_revision
+    assert saved.completion == initial.completion
+    assert saved.boundary_evidence[-1].outcome == "infrastructure_failure"
+    assert saved.boundary_evidence[-1].diagnostic.kind == "infrastructure"
+    assert outcome.developer_submissions == 0
+    assert gateway.units == []
+    assert regression_runtime.requests == []
+    assert len(candidates.cleaned) == 1
+    promote.assert_not_called()
+    advance_revision.assert_not_called()
+    probe.assert_called_once()
