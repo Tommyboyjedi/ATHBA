@@ -1058,3 +1058,223 @@ async def test_planner_public_api_names_do_not_reject_behavioral_scenario():
     assert len(gateway.calls) == 1
     assert reader.calls == [(revision, "tests/test_signal_board.py")]
     assert len(reasoning.requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["signal_board", "catalog"])
+@pytest.mark.parametrize("observation", [
+    "len(component.signals) == 0",
+    "len(component._state) == 0",
+    "component.CamelCase() == 0",
+    "component.skip() == 0",
+    "component.xfail() == 0",
+    "component.patch('{module}') == 0",
+    "component.setattr('{module}') == 0",
+])
+async def test_pre_intent_accepts_product_names_and_freezes_only_after_approval(kind, observation):
+    value = request("catalog") if kind == "catalog" else signal_board_request(
+        "empty-board", signal_board_contract(),
+    )
+    value = replace(value, ticket=replace(
+        value.ticket, focused_behavior="A new component starts empty.",
+        expected_result="The new component contains no entries.",
+        test_name=value.allowed_test_path + "::test_REQ_001",
+    ))
+    component = "Catalog" if kind == "catalog" else "SignalBoard"
+    source = (
+        f"from {kind} import {component}\n\n"
+        "def test_arbitrary_name():\n"
+        f"    component = {component}()\n"
+        f"    assert {observation.format(module=kind)}\n"
+    )
+    revision = "b" * 40
+    service, gateway, reasoning, _reader = components(
+        [accepted(value.ticket.step_id + "--scenario-draft-1", revision, "names")],
+        [approval(value.source_requirement_refs[0])], {revision: source},
+    )
+    submitted = await service.submit_candidate(value, binding())
+    assert submitted.state.approved_microcycle is None
+    assert reasoning.requests == []
+    outcome = await service.review_intent(value)
+    assert len(reasoning.requests) == 1
+    attempt = outcome.state.attempts[0]
+    assert attempt.candidate_assessment.accepted
+    assert attempt.candidate.actual_test_identity.endswith("::test_arbitrary_name")
+    frozen = outcome.state.approved_microcycle
+    assert frozen is not None
+    assert frozen.intent.status == "approved"
+    assert frozen.scenario_draft.canonical_test_identity.endswith("::test_REQ_001")
+    assert frozen.scenario_draft.source == frozen.model.complete_source
+    assert [fragment.kind for fragment in frozen.fragments] == [
+        "production_import", "constructor", "assertion",
+    ]
+    assert frozen.frontier.index == 0
+    assert frozen.frontier.active_fragment_id == frozen.fragments[0].fragment_id
+    assert frozen.frontier.materialised_fragment_ids == (frozen.fragments[0].fragment_id,)
+    assert gateway.calls[0][0].allowed_paths == [value.allowed_test_path]
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("source", "code"), [
+    ("from catalog import Catalog\ndef test_bad(:\n    pass\n", "syntax_invalid"),
+    ("from catalog import Catalog\n", "no_test"),
+    ("from catalog import Catalog\ndef test_a():\n    assert Catalog\ndef test_b():\n    assert Catalog\n", "multiple_tests"),
+    ("import pytest\nfrom catalog import Catalog\ndef test_a():\n    pytest.skip('absent')\n    assert Catalog\n", "skip_or_xfail"),
+    ("from pytest import xfail as evade\nfrom catalog import Catalog\ndef test_a():\n    evade('absent')\n    assert Catalog\n", "skip_or_xfail"),
+    ("import pytest as pt\nfrom catalog import Catalog\n@pt.mark.skip\ndef test_a():\n    assert Catalog\n", "skip_or_xfail"),
+    ("import pytest\nfrom catalog import Catalog\n@pytest.mark.skipif(True, reason='absent')\ndef test_a():\n    assert Catalog\n", "skip_or_xfail"),
+    ("import pytest\nfrom catalog import Catalog\ndef test_a():\n    pytest.importorskip('catalog')\n    assert Catalog\n", "missing_capability_evasion"),
+    ("from catalog import Catalog\ndef test_a():\n    try:\n        from catalog import Catalog\n    except ImportError:\n        assert True\n    assert Catalog\n", "missing_capability_evasion"),
+    ("class Catalog:\n    pass\ndef test_a():\n    assert Catalog\n", "substitute_implementation"),
+    ("from unittest.mock import patch as replace_behavior\nfrom catalog import Catalog\ndef test_a():\n    with replace_behavior('catalog.Catalog'):\n        assert Catalog\n", "mocked_behavior"),
+    ("from unittest import mock\nfrom catalog import Catalog\ndef test_a():\n    with mock.patch('catalog.Catalog'):\n        assert Catalog\n", "mocked_behavior"),
+    ("def test_a():\n    assert True\n", "missing_production_reference"),
+    ("from catalog import Catalog\ndef test_a():\n    yield Catalog()\n", "unusable_artifact"),
+    ("from catalog import Catalog\ndef test_a():\n    pass\n", "unusable_artifact"),
+])
+async def test_pre_intent_mechanical_failure_is_typed_durable_and_feeds_repair(source, code):
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "b" * 40, "bad"),
+         accepted("catalog-ticket--scenario-draft-2", "c" * 40, "repair")],
+        [approval("SRC-CATALOG")],
+        {"b" * 40: source, "c" * 40: plain_catalog_candidate()},
+    )
+    await service.submit_candidate(request("catalog"), binding())
+    failed = await service.review_intent(request("catalog"))
+    assert reasoning.requests == []
+    assert failed.state.approved_microcycle is None
+    attempt = failed.state.attempts[0]
+    assert code in {issue.code for issue in attempt.candidate_assessment.issues}
+    assert attempt.feedback == attempt.candidate_assessment.repair_feedback()
+    assert attempt.feedback and attempt.candidate_source == source
+    persisted = ScenarioDraftRunState.from_dict(failed.state.to_dict())
+    service.state_store.save(persisted)
+    await service.submit_candidate(request("catalog"), binding())
+    payload = json.loads(gateway.calls[1][0].objective)
+    assert payload["repair_feedback"] == attempt.feedback
+    assert payload["previous_candidate"]["assessment"] == json.loads(json.dumps(attempt.candidate_assessment.to_dict()))
+    assert payload["previous_candidate"]["source"] == source
+    assert gateway.calls[1][1].base_sha == "b" * 40
+    repaired = await service.review_intent(request("catalog"))
+    assert repaired.approved
+    assert len(reasoning.requests) == 1
+    assert len(repaired.state.attempts) == 2
+    assert repaired.state.attempts[1].repair_parent_attempt == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("disposition", ["wrong_behavior", "repair_required", "insufficient_evidence"])
+async def test_pre_intent_semantic_rejection_has_no_frontier_and_remains_repairable(disposition):
+    feedback = "The scenario must demonstrate the selected observable result."
+    source = plain_catalog_candidate(body="    assert Catalog\n")
+    service, gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "b" * 40, "semantic"),
+         accepted("catalog-ticket--scenario-draft-2", "c" * 40, "repair")],
+        [json.dumps({"disposition": disposition, "feedback": feedback,
+                     "evidence_refs": ["SRC-CATALOG"]}), approval("SRC-CATALOG")],
+        {"b" * 40: source, "c" * 40: plain_catalog_candidate()},
+    )
+    await service.submit_candidate(request("catalog"), binding())
+    rejected = await service.review_intent(request("catalog"))
+    assert len(reasoning.requests) == 1
+    assert rejected.state.approved_microcycle is None
+    attempt = rejected.state.attempts[0]
+    assert attempt.candidate_assessment.accepted
+    assert attempt.intent.status == disposition
+    assert attempt.feedback == feedback
+    service.state_store.save(ScenarioDraftRunState.from_dict(rejected.state.to_dict()))
+    await service.submit_candidate(request("catalog"), binding())
+    payload = json.loads(gateway.calls[1][0].objective)
+    assert payload["previous_candidate"]["intent_feedback"] == feedback
+    assert payload["repair_feedback"] == feedback
+    repaired = await service.review_intent(request("catalog"))
+    assert repaired.approved
+    assert len(reasoning.requests) == 2
+    assert len(repaired.state.attempts) == 2
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("test_path", "feedback"), [
+    ("../test_catalog.py", "unsafe"),
+    ("/tmp/test_catalog.py", "unsafe"),
+    ("tests/test_other.py", "planned pytest identity is invalid"),
+])
+async def test_pre_intent_unsafe_or_wrong_path_has_typed_feedback(test_path, feedback):
+    original = request("catalog")
+    value = replace(original, allowed_test_path=test_path, ticket=replace(
+        original.ticket, test_path=test_path,
+    ))
+    service, gateway, reasoning, reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "b" * 40, "wrong-path"),
+         accepted("catalog-ticket--scenario-draft-2", "c" * 40, "retry")],
+        [], {"b" * 40: plain_catalog_candidate(), "c" * 40: plain_catalog_candidate()},
+    )
+    await service.submit_candidate(value, binding())
+    rejected = await service.review_intent(value)
+    assert reasoning.requests == []
+    assert reader.calls == ([] if "unsafe" == feedback else [("b" * 40, test_path)])
+    assert rejected.state.approved_microcycle is None
+    attempt = rejected.state.attempts[0]
+    assert attempt.candidate_assessment.issues[0].code == "unusable_artifact"
+    assert feedback in attempt.feedback
+    assert attempt.feedback == attempt.candidate_assessment.repair_feedback()
+    service.state_store.save(ScenarioDraftRunState.from_dict(rejected.state.to_dict()))
+    await service.submit_candidate(value, binding())
+    assert json.loads(gateway.calls[1][0].objective)["repair_feedback"] == attempt.feedback
+    assert len(reasoning.requests) == 0
+
+
+@pytest.mark.asyncio
+async def test_pre_intent_out_of_scope_edit_stays_blocked_after_resume_and_repairs_from_trusted_base():
+    from core.execution.work_unit_gateway import ExecutionPolicyEvidence
+
+    result = replace(
+        accepted("catalog-ticket--scenario-draft-1", "b" * 40, "outside"),
+        policy_evidence=ExecutionPolicyEvidence(
+            ["tests/test_catalog.py"], ["tests/test_catalog.py", "catalog.py"],
+        ),
+    )
+    service, gateway, reasoning, reader = components(
+        [result, accepted("catalog-ticket--scenario-draft-2", "c" * 40, "repair")],
+        [approval("SRC-CATALOG")], {"c" * 40: plain_catalog_candidate()},
+    )
+    rejected = await service.submit_candidate(request("catalog"), binding())
+    attempt = rejected.state.attempts[0]
+    assert attempt.status == "candidate_invalid"
+    assert attempt.candidate_assessment.issues[0].code == "unusable_artifact"
+    assert "outside the permitted test path" in attempt.feedback
+    assert attempt.feedback == attempt.candidate_assessment.repair_feedback()
+    service.state_store.save(ScenarioDraftRunState.from_dict(rejected.state.to_dict()))
+    blocked = await service.review_intent(request("catalog"))
+    assert blocked.state.approved_microcycle is None
+    assert reasoning.requests == []
+    assert reader.calls == []
+    await service.submit_candidate(request("catalog"), binding())
+    assert gateway.calls[1][1].base_sha == request("catalog").development_base_revision
+    persisted = service.state_store.load(request("catalog").scenario_id).attempts[1]
+    assert persisted.repair_base_sha == gateway.calls[1][1].base_sha
+    assert persisted.repair_base_ref == gateway.calls[1][1].base_ref
+    assert json.loads(gateway.calls[1][0].objective)["repair_feedback"] == attempt.feedback
+    repaired = await service.review_intent(request("catalog"))
+    assert repaired.approved
+    assert len(repaired.state.attempts) == 2
+    assert len(reasoning.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_pre_intent_dependency_patch_is_not_a_product_mock_from_incidental_text():
+    source = (
+        "from unittest.mock import patch\nfrom catalog import Catalog\n"
+        "def test_catalog():\n"
+        "    with patch('time.time', return_value='catalog'):\n"
+        "        assert Catalog()\n"
+    )
+    service, _gateway, reasoning, _reader = components(
+        [accepted("catalog-ticket--scenario-draft-1", "b" * 40, "dependency")],
+        [approval("SRC-CATALOG")], {"b" * 40: source},
+    )
+    outcome = await service.draft(request("catalog"), binding())
+    assert outcome.approved
+    assert len(reasoning.requests) == 1

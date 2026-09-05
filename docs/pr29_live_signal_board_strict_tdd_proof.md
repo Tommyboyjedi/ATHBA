@@ -461,3 +461,67 @@ Focused validation for this closure passed: `63 passed` across behavior-contract
 surface, scenario drafting, feature-execution advance, and persistence tests.
 No production, Rack AI, Tester-information, Intent Review, Gatekeeper, planner,
 routing, budget, grammar, PR21, or refactoring source changed.
+
+
+## 2026-09-05: mechanical-only Tester admission
+
+Authority: PR29 at `49b3bfd0cd11d47dcac0436799469af50870bb55`. The older
+product-surface lint sections above describe historical runs, not the current
+boundary. At this head the behavior-first restoration had already removed
+Planner `public_api` and undeclared/private-member enforcement. Remaining
+false blockers were name-only skip/xfail and patch/setattr detection.
+Some parser, source-read and canonical-path failures also lacked persisted
+typed candidate issues.
+
+The corrected rule is: a mechanically trustworthy complete scenario reaches
+independent Intent Review. Framework evasion and production behavior mocking
+are identified as framework operations, not inferred from product method
+names. No product API authority, semantic resolver, technical-binding stage,
+naming/style rule or architecture review is introduced.
+
+The current path and all deterministic stop categories were inspected:
+
+| Boundary | Mechanical stop conditions retained |
+| --- | --- |
+| Request/execution admission | Nonempty identity/source/base fields; matching ticket/test path, trusted revision and source evidence; valid adapter/framework; accepted revision/branch/evidence; existing external execution failures and four-submission limit. The executor retains its authoritative writable-path policy. Reported edits outside the permitted test path additionally become typed candidate failures. |
+| Candidate assessment | Python syntax; exactly one ordinary `test_*` function; no helpers, fixtures, classes, async/parameterized tests, nested declarations, unsupported module forms, module/test docstrings or standalone string expressions under the existing strict grammar. |
+| Artifact integrity | Production-module reference required; local substitute declarations, real behavior patches, pytest skip/xfail/skipif/importorskip and the existing import-error-success evasion rejected. Prohibited declarations remain grammar failures regardless of their names. |
+| Parser/canonicalisation | Existing deterministic parser rejects unsupported statement/dynamic forms (including pass/yield), unrecoverable fragments and empty fragment plans. Planned identity/path must be usable; the submitted test name is deterministically normalized, not required to match the planned spelling. Unsafe paths/source-read failures stop before Intent. These preparation failures now retain a typed `unusable_artifact` issue and descriptive feedback. |
+| Repair/recovery | Existing immutable request/base checks, verified repair ref/SHA, unchanged-candidate detection, persisted lineage and attempt exhaustion remain. A persisted mechanical rejection cannot be re-reviewed directly after reload; a new bounded submission is required. An out-of-scope candidate is never used as the repair base; the attempt records the actual execution binding. |
+
+`ScenarioAuthoringContract` remains the existing strict mechanical grammar.
+`ScenarioCandidateAssessment`/`ScenarioCandidateIssue` retain diagnostics and
+feed the existing Tester repair payload without replacement test code.
+Unavailable source remains absent rather than being invented as empty source.
+The existing submission-recording method was moved to a module helper to keep
+`ScenarioDraftingService` within the mandatory class-size limit.
+
+A passing candidate is canonicalised and its complete source is sent to Intent
+Review with the selected behavior, expected result and source evidence. The
+existing fragment-kind preview is metadata, not a Frontier. Intent alone decides
+whether eventual GREEN would demonstrate that behavior. Approval freezes the
+scenario, parses/fragments it and creates the existing initial Frontier.
+`wrong_behavior`, `repair_required` and `insufficient_evidence` retain semantic
+feedback, create no frozen microcycle/Frontier, and allow bounded repair.
+
+Deterministic regressions cover the empty SignalBoard shape
+`assert len(component.signals) == 0` and the same rule for an unrelated Catalog.
+Undeclared/private/mixed-case members and production methods named skip, xfail,
+patch or setattr reach Intent. An unrelated dependency patch is not rejected because return-value text mentions the production module. Further tests prove typed mechanical rejection,
+zero Intent calls, serialized reload, feedback handoff, candidate lineage,
+repair, approval/freezing/fragments/Frontier and semantic rejection without a
+Frontier. The existing public_api regression remains.
+
+Validation on the final code: 91 focused drafting/adapter tests passed; the full
+pytest suite passed (589 tests). Coding-principles gate, configured mypy (29
+source files), compileall over athba/core/llm_service/tests/scripts and
+`git diff --check` passed. No unrelated test failed. Final deterministic logs
+are retained under untracked `evidence/pre-intent-focused-final-tree.log` and
+`evidence/pre-intent-full-final-tree.log`.
+
+No inference calls or live SignalBoard rerun were made. Strict TDD sequencing,
+RED/GREEN, Developer production-only mutation, regression, CAS, Senior Review,
+Gatekeeper independence, Behavior Planner, BPQ-V1, Rack AI, JCode and PR21 were
+unchanged. The four Tester submissions, 300-second timeout, execution budgets,
+worker routing and model configuration were unchanged. The Planner test_hint and
+workspace evidence_refs TODOs were reviewed and left intact.

@@ -41,6 +41,7 @@ class ScenarioSubmissionOutcome(str, Enum):
 
 class ScenarioCandidateIssueCode(str, Enum):
     SYNTAX_INVALID = "syntax_invalid"
+    UNUSABLE_ARTIFACT = "unusable_artifact"
     MODULE_DOCSTRING = "module_docstring"
     NO_TEST = "no_test"
     MULTIPLE_TESTS = "multiple_tests"
