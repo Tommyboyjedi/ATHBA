@@ -846,6 +846,7 @@ class FrontierExecutionRequest:
     artifact: MaterialisedTestArtifact
     project_root: str
     test_path: str
+    production_path: str | None = None
 
 
 @dataclass(frozen=True)

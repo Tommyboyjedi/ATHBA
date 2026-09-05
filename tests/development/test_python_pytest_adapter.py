@@ -1,4 +1,5 @@
 import ast
+from dataclasses import replace
 
 import pytest
 
@@ -28,7 +29,7 @@ def artifact(adapter, model, fragments, index):
 
 
 def execute(adapter, tmp_path, model, value):
-    return adapter.execute_frontier(FrontierExecutionRequest(value, str(tmp_path), model.test_path))
+    return adapter.execute_frontier(FrontierExecutionRequest(value, str(tmp_path), model.test_path, "widget_module.py"))
 
 
 def classify(adapter, fragments, index, value, prior=None):
@@ -118,3 +119,105 @@ def test_final_artifact_matches_approved_scenario_intent():
     final = adapter.materialise_final_test(FinalTestMaterialisationRequest(model, fragments, "base"))
     assert ast.dump(ast.parse(final.complete_source), include_attributes=False) == ast.dump(ast.parse(model.complete_source), include_attributes=False)
     assert all(item.source_span is not None for item in fragments)
+
+
+@pytest.mark.parametrize("expression", ["widget.entries()", "assert len(widget.entries()) == 0"])
+def test_missing_production_member_call_assertion_consistency(tmp_path, expression):
+    (tmp_path / "widget_module.py").write_text("class Widget: pass\n")
+    adapter, model, fragments = prepared(
+        "widget = Widget()\n" + expression, "from widget_module import Widget"
+    )
+    prior = artifact(adapter, model, fragments, 1)
+    assert execute(adapter, tmp_path, model, prior).kind == "green"
+    value = artifact(adapter, model, fragments, 2)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    facts = {item.name: item.value for item in diagnostic.facts}
+    assert facts["exception_type"] == "AttributeError"
+    assert "has no attribute 'entries'" in diagnostic.message
+    outcome = classify(adapter, fragments, 2, diagnostic, "green").outcome
+    print(f"{fragments[2].kind}: {outcome}")
+    assert outcome == "valid_missing_capability_red"
+
+
+@pytest.mark.parametrize("expression", [
+    "value = widget.entries", "if True:\n    widget.entries()",
+    "for _ in [1]:\n    widget.entries()",
+    "assert widget.entries == []", "assert Widget.entries == []",
+    "assert widget_module.entries == []",
+])
+def test_supported_fragment_missing_production_member(tmp_path, expression):
+    (tmp_path / "widget_module.py").write_text("class Widget: pass\n")
+    adapter, model, fragments = prepared(
+        "widget = Widget()\n" + expression,
+        "import widget_module\nfrom widget_module import Widget",
+    )
+    index = len(fragments) - 1
+    value = artifact(adapter, model, fragments, index)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    assert classify(adapter, fragments, index, diagnostic, "green").outcome == "valid_missing_capability_red"
+    unknown = replace(fragments[index], kind="unsupported_ast")
+    assert adapter.classify_boundary(BoundaryClassificationRequest(
+        diagnostic, value, unknown, "green",
+    )).outcome == "unsupported_language_boundary"
+    assert classify(adapter, fragments, index, diagnostic, "failed").outcome == "failure_before_frontier"
+
+
+@pytest.mark.parametrize("body,production", [
+    ("value = object()\nvalue.entries()", "class Widget: pass\n"),
+    ("value = object()\nassert value.entries()", "class Widget: pass\n"),
+    ("assert widget.entries()", "class Widget:\n    def entries(self):\n        return object().absent\n"),
+    ("widget.entries()", "class Widget:\n    def entries(self):\n        raise AttributeError('unrelated')\n"),
+    ("assert widget.entries", "class Widget:\n    @property\n    def entries(self):\n        return object().absent\n"),
+    ("assert widget.entries()", "class Widget:\n    def __getattr__(self, name):\n        raise AttributeError(name, name=name, obj=self)\n"),
+    ("assert 1 / 0 == 0", "class Widget: pass\n"),
+    ("assert len(widget) == 0", "class Widget: pass\n"),
+    ("from unittest.mock import Mock\nwidget = Mock(spec=[])\nassert widget.entries()", "class Widget: pass\n"),
+    ("widget = type('Widget', (), {'__module__': 'widget_module'})()\nassert widget.entries()", "class Widget: pass\n"),
+    ("from helper import check\nassert check(widget)", "class Widget: pass\n"),
+    ("from helper import Other\nwidget = Other()\nassert widget.entries()", "class Widget: pass\n"),
+])
+def test_unproven_runtime_failures_are_not_red(tmp_path, body, production):
+    (tmp_path / "widget_module.py").write_text(production)
+    (tmp_path / "helper.py").write_text(
+        "class Other: pass\ndef check(value):\n    return value.entries()\n"
+    )
+    adapter, model, fragments = prepared("widget = Widget()\n" + body, "from widget_module import Widget")
+    index = len(fragments) - 1
+    value = artifact(adapter, model, fragments, index)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    assert not any(item.name == "missing_production_member" for item in diagnostic.facts)
+    assert classify(adapter, fragments, index, diagnostic, "green").outcome in {
+        "unsupported_language_boundary", "failure_before_frontier",
+    }
+
+
+def test_missing_production_path_fails_closed(tmp_path):
+    (tmp_path / "widget_module.py").write_text("class Widget: pass\n")
+    adapter, model, fragments = prepared("widget = Widget()\nassert widget.entries()", "from widget_module import Widget")
+    value = artifact(adapter, model, fragments, 2)
+    diagnostic = adapter.execute_frontier(FrontierExecutionRequest(value, str(tmp_path), model.test_path))
+    assert adapter.classify_boundary(BoundaryClassificationRequest(
+        diagnostic, value, fragments[2], "green",
+    )).outcome == "unsupported_language_boundary"
+
+
+@pytest.mark.parametrize("phase", ["setup", "teardown"])
+def test_fixture_attribute_error_cannot_supply_missing_capability_red(tmp_path, phase):
+    (tmp_path / "widget_module.py").write_text("class Widget: pass\n")
+    failure = "    Widget().entries()\n"
+    fixture_body = failure + "    yield\n" if phase == "setup" else "    yield\n" + failure
+    (tmp_path / "conftest.py").write_text(
+        "import pytest\nfrom widget_module import Widget\n@pytest.fixture(autouse=True)\ndef fixture():\n" + fixture_body
+    )
+    adapter, model, fragments = prepared("widget = Widget()\nassert widget.entries()", "from widget_module import Widget")
+    value = artifact(adapter, model, fragments, 2)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    assert classify(adapter, fragments, 2, diagnostic, "green").outcome in {
+        "unsupported_language_boundary", "failure_before_frontier",
+    }
+
+
+@pytest.mark.parametrize("body", ["assert (", "return 1", "yield 1", "async def helper():\n    pass"])
+def test_invalid_or_unsupported_scenario_cannot_reach_red(body):
+    with pytest.raises(ValueError, match="unsupported|invalid"):
+        prepared(body)

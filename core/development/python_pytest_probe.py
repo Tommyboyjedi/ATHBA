@@ -6,6 +6,9 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+from core.development.python_missing_member import MissingMemberContext, missing_production_member
 
 
 @dataclass
@@ -19,6 +22,7 @@ class _Facts:
     teardown_outcome: str = "not_run"
     was_xfail: bool = False
     was_xpass: bool = False
+    missing_production_member: bool = False
     exception_type: str | None = None
     failure_message: str | None = None
     source_line: int | None = None
@@ -29,9 +33,14 @@ class _Facts:
 
 
 class _Plugin:
-    def __init__(self, node: str):
+    def __init__(self, node: str, production_path: str):
         self.node = node
+        self.member_context = MissingMemberContext(Path(node.split("::", 1)[0]).resolve(), Path(production_path).resolve() if production_path else None)
         self.facts = _Facts(evidence_refs=[node])
+
+    def pytest_runtest_makereport(self, item, call) -> None:
+        if item.nodeid == self.node and call.when == "call" and call.excinfo is not None:
+            self.facts.missing_production_member = missing_production_member(call.excinfo.value, self.member_context)
 
     def pytest_collection_finish(self, session) -> None:
         self.facts.requested_node_found = self.node in [item.nodeid for item in session.items]
@@ -85,11 +94,11 @@ class _Plugin:
 
 
 def main() -> int:
-    root, node = sys.argv[1:3]
+    root, node, production_path = sys.argv[1:4]
     os.chdir(root)
     sys.path.insert(0, root)
     import pytest
-    plugin = _Plugin(node)
+    plugin = _Plugin(node, production_path)
     exit_code = pytest.main(["-q", "-p", "no:cacheprovider", node], plugins=[plugin])
     print(json.dumps(asdict(plugin.finish(int(exit_code)))), flush=True)
     return 0

@@ -122,7 +122,7 @@ def _observe_frontier(
     )
     try:
         diagnostic = adapter.execute_frontier(
-            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path)
+            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path)
         )
         previous = BoundaryOutcome.GREEN.value if state.frontier.index else None
         assessment = adapter.classify_boundary(
@@ -212,7 +212,7 @@ def _verify_developer_green(
     )
     try:
         diagnostic = adapter.execute_frontier(
-            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path)
+            FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path)
         )
         previous = BoundaryOutcome.GREEN.value if state.frontier.index else None
         assessment = adapter.classify_boundary(

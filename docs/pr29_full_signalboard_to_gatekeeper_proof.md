@@ -151,3 +151,103 @@ Authoritative scenario state: `/srv/ATHBA/state/scenario-drafts/pr29-fresh-signa
 ATHBA source code, prompts, adapter, grammar, Frontier machinery, Planner, Developer, Gatekeeper, accounting, timeouts, execution budgets and routing were unchanged. BPQ-V1, Rack AI, JCode and PR21 were unchanged; PR21 was not started. All existing TODOs, including test_hint and evidence_refs plumbing, remain intact. The real Developer changed production source **only in the generated project**, producing a minimal `SignalBoard` class; accepted final source is retained in E/terminal-snapshots. No production implementation was manually authored.
 
 Only this documentation file is committed; generated state and runtime evidence remain outside the commit. Validation for the documentation change: `git diff --check`; no source-test suite was rerun for this documentation-only update. The live proof's partial test evidence and terminal outcome above are not a full end-to-end PASS.
+
+
+## Deterministic assertion RED correction: 2026-09-05
+
+This follow-up starts at ATHBA `5e75c1d567f28641367eca6d26d8a1891cc1c202`.
+It corrects the generic harness defect; it does not resume, rerun, or amend the
+historical live run `pr29-fresh-signalboard-20260905T105000Z` above. The original
+failure evidence and persisted run/scenario/microcycle/feature state remain intact.
+No model calls were made during this correction.
+
+### Source and evidence trace
+
+The current `strict_microcycle_advance._observe_frontier` materialises the active
+prefix through `PythonFrontierMaterialiser`, then executes its exact pytest node
+through `PythonPytestAdapter.execute_frontier` / `PytestStructuredExecutor` and
+`python_pytest_probe`. Probe hooks record collection, node discovery/execution,
+setup/call/teardown, exception and failure location. The executor converts these
+into `BoundaryDiagnostic`; `PythonBoundaryClassifier` checks the prior frontier
+and active emitted source span before classifying. `_observe_frontier` records
+the assessment and only `_VALID_RED_OUTCOMES` can accept the RED revision and
+select `SUBMIT_DEVELOPER`. Unsupported outcomes block instead. The synchronous
+`StrictMicrocycleService._execute_frontier` route uses the same adapter/classifier.
+
+The parser classifies `ast.Assert` as `assertion`; a bare expression call is
+`call`. At the starting HEAD, the missing-capability exception branch admitted
+imports, constructors and calls, but excluded assertions. The subsequent assertion
+branch admitted behavioral assertion failures, so a missing member in an assertion
+fell through to `unsupported_language_boundary`. There was also no runtime owner
+check in the old call-span AttributeError branch.
+
+Read-only inspection of the actual persisted microcycle confirms the active
+`python-3-assertion`, line 6, `AttributeError` for the missing member, successful
+collection/node discovery/setup/teardown, failed call and unsupported outcome.
+Frontier 0 completed RED/GREEN/regression; Frontier 1 was already GREEN and
+completed regression without a second Developer call.
+
+### Reproduction and generic rule
+
+Before changing production code, a parameterized real-pytest regression created
+`widget_module.Widget` with no members, verified the constructor frontier GREEN,
+and executed `widget.entries()` versus `assert len(widget.entries()) == 0`.
+The actual exceptions were missing-member AttributeErrors. The call passed the
+expected RED check, while the assertion failed it with the historical unsupported
+classification: **1 passed, 1 failed**. This is retained in
+`evidence/pr29-assertion-red-correction/before.log`.
+
+A missing member is now accepted across supported fragment kinds only with
+positive runtime ownership evidence: the innermost failure is a matching Python
+`LOAD_ATTR` in the canonical test, the exception identifies the actual owner and
+member, the owner module/type belongs to the declared production file (including
+module type identity), and static lookup proves absence without invoking getters.
+Custom attribute lookup, properties, substitutes and helper/production-internal
+exceptions do not satisfy that proof. Collection, node execution, setup, call,
+teardown, prior-frontier and active-span checks must also agree. Missing evidence
+fails closed. Unknown fragment kinds remain unsupported.
+
+The execution request gains an optional production-path diagnostic input, passed
+from the existing strict-microcycle request into the probe. Existing persisted
+state schemas are unchanged; the proof uses the existing extensible diagnostic
+facts. Old diagnostics lacking ownership evidence cannot newly authorize an
+AttributeError RED. No production name or fixture is special-cased.
+
+Ordinary assertion mismatch remains the existing **valid_behavioral_red**, never
+**valid_missing_capability_red**. Rejecting all behavioral assertion RED would
+change strict-TDD semantics and is deliberately outside this correction.
+
+Tests cover call/assertion equivalence, production module/class/instance members,
+declarations and compound fragments, unknown fragment kinds, prior-frontier
+failure, unrelated objects and exceptions, helpers, fixtures, properties, custom
+lookup, mocks/substitutes, missing production-path evidence and invalid syntax.
+The strict-microcycle transition regression checks accepted RED and pending
+Developer action without making a Developer submission or advancing the frontier.
+
+Tester, Intent Review, Behavior Planner, scenario grammar/freezing/fragmentation,
+Frontier ordering, Developer mutation rules, GREEN validation, regression, CAS,
+Senior Review, Gatekeeper, repair accounting and trusted-revision rules are
+unchanged. Only production-path diagnostic plumbing changes in the microcycle
+call sites. BPQ-V1, Rack AI, JCode, PR21, prompts, model configuration, routing,
+execution budgets and timeouts are unchanged. Historical live proof remains
+incomplete; deterministic correction is not a claim of live proof completion.
+
+### Validation and preservation
+
+All commands ran in `/srv/ATHBA` using `./.venv/bin/python`, `PYTHONPATH=.`,
+CPU-only CI test settings, and `TMPDIR=/srv/ATHBA/evidence/pr29-assertion-red-correction`.
+`PYTEST_ADDOPTS=--rootdir=.` kept nested disposable pytest projects rooted at their
+own working directory while keeping all temporary files inside ATHBA.
+
+- Focused adapter, strict-microcycle, RED-acceptance and domain tests: **66 passed**
+  in 54.48s (`focused-final.log`).
+- Full `python -m pytest -q`: **618 passed** in 174.23s, exit 0 (`full.log`, `full.exit`).
+- `scripts/check_coding_principles.py`: PASS (`principles-final.log`).
+- Configured `python -m mypy`: PASS, 29 source files (`mypy-final.log`).
+- Explicit mypy for adapter, probe and missing-member helper: PASS, 3 source files.
+- `python -m compileall -q athba core llm_service tests scripts`: PASS (`compileall.log`).
+- `git diff --check`: PASS.
+- SHA-256 comparison: all 38 historical evidence/state files unchanged
+  (`historical-hashes.json`). Evidence logs remain untracked and outside the commit.
+
+Log paths above are relative to `evidence/pr29-assertion-red-correction/`.

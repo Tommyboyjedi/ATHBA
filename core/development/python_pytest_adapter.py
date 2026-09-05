@@ -575,7 +575,7 @@ class PytestStructuredExecutor:
         if syntax is not None:
             return syntax
         node = request.artifact.canonical_test_identity
-        command = [sys.executable, "-m", "core.development.python_pytest_probe", str(root), node]
+        command = [sys.executable, "-m", "core.development.python_pytest_probe", str(root), node, request.production_path or ""]
         environment = os.environ | {"PYTHONPATH": str(Path(__file__).resolve().parents[2])}
         completed = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=30)
         try:
@@ -629,7 +629,18 @@ class PythonBoundaryClassifier:
             return BoundaryAssessment(outcome.value, request.active_fragment.fragment_id, request.diagnostic)
         exception = facts.get("exception_type", "")
         active_kind = request.active_fragment.kind
-        if exception in {"ImportError", "ModuleNotFoundError", "NameError", "AttributeError"} and active_kind in {item.value for item in (PythonFragmentKind.PRODUCTION_IMPORT, PythonFragmentKind.CONSTRUCTOR, PythonFragmentKind.CALL)}:
+        if exception == "AttributeError":
+            proven = facts.get("missing_production_member") == "True" and all(
+                facts.get(name) == expected for name, expected in (
+                    ("collection_succeeded", "True"), ("requested_node_found", "True"),
+                    ("requested_node_executed", "True"), ("setup_outcome", "passed"),
+                    ("call_outcome", "failed"), ("teardown_outcome", "passed"),
+                )
+            )
+            supported = active_kind in {item.value for item in PythonFragmentKind}
+            outcome = BoundaryOutcome.VALID_MISSING_CAPABILITY_RED if proven and supported else BoundaryOutcome.UNSUPPORTED_LANGUAGE_BOUNDARY
+            return BoundaryAssessment(outcome.value, request.active_fragment.fragment_id, request.diagnostic)
+        if exception in {"ImportError", "ModuleNotFoundError", "NameError"} and active_kind in {item.value for item in (PythonFragmentKind.PRODUCTION_IMPORT, PythonFragmentKind.CONSTRUCTOR, PythonFragmentKind.CALL)}:
             return BoundaryAssessment(BoundaryOutcome.VALID_MISSING_CAPABILITY_RED.value, request.active_fragment.fragment_id, request.diagnostic)
         if active_kind == PythonFragmentKind.ASSERTION and (
             exception == "AssertionError" or request.diagnostic.message.lstrip().startswith("assert ")
