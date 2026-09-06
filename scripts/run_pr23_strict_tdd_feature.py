@@ -134,7 +134,7 @@ async def execute(
         input_value.checkpoint,
         composition.athba_revision,
         composition.rack_ai_revision,
-        StrictTddRunControllerConfig(100),
+        StrictTddRunControllerConfig(1000),
     )
     if input_value.mode == StrictTddRunMode.START:
         return await composition.controller.start(request)
