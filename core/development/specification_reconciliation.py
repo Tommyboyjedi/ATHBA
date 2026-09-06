@@ -24,6 +24,8 @@ class AcceptedTestEvidence:
     requirement_refs: list[str]
     red_revision: str
     semantic_revision: str
+    test_source: str | None = None
+    final_revision_verified: bool = False
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -33,6 +35,8 @@ class AcceptedTestEvidence:
             "requirement_refs": list(self.requirement_refs),
             "red_revision": self.red_revision,
             "semantic_revision": self.semantic_revision,
+            "test_source": self.test_source,
+            "final_revision_verified": self.final_revision_verified,
         }
 
 
@@ -80,11 +84,16 @@ class GitAcceptedTestCatalog:
         self.semantic_revision = semantic_revision
 
     def contains(self, evidence: AcceptedTestEvidence) -> bool:
-        accepted_digest = self._test_digest(evidence.semantic_revision, evidence.test_name)
-        final_digest = self._test_digest(self.semantic_revision, evidence.test_name)
-        if accepted_digest is None or final_digest is None:
-            return False
-        return accepted_digest == final_digest
+        return self.verified_source(evidence) is not None
+
+    def verified_source(self, evidence: AcceptedTestEvidence) -> str | None:
+        accepted_source = self._test_source(evidence.semantic_revision, evidence.test_name)
+        final_source = self._test_source(self.semantic_revision, evidence.test_name)
+        if accepted_source is None or final_source is None:
+            return None
+        if hashlib.sha256(accepted_source.encode("utf-8")).hexdigest() != hashlib.sha256(final_source.encode("utf-8")).hexdigest():
+            return None
+        return final_source
 
     def _test_digest(self, revision: str, test_name: str) -> str | None:
         source = self._test_source(revision, test_name)
@@ -184,8 +193,19 @@ class ChecklistItemReconciler:
         self.catalog = catalog
 
     async def reconcile(self, request: ChecklistReconciliationRequest) -> ChecklistTestReconciliation:
+        verified = []
+        for evidence in request.accepted:
+            source = _catalog_verified_source(self.catalog, evidence)
+            verified.append(
+                replace(
+                    evidence,
+                    test_source=source,
+                    final_revision_verified=source is not None,
+                )
+            )
+        prompt_request = replace(request, accepted=verified)
         try:
-            submission = await ReconciliationSubmission(self.gateway).submit(_reasoning_request(request))
+            submission = await ReconciliationSubmission(self.gateway).submit(_reasoning_request(prompt_request))
         except ReconciliationFailure as error:
             raise replace(error, checklist_ref=request.checklist_ref,
                           accepted_test_names=tuple(item.test_name for item in request.accepted)) from error
@@ -222,6 +242,16 @@ class TestEvidenceReconciler:
                 )
             )
         return results
+
+
+def _catalog_verified_source(
+    catalog: GitAcceptedTestCatalog,
+    evidence: AcceptedTestEvidence,
+) -> str | None:
+    verified_source = getattr(catalog, "verified_source", None)
+    if callable(verified_source):
+        return verified_source(evidence)
+    return None
 
 
 def _verified_yes_or_no(
@@ -285,8 +315,11 @@ def _reconciliation_prompt(
                 "rationale": "brief explanation",
             },
             "rules": [
+                "read the supplied test_source and judge the observable behavior it actually proves",
                 "answer YES only when one or more listed accepted tests directly prove the item",
                 "answer NO when evidence is absent, indirect, or uncertain",
+                "select only tests with final_revision_verified=true",
+                "do not infer semantics merely from requirement references or test names",
                 "never invent a test identifier",
                 "do not use production code, review, mechanical checks, or assumptions as evidence",
             ],

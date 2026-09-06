@@ -199,3 +199,40 @@ async def test_reconciler_rejects_changed_test_body_at_final_trusted_revision(tm
     assert results[0].answer == "NO"
     assert results[0].accepted_test_names == []
     assert "preserved" in results[0].rationale
+
+
+@pytest.mark.asyncio
+async def test_prompt_contains_only_verified_final_test_source(tmp_path):
+    revision = _repository(tmp_path)
+    gateway = FakeReasoningGateway([
+        {"answer": "YES", "selected_test_names": ["tests/test_reservation_book.py::test_add_resource"], "rationale": "body proves it"},
+        {"answer": "NO", "selected_test_names": [], "rationale": "no"},
+    ])
+    await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, revision)).reconcile(
+        _checklist(), _run_state(revision)
+    )
+    payload = json.loads(gateway.requests[0].prompt)
+    evidence = payload["accepted_tdd_tests"][0]
+    assert evidence["test_source"] == "def test_add_resource():\n    assert True"
+    assert evidence["final_revision_verified"] is True
+    assert "class ReservationBook" not in gateway.requests[0].prompt
+
+
+@pytest.mark.asyncio
+async def test_changed_test_source_is_not_supplied_as_trusted_evidence(tmp_path):
+    accepted_revision = _repository(tmp_path)
+    (tmp_path / "tests" / "test_reservation_book.py").write_text(
+        "def test_add_resource():\n    assert False\n", encoding="utf-8"
+    )
+    final_revision = _commit_all(tmp_path, "change accepted test body")
+    gateway = FakeReasoningGateway([
+        {"answer": "NO", "selected_test_names": [], "rationale": "changed evidence"},
+        {"answer": "NO", "selected_test_names": [], "rationale": "no"},
+    ])
+    await TestEvidenceReconciler(
+        gateway, GitAcceptedTestCatalog(tmp_path, final_revision)
+    ).reconcile(_checklist(), _run_state(accepted_revision))
+    evidence = json.loads(gateway.requests[0].prompt)["accepted_tdd_tests"][0]
+    assert evidence["test_source"] is None
+    assert evidence["final_revision_verified"] is False
+    assert "assert False" not in gateway.requests[0].prompt

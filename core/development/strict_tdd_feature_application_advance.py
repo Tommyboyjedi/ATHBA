@@ -153,8 +153,22 @@ async def _reconcile(
         service.states.save(blocked)
         return _result_for(FeatureTransitionKind.BLOCKED, blocked, project,
                            error.kind.value, reasoning=bool(error.attempts))
-    updated = replace(state, final_reconciliation=reconciliation)
+    all_yes = bool(reconciliation) and all(item.get("answer") == "YES" for item in reconciliation)
+    updated = replace(
+        state,
+        status=StrictTddFeatureStatus.RUNNING.value if all_yes else StrictTddFeatureStatus.BLOCKED.value,
+        blocked_reason=None if all_yes else "specification_gatekeeper_failed",
+        final_reconciliation=reconciliation,
+    )
     service.states.save(updated)
+    if not all_yes:
+        return _result_for(
+            FeatureTransitionKind.BLOCKED,
+            updated,
+            project,
+            "specification_gatekeeper_failed",
+            reasoning=True,
+        )
     return _result_for(FeatureTransitionKind.RECONCILIATION_COMPLETED, updated, project, reasoning=True)
 
 
