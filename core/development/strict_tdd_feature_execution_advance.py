@@ -315,6 +315,7 @@ def _result(
     draft_state: ScenarioDraftRunState | None = None,
     microcycle_fingerprint: TransitionFingerprint | None = None,
 ) -> ScenarioAdvanceResult:
+    outcome = replace(outcome, draft_state=draft_state)
     fingerprint = _fingerprint(outcome, request, draft_state, microcycle_fingerprint)
     return ScenarioAdvanceResult(
         kind,

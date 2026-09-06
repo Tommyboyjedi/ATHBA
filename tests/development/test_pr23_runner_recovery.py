@@ -170,7 +170,7 @@ def test_blocked_and_transition_limit_results_write_reports(tmp_path, capsys):
     assert Path(StrictTddRunStateRepository(state / "runs").load("recovery-run").structured_report_path).exists()
 
     state, evidence = tmp_path / "limited-state", tmp_path / "limited-evidence"
-    factory = Factory([transition(marker=f"-{item}") for item in range(100)])
+    factory = Factory([transition(marker=f"-{item}") for item in range(1000)])
     assert main(args("start", state, evidence), factory) == StrictTddRunnerExitCode.TRANSITION_LIMIT_REACHED
     assert json.loads(capsys.readouterr().out)["status"] == "transition_limit_reached"
     assert Path(StrictTddRunStateRepository(state / "runs").load("recovery-run").structured_report_path).exists()

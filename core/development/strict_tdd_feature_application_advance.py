@@ -30,6 +30,8 @@ from core.development.strict_tdd_transitions import (
     TransitionFingerprint,
 )
 
+from core.development.strict_tdd_feature_replan import FeatureReplanContext, advance_replan, replan_pending, require_replan
+
 MAX_FEATURE_COMPATIBILITY_TRANSITIONS = 100
 
 
@@ -62,6 +64,8 @@ async def advance(
         return _result_for(FeatureTransitionKind.FEATURE_COMPLETED, state, project)
     if state.status == StrictTddFeatureStatus.BLOCKED.value:
         return _result_for(FeatureTransitionKind.BLOCKED, state, project, state.blocked_reason)
+    if replan_pending(state):
+        return await advance_replan(service, FeatureReplanContext(state, project))
     if state.pending_completed_behavior is not None:
         return _record_completed_behavior(service, state, project)
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
@@ -209,6 +213,12 @@ async def _advance_scenario(
             behavior_ref=behavior.ref,
             scenario_transition=advanced,
         )
+    if outcome.status == "attempts_exhausted" and outcome.draft_state is not None:
+        replanning = require_replan(state, outcome.draft_state)
+        if replanning is not None:
+            service.states.save(replanning)
+            return _result_for(FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED, replanning, project,
+                               behavior_ref=behavior.ref, scenario_transition=advanced)
     if outcome.blocked_reason is not None or outcome.status in {"scenario_draft_blocked", "replan_required", "attempts_exhausted", "blocked"}:
         updated = service._after_scenario(state, outcome)
         service.states.save(updated)
@@ -293,7 +303,7 @@ def _result_for(
         state.canonical_development_base if nested is None else nested.canonical_sha,
         state.working_revision if nested is None else nested.working_sha,
         (len(state.completed_behaviors),) if nested is None else (len(state.completed_behaviors), *nested.retry_counts),
-        _pending_action(state) if nested is None else nested.pending_action,
+        _pending_action(state) if nested is None or replan_pending(state) else nested.pending_action,
     )
     path = StrictTddTransitionPath(
         kind,
@@ -326,6 +336,8 @@ def _result_for(
 
 
 def _pending_action(state: StrictTddFeatureState) -> str:
+    if replan_pending(state):
+        return state.behavior_replans[-1].phase.value
     if state.status == StrictTddFeatureStatus.PLANNING.value:
         return "gatekeeper_checklist"
     if state.current_scenario_id is not None:

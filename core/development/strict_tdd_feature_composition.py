@@ -6,6 +6,7 @@ from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
 from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
 from core.development.behavior_completion import BehaviorCompletionDependencies, BehaviorCompletionService
 from core.development.behavior_contract_coordinator import BehaviorContractPlanner
+from core.development.behavior_replan_domain import BehaviorReplanPolicy
 from core.development.behavior_repair import (
     BehaviorRepairDependencies,
     BehaviorRepairService,
@@ -52,6 +53,7 @@ class StrictTddCompositionRequest:
     execution_budget_policy: StrictTddExecutionBudgetPolicy = field(
         default_factory=StrictTddExecutionBudgetPolicy
     )
+    replan_policy: BehaviorReplanPolicy = field(default_factory=BehaviorReplanPolicy)
 
 @dataclass(frozen=True)
 class StrictTddFeatureComposition:
@@ -128,5 +130,5 @@ class StrictTddFeatureCompositionFactory:
         revisions = MicrocycleRevisionLifecycle(RevisionLifecycleDependencies(MicrocycleRevisionRepository(root / "revisions"), MicrocycleGitClient(request.repository_root)))
         scenarios = StrictFeatureScenarioExecutor(StrictFeatureScenarioDependencies(drafting, strict, revisions, environment))
         reconciler = CompletedFeatureReconciler(request.repository_root, microcycle_store, request.reasoning_gateway)
-        application = StrictTddFeatureApplicationService(StrictTddFeatureDependencies(environment, StrictTddFeatureRepository(root / "features"), BehaviorContractPlanner(request.reasoning_gateway), SpecificationGatekeeper(request.reasoning_gateway), scenarios, reconciler))
+        application = StrictTddFeatureApplicationService(StrictTddFeatureDependencies(environment, StrictTddFeatureRepository(root / "features"), BehaviorContractPlanner(request.reasoning_gateway), SpecificationGatekeeper(request.reasoning_gateway), scenarios, reconciler, request.replan_policy))
         return StrictTddFeatureComposition(application, environment, revisions, gateway, application.contract_planner, application.gatekeeper, drafting, adapters, strict, regression, completion, repair, CompletedMicrocycleEvidenceCollector())

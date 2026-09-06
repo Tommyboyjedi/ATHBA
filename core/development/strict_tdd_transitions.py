@@ -59,6 +59,9 @@ class FeatureTransitionKind(str, Enum):
     BEHAVIOR_SELECTED = "behavior_selected"
     SCENARIO_ADVANCED = "scenario_advanced"
     BEHAVIOR_RECORDED = "behavior_recorded"
+    BEHAVIOR_REPLAN_REQUIRED = "behavior_replan_required"
+    BEHAVIOR_SPLIT_RECEIVED = "behavior_split_received"
+    BEHAVIOR_SPLIT = "behavior_split"
     RECONCILIATION_COMPLETED = "reconciliation_completed"
     FEATURE_COMPLETED = "feature_completed"
     BLOCKED = "blocked"
@@ -83,6 +86,7 @@ class StrictTddTransitionPath:
             raise ValueError("microcycle advancement requires its exact microcycle kind")
         if self.scenario_kind is not None and self.feature_kind not in {
             FeatureTransitionKind.SCENARIO_ADVANCED,
+            FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED,
             FeatureTransitionKind.BLOCKED,
         }:
             raise ValueError("nested scenario provenance requires a scenario-consuming feature transition")

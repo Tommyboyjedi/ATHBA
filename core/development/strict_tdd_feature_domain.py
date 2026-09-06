@@ -8,6 +8,7 @@ from hashlib import sha256
 from typing import Any
 
 from core.development.reconciliation_response import ReconciliationFailure
+from core.development.behavior_replan_domain import BehaviorReplanRecord
 
 
 class StrictTddFeatureStatus(str, Enum):
@@ -94,6 +95,7 @@ class StrictTddFeatureState:
     final_reconciliation: tuple[dict[str, object], ...] = ()
     evidence_refs: tuple[str, ...] = ()
     reconciliation_failure: ReconciliationFailure | None = None
+    behavior_replans: tuple[BehaviorReplanRecord, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -112,6 +114,7 @@ class StrictTddFeatureState:
     def to_dict(self) -> dict[str, object]:
         return {
             **asdict(self),
+            "behavior_replans": [item.to_dict() for item in self.behavior_replans],
             "reconciliation_failure": None if self.reconciliation_failure is None else self.reconciliation_failure.to_dict(),
             "completed_behaviors": [asdict(item) for item in self.completed_behaviors],
         }
@@ -136,6 +139,7 @@ class StrictTddFeatureState:
             payload.get("blocked_reason"), tuple(payload.get("final_reconciliation", ())),
             tuple(str(item) for item in payload.get("evidence_refs", ())),
             None if payload.get("reconciliation_failure") is None else ReconciliationFailure.from_dict(payload["reconciliation_failure"]),
+            tuple(BehaviorReplanRecord.from_dict(item) for item in payload.get("behavior_replans", ())),
         )
 
 

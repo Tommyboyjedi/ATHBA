@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Protocol, cast
 
+from core.development.behavior_replan_domain import BehaviorReplanRequest, BehaviorReplanResponse
+from core.development.behavior_replanning import BehaviorRequirementReplanner
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.contract_run_store import ContractRunStore
 from core.development.failure_progression import (
@@ -352,6 +354,9 @@ class BehaviorContractPlanner:
     def __init__(self, gateway: ReasoningGateway, clause_planner: RequirementClausePlanner | None = None):
         self.gateway = gateway
         self.clause_planner = clause_planner or RequirementClausePlanner(gateway)
+
+    async def replan_requirement(self, request: BehaviorReplanRequest) -> BehaviorReplanResponse:
+        return await BehaviorRequirementReplanner(self.gateway).replan(request)
 
     async def create_contract(self, request: ContractPlanningRequest | None = None, **legacy) -> BehaviorContract:
         request = request or ContractPlanningRequest(
