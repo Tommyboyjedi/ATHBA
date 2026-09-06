@@ -29,6 +29,7 @@ from core.development.microcycle_domain import (
 
 PYTHON_LANGUAGE_ID = "python"
 PYTEST_ADAPTER_VERSION = "1.0.0"
+PYTHON_PYTEST_ADAPTER_ID = "python-pytest"
 
 
 class PythonFragmentKind(str, Enum):
@@ -543,10 +544,11 @@ class PythonFrontierMaterialiser:
         if active not in {item.fragment_id for item in request.fragments}:
             raise ValueError("active frontier fragment is unknown")
         return MaterialisedTestArtifact(
-            "python-pytest", PYTEST_ADAPTER_VERSION, request.model.scenario_id,
+            PYTHON_PYTEST_ADAPTER_ID, PYTEST_ADAPTER_VERSION, request.model.scenario_id,
             request.frontier.index, request.model.canonical_test_identity, source,
             active, tuple(spans), request.base_revision,
         )
+
 
     @staticmethod
     def _append_scaffolding(rows: list[str], scaffolding: tuple[str, ...]) -> None:
@@ -558,6 +560,79 @@ class PythonFrontierMaterialiser:
         start = len(buffer.rows) + 1
         buffer.rows.extend(textwrap.indent(emission.source, emission.indent).splitlines())
         buffer.spans.append(FragmentSourceSpan(emission.fragment.fragment_id, SourceSpan(start, len(buffer.rows))))
+
+
+
+@dataclass(frozen=True)
+class PythonPytestModuleMergeRequest:
+    trusted_source: str
+    scenario_source: str
+    canonical_test_identity: str
+
+
+@dataclass(frozen=True)
+class _CurrentTestRemovalRequest:
+    source: str
+    module: ast.Module
+    test_name: str
+
+
+class PythonPytestModuleMerger:
+    """Preserves completed pytest tests while replacing one current scenario test."""
+
+    def merge(self, request: PythonPytestModuleMergeRequest) -> str:
+        if not request.trusted_source.strip():
+            return request.scenario_source
+        trusted = ast.parse(request.trusted_source)
+        scenario = ast.parse(request.scenario_source)
+        test_name = self._test_name(request.canonical_test_identity)
+        current = self._current_test(scenario, test_name)
+        retained = self._without_current_test(_CurrentTestRemovalRequest(request.trusted_source, trusted, test_name))
+        existing = {ast.dump(node, include_attributes=False) for node in trusted.body}
+        additions = [
+            self._source(request.scenario_source, node)
+            for node in scenario.body
+            if not isinstance(node, ast.FunctionDef)
+            and ast.dump(node, include_attributes=False) not in existing
+        ]
+        chunks = [retained.rstrip("\n"), *additions, self._source(request.scenario_source, current)]
+        return "\n\n".join(chunk for chunk in chunks if chunk) + "\n"
+
+    @staticmethod
+    def _test_name(canonical_test_identity: str) -> str:
+        path, separator, name = canonical_test_identity.rpartition("::")
+        if separator != "::" or not path or not name.startswith("test_"):
+            raise ValueError("canonical pytest identity is invalid")
+        return name
+
+    @staticmethod
+    def _current_test(module: ast.Module, test_name: str) -> ast.FunctionDef:
+        tests = [node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == test_name]
+        if len(tests) != 1:
+            raise ValueError("materialised scenario must contain exactly one current test")
+        return tests[0]
+
+    def _without_current_test(self, request: _CurrentTestRemovalRequest) -> str:
+        lines = request.source.splitlines()
+        removals = {
+            line
+            for node in request.module.body
+            if isinstance(node, ast.FunctionDef) and node.name == request.test_name
+            for line in range(self._start_line(node), (node.end_lineno or node.lineno) + 1)
+        }
+        return "\n".join(line for index, line in enumerate(lines, start=1) if index not in removals)
+
+    @staticmethod
+    def _source(source: str, node: ast.AST) -> str:
+        lines = source.splitlines()
+        start = PythonPytestModuleMerger._start_line(node)
+        end = node.end_lineno or node.lineno
+        return "\n".join(lines[start - 1:end])
+
+    @staticmethod
+    def _start_line(node: ast.AST) -> int:
+        decorators = getattr(node, "decorator_list", ())
+        return min([node.lineno, *(item.lineno for item in decorators)])
 
 
 class PytestProbeOutput:

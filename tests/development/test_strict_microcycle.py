@@ -1,4 +1,6 @@
+import ast
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,9 +19,11 @@ from core.development.microcycle_domain import (
     TestScenarioDraft,
 )
 from core.development.python_pytest_adapter import PythonPytestAdapter
+from core.development.specification_reconciliation import AcceptedTestEvidence, GitAcceptedTestCatalog
 from core.development.strict_tdd_transitions import MicrocycleTransitionKind
 from core.development.strict_microcycle import (
     FrontierCandidate,
+    FrontierCandidateRequest,
     RegressionRepairContext,
     GitFrontierMaterialiser,
     StrictMicrocycleDependencies,
@@ -632,3 +636,71 @@ async def test_invalid_probe_blocks_microcycle_without_progression(tmp_path, mon
     promote.assert_not_called()
     advance_revision.assert_not_called()
     probe.assert_called_once()
+
+
+
+
+def test_git_materialiser_preserves_completed_behavior_tests_across_scenarios(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    run(root, "init", "-q")
+    run(root, "config", "user.name", "test")
+    run(root, "config", "user.email", "test@example.test")
+    (root / "widget.py").write_text(
+        "class Widget:\n    def one(self): return 1\n    def two(self): return 2\n    def three(self): return 3\n",
+        encoding="utf-8",
+    )
+    (root / "tests").mkdir()
+    (root / "tests" / "test_widget.py").write_text("", encoding="utf-8")
+    run(root, "add", ".")
+    run(root, "commit", "-qm", "base")
+    adapter = PythonPytestAdapter()
+    materialiser = GitFrontierMaterialiser()
+
+    def test_body(source, name):
+        module = ast.parse(source)
+        node = next(node for node in module.body if getattr(node, "name", None) == name)
+        return ast.get_source_segment(source, node)
+
+    def materialise(base_revision, test_name, body):
+        source = "from widget import Widget\n\n" + f"def {test_name}():\n" + body
+        draft = TestScenarioDraft(test_name, test_name, "python", source,
+                                  f"tests/test_widget.py::{test_name}", "tests/test_widget.py")
+        model = adapter.parse_scenario(type("Request", (), {"draft": draft})())
+        fragments = adapter.fragment_scenario(type("Request", (), {"model": model})())
+        frontier = ScenarioFrontier(test_name, len(fragments) - 1, fragments[-1].fragment_id,
+                                    tuple(fragment.fragment_id for fragment in fragments))
+        artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(model, fragments, frontier, base_revision))
+        return materialiser.materialise(FrontierCandidateRequest(artifact, root, "tests/test_widget.py"))
+
+    base = run(root, "rev-parse", "HEAD").strip()
+    first = materialise(base, "test_REQ_001", "    widget = Widget()\n    assert widget.one() == 1\n")
+    first_source = run(root, "show", f"{first.candidate_revision}:tests/test_widget.py")
+    assert first_source == first.artifact.complete_source
+    first_body = test_body(first_source, "test_REQ_001")
+    first_revision = first.candidate_revision
+    materialiser.cleanup(first)
+
+    second_partial = materialise(first_revision, "test_REQ_002", "    widget = Widget()\n")
+    partial_source = run(root, "show", f"{second_partial.candidate_revision}:tests/test_widget.py")
+    assert test_body(partial_source, "test_REQ_001") == first_body
+    partial_revision = second_partial.candidate_revision
+    materialiser.cleanup(second_partial)
+
+    second_final = materialise(partial_revision, "test_REQ_002", "    widget = Widget()\n    assert widget.two() == 2\n")
+    second_source = run(root, "show", f"{second_final.candidate_revision}:tests/test_widget.py")
+    assert second_source.count("def test_REQ_002") == 1
+    assert test_body(second_source, "test_REQ_001") == first_body
+    second_revision = second_final.candidate_revision
+    materialiser.cleanup(second_final)
+
+    third = materialise(second_revision, "test_REQ_003", "    widget = Widget()\n    assert widget.three() == 3\n")
+    final_source = run(root, "show", f"{third.candidate_revision}:tests/test_widget.py")
+    assert {node.name for node in ast.parse(final_source).body if isinstance(node, ast.FunctionDef)} == {"test_REQ_001", "test_REQ_002", "test_REQ_003"}
+    assert final_source.count("from widget import Widget") == 1
+    assert test_body(final_source, "test_REQ_001") == first_body
+    completed = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/test_widget.py"], cwd=third.project_root, capture_output=True, text=True)
+    assert completed.returncode == 0 and "3 passed" in completed.stdout
+    evidence = AcceptedTestEvidence("tests/test_widget.py::test_REQ_001", "tests/test_widget.py", "REQ-001", ["REQ-001"], first_revision, first_revision)
+    assert GitAcceptedTestCatalog(root, third.candidate_revision).contains(evidence)
+    materialiser.cleanup(third)
