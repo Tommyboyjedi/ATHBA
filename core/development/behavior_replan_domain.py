@@ -55,6 +55,7 @@ class BehaviorReplanRequest:
     canonical_revision: str
     lineage: tuple[str, ...] = ()
     preservation_instruction: str = "Previously completed behavior must not be changed. Replan only the unresolved parent; do not redesign the Behavior Contract."
+    failure_evidence: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if any(not value.strip() for value in (self.project_id, self.source_requirement, self.canonical_ref,
@@ -79,6 +80,7 @@ class BehaviorReplanRequest:
             "completed_requirements": [item.to_dict() for item in self.completed_requirements],
             "canonical_ref": self.canonical_ref, "canonical_revision": self.canonical_revision,
             "lineage": list(self.lineage), "preservation_instruction": self.preservation_instruction,
+            "failure_evidence": list(self.failure_evidence),
         }
 
     @classmethod
@@ -91,6 +93,7 @@ class BehaviorReplanRequest:
             tuple(BehaviorContractRequirement.from_dict(item) for item in value["completed_requirements"]),
             value["canonical_ref"], value["canonical_revision"], tuple(value["lineage"]),
             value["preservation_instruction"],
+            tuple(value.get("failure_evidence", ())),
         )
 
 

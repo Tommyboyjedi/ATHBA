@@ -23,8 +23,13 @@ class FeatureReplanContext:
     project: DevelopmentProject
 
 
-def require_replan(state: StrictTddFeatureState, draft: ScenarioDraftRunState) -> StrictTddFeatureState | None:
-    if not replan_worthy(draft):
+def require_replan(
+    state: StrictTddFeatureState,
+    draft: ScenarioDraftRunState,
+    developer_exhaustion: bool = False,
+    failure_evidence: tuple[str, ...] = (),
+) -> StrictTddFeatureState | None:
+    if not developer_exhaustion and not replan_worthy(draft):
         return None
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}))
     parent = next(item for item in contract.observable_requirements if item.ref == draft.behavior_ref)
@@ -42,6 +47,7 @@ def require_replan(state: StrictTddFeatureState, draft: ScenarioDraftRunState) -
         tuple(item for item in contract.source_clauses if item.ref in parent.source_refs),
         draft, tuple(item for item in contract.observable_requirements if item.ref in completed),
         str(state.canonical_ref), str(state.canonical_development_base), lineage,
+        failure_evidence=failure_evidence,
     )
     return replace(state, behavior_replans=(*state.behavior_replans, BehaviorReplanRecord(request)),
                    evidence_refs=(*state.evidence_refs, f"feature:{state.project_id}:behavior-replan:{parent.ref}"))

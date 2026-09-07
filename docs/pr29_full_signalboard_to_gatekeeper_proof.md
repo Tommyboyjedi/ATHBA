@@ -595,3 +595,7 @@ Fresh run pr29-fresh-signalboard-20260906T105103Z completed six Behavior Require
 The correction supplies only exact accepted pytest function source verified from the final trusted Git revision against the accepted semantic revision. Changed or deleted tests have no trusted source and remain unusable evidence. Production source, implementation transcripts and review opinions remain hidden. The Gatekeeper is instructed to judge observable behavior from supplied test bodies, not infer semantics from requirement references or test names.
 
 Final feature completion now requires every independent checklist item to be YES. Any NO persists the complete reconciliation, canonical revision, completed behaviors and accepted tests, then enters the durable typed blocker specification_gatekeeper_failed; it is not sent automatically to Behavior Planner.
+
+### Developer exhaustion replan note
+
+Fresh run `pr29-fresh-signalboard-20260906T140014Z` reached REQ-003 with an approved scenario and frontier 5. Developer attempts 1–4 were exhausted, and the previous behavior incorrectly terminal-blocked the feature. Developer exhaustion now enters the same existing Behavior Planner replan/split path as Tester exhaustion; no Developer attempt 5 is created. The trusted revision and historical failed-frontier evidence remain preserved.

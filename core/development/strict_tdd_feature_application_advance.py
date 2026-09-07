@@ -28,6 +28,7 @@ from core.development.strict_tdd_transitions import (
     ScenarioAdvanceResult,
     StrictTddTransitionPath,
     TransitionFingerprint,
+    MicrocycleTransitionKind,
 )
 
 from core.development.strict_tdd_feature_replan import FeatureReplanContext, advance_replan, replan_pending, require_replan
@@ -228,7 +229,13 @@ async def _advance_scenario(
             scenario_transition=advanced,
         )
     if outcome.status == "attempts_exhausted" and outcome.draft_state is not None:
-        replanning = require_replan(state, outcome.draft_state)
+        developer_exhaustion = (
+            advanced.microcycle_kind == MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED
+            and advanced.blocker_or_replan_reason == "developer_attempts_exhausted"
+        )
+        replanning = require_replan(
+            state, outcome.draft_state, developer_exhaustion, outcome.evidence_refs
+        )
         if replanning is not None:
             service.states.save(replanning)
             return _result_for(FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED, replanning, project,

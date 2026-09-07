@@ -88,6 +88,74 @@ async def pending_application(tmp_path, payload=None, count=1):
     return app, gateway, gatekeeper, scenarios, reconciler, transition
 
 
+def test_developer_exhaustion_reuses_replan_request_with_frontier_evidence():
+    planned = contract("feature", 5)
+    parent = planned.observable_requirements[-1]
+    state = StrictTddFeatureState(
+        "feature", "hash", "running", planned.to_dict(),
+        current_scenario_id="feature--B-4",
+        completed_behaviors=(),
+        canonical_ref="refs/heads/main", canonical_development_base="trusted",
+    )
+    approved = replace(exhausted(parent), status="approved")
+    result = require_replan(
+        state, approved, developer_exhaustion=True,
+        failure_evidence=("microcycle:feature--B-4:frontier-5", "developer:attempts-1-4"),
+    )
+    assert result is not None and result.status == "running"
+    record = result.behavior_replans[-1]
+    assert record.phase == BehaviorReplanPhase.REQUIRED
+    assert record.request.failure_evidence == (
+        "microcycle:feature--B-4:frontier-5", "developer:attempts-1-4"
+    )
+    assert record.request.canonical_revision == "trusted"
+    assert len(record.request.tester_failures.attempts) == 4
+
+
+@pytest.mark.asyncio
+async def test_application_routes_developer_exhaustion_to_existing_replan(tmp_path):
+    from core.development.strict_tdd_transitions import MicrocycleTransitionKind, ScenarioTransitionKind
+
+    planned = contract("feature", 1)
+    app, _, _, scenarios, _ = service(tmp_path, planned)
+    for _ in range(3):
+        await app.advance(request())
+    await app.advance(request())
+    gateway = ReplanGateway()
+    app.contract_planner = BehaviorContractPlanner(gateway)
+    original = scenarios.advance
+
+    async def developer_exhausted(value):
+        advanced = await original(value)
+        draft = replace(
+            exhausted(value.behavior, value.canonical_development_base),
+            status="approved",
+        )
+        outcome = replace(
+            advanced.result, status="attempts_exhausted",
+            canonical_development_base=value.canonical_development_base,
+            blocked_reason="developer_attempts_exhausted",
+            draft_state=draft,
+            evidence_refs=("microcycle:frontier-5",),
+        )
+        return replace(
+            advanced, kind=ScenarioTransitionKind.MICROCYCLE_ADVANCED, resulting_status="attempts_exhausted",
+            blocker_or_replan_reason="developer_attempts_exhausted",
+            result=outcome, microcycle_kind=MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED,
+        )
+
+    scenarios.advance = developer_exhausted
+    transition = await app.advance(request())
+    assert transition.kind == FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED
+    assert app.states.load("feature").status == "running"
+    assert len(gateway.requests) == 0
+    received = await app.advance(request())
+    assert received.kind == FeatureTransitionKind.BEHAVIOR_SPLIT_RECEIVED
+    assert len(gateway.requests) == 1
+    sent = json.loads(gateway.requests[0].prompt)["request"]
+    assert sent["failure_evidence"] == ["microcycle:frontier-5"]
+
+
 @pytest.mark.asyncio
 async def test_split_replaces_parent_in_order_preserves_completed_and_resumes(tmp_path):
     app, gateway, gatekeeper, scenarios, reconciler, required = await pending_application(tmp_path, count=5)
