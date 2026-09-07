@@ -1,6 +1,8 @@
 """One-persisted-transition feature application and its compatibility loop."""
 from __future__ import annotations
 
+from core.development.specification_evidence_policy import reconciliation_satisfied
+
 from dataclasses import replace
 
 from core.development.reconciliation_response import ReconciliationFailure
@@ -154,7 +156,7 @@ async def _reconcile(
         service.states.save(blocked)
         return _result_for(FeatureTransitionKind.BLOCKED, blocked, project,
                            error.kind.value, reasoning=bool(error.attempts))
-    all_yes = bool(reconciliation) and all(item.get("answer") == "YES" for item in reconciliation)
+    all_yes = reconciliation_satisfied(reconciliation)
     updated = replace(
         state,
         status=StrictTddFeatureStatus.RUNNING.value if all_yes else StrictTddFeatureStatus.BLOCKED.value,

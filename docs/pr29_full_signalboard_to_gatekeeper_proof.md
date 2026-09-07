@@ -599,3 +599,68 @@ Final feature completion now requires every independent checklist item to be YES
 ### Developer exhaustion replan note
 
 Fresh run `pr29-fresh-signalboard-20260906T140014Z` reached REQ-003 with an approved scenario and frontier 5. Developer attempts 1–4 were exhausted, and the previous behavior incorrectly terminal-blocked the feature. Developer exhaustion now enters the same existing Behavior Planner replan/split path as Tester exhaustion; no Developer attempt 5 is created. The trusted revision and historical failed-frontier evidence remain preserved.
+
+## 2026-09-07: specification modality and deterministic evidence routing
+
+Full run `pr29-fresh-signalboard-20260907T080002Z` completed all five Behavior
+Requirements, then blocked at `specification_gatekeeper_failed`. Its final
+Gatekeeper exposed specification modality drift and an evidence-policy mismatch:
+"not required" had become a mandatory absence claim, and unit-test reconciliation
+was being asked to prove constraints that require other evidence.
+
+Checklist facts now retain the existing behavior/validation/invariant/constraint/
+quality kinds and add explicit `required`, `forbidden`, or `non_goal` modality,
+a verbatim source quote, and a source-grounded subject. New atomizer responses
+must supply these fields. Explicit wording is checked against the original source
+context; an excerpt cannot drop a surrounding "not required" operator. Existing
+serialized facts remain readable; missing provenance cannot authorize a new
+ungrounded deterministic pass. Planner output, production source, and review
+opinions are not added to the behavioral reconciler's evidence.
+
+Non-goals create no mandatory positive acceptance proof obligation. They persist
+as `NOT_APPLICABLE` / `not_required`, with their original wording. Obvious public
+capabilities may produce a separate `unrequested_surface_detected` scope finding;
+this is not recast as an explicit prohibition. Such a finding blocks completion
+under the scope policy. Explicitly optional capabilities are permitted; capabilities
+explicitly required elsewhere in the original-source checklist are not unrequested.
+Private helper names are not public-capability evidence. Public inspection uses a
+bounded vocabulary of obvious capability identifiers and exact quoted identifiers,
+not inferred behavior from implementation internals.
+
+Final reconciliation now follows a typed checklist -> evidence policy -> language
+verifier -> evidence result route. Behavioral items retain the unchanged accepted,
+final-revision test-body reconciliation, including its prompts, answer semantics,
+and format-only repair policy. Deterministic results bypass that model entirely.
+Canonical Git inspection supplies revision, inspected paths, adapter identity/version,
+policy, outcome, and diagnostics in the persisted final reconciliation.
+
+The Python specification-evidence adapter is a separate capability using the existing
+language-descriptor/catalog pattern; Tester adapters and execution are unchanged.
+Dependency evidence inspects standard-library/project-local imports and runtime
+packaging declarations. Dynamic imports, executable dependency metadata, unsupported
+languages, and incomplete snapshots fail closed. Storage evidence checks explicit
+storage dependencies/APIs and treats opaque calls/configuration as unsupported; it
+does not infer persistence merely from an internal method named `save` or `write`.
+A storage PASS is limited to the supported static source policy, not a universal
+claim about arbitrary Python runtime effects. Explicit public prohibitions use
+API inspection, with dynamic extension/inheritance unable to establish absence.
+Existing coding-principles static limits are reused when explicitly requested.
+Unconfigured qualities, including "small" and "direct", persist
+`unsupported_evidence_policy`; tests cannot substitute for those policies.
+
+The separate latest-payload semantic NO remains intentionally unresolved for a
+separate investigation. No Planner decomposition/replanning, Tester, Intent,
+Developer, TDD, regression, Senior Review, accepted-test preservation, readiness,
+transition limits, gateway/provider, Rack AI, JCode, or PR21 changes are included.
+Fake-only tests cover the original SignalBoard qualification wording and mixed
+final routing through the real CLI, including byte-for-byte preservation of completed
+TDD evidence and zero reasoning/execution calls on terminal restart. No live model
+calls, endpoint probes, historical-run mutations, or new SignalBoard proof were
+performed. `MODEL_CALLS_MADE=0`. Changes remain uncommitted and unpushed for scope review.
+
+Validation on this uncommitted implementation: focused 115 passed; full deterministic
+suite 783 passed (exit 0); coding-principles, configured mypy (29 files), explicit
+mypy for all 12 changed/new production modules, compileall, and diff-check passed.
+The earlier full run was intentionally interrupted after 360 passes because review
+changed the source; it is retained as incomplete, not counted as a validation pass.
+Evidence: `evidence/pr29-modality-evidence-routing-20260907/`.

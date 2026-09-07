@@ -19,11 +19,11 @@ from core.development.scenario_drafting import ScenarioDraftingService
 from core.development.scenario_drafting_domain import ScenarioDraftRequest, ScenarioRepositoryFacts
 from core.development.specification_reconciliation import (
     ChecklistItemReconciler,
-    ChecklistReconciliationRequest,
     CompletedMicrocycleEvidenceCollector,
     GitAcceptedTestCatalog,
 )
 from core.development.reconciliation_response import ReconciliationFailure
+from core.development.specification_evidence_routing import RoutedChecklistReconciler, RoutedChecklistRequest, required_source_subjects
 from core.development.microcycle_domain import MicrocycleState
 from core.development.strict_microcycle import StrictMicrocycleRequest, StrictMicrocycleService
 from core.development.strict_tdd_feature_application import (
@@ -76,16 +76,19 @@ class CompletedFeatureReconciler:
         states = [self._state(item.scenario_id) for item in request.completed_behaviors]
         accepted = CompletedMicrocycleEvidenceCollector().collect(states)
         catalog = GitAcceptedTestCatalog(self.repository_root, request.canonical_revision)
-        item_reconciler = ChecklistItemReconciler(self.reasoning_gateway, catalog)
+        item_reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(self.reasoning_gateway, catalog), catalog)
+        requested_subjects = required_source_subjects(gatekeeper.checklist)
+        languages = {state.model.language_id for state in states}
+        language = next(iter(languages)) if len(languages) == 1 else ""
         results: list[dict[str, object]] = []
         for item in gatekeeper.checklist.items:
             try:
                 result = await item_reconciler.reconcile(
-                    ChecklistReconciliationRequest(request.contract.project_id, item.ref, item.text, accepted)
+                    RoutedChecklistRequest(gatekeeper.checklist.project_id, item, gatekeeper.checklist.requirement_text, accepted, language, requested_subjects)
                 )
             except ReconciliationFailure as error:
                 raise replace(error, completed_results=tuple(results)) from error
-            results.append(result.to_dict())
+            results.append(result)
         return tuple(results)
 
     def _state(self, scenario_id: str):

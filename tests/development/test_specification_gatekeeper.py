@@ -132,9 +132,9 @@ def requirement_text() -> str:
 def checklist_payload():
     return {
         "items": [
-            {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test"},
-            {"ref": "SPEC-2", "text": "Resource capacity must be positive.", "kind": "validation", "evidence_kind": "test"},
-            {"ref": "SPEC-3", "text": "The implementation must remain readable and free of unnecessary abstractions.", "kind": "quality", "evidence_kind": "review"},
+            {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"},
+            {"ref": "SPEC-2", "text": "Resource capacity must be positive.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"},
+            {"ref": "SPEC-3", "text": "The implementation must remain readable and free of unnecessary abstractions.", "kind": "quality", "evidence_kind": "review", "modality": "required", "source_quote": "free of unnecessary abstractions.", "subject": "unnecessary abstractions"},
         ]
     }
 
@@ -282,6 +282,7 @@ async def test_valid_component_requirement_can_produce_checklist():
         ref="SPEC-1",
         text="A resource has a unique id.",
         kind="validation",
+        modality="required", source_quote="A resource has a unique id and a positive integer capacity.", subject="resource",
     )
 
 
@@ -313,7 +314,7 @@ async def test_malformed_or_invalid_checklist_output_fails_closed():
             ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
         )
 
-    bad_kind = SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [{"ref": "SPEC-1", "text": "x", "kind": "string"}]}]))
+    bad_kind = SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [{"ref": "SPEC-1", "text": "x", "kind": "string", "modality": "required", "source_quote": "x", "subject": "x"}]}]))
     with pytest.raises(ValueError, match="unsupported checklist item kind"):
         await bad_kind.create_checklist(
             ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
@@ -597,7 +598,7 @@ def test_gatekeeper_records_explicit_evidence_and_assessment_round_trip():
 async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
     payload = contract_payload()
     payload["source_clauses"] = [
-        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
     ]
     payload["observable_requirements"] = [
         {
@@ -657,7 +658,7 @@ async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
         {
             "project_id": "reservation-book",
             "requirement_text": requirement_text(),
-            "items": [{"ref": "REQ-08", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}],
+            "items": [{"ref": "REQ-08", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}],
         }
     )
     gatekeeper = SpecificationGatekeeper(
@@ -687,7 +688,7 @@ async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
 def test_gap_adapter_uses_contract_source_ref_when_checklist_ref_drifts():
     payload = contract_payload()
     payload["source_clauses"] = [
-        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
     ]
     payload["observable_requirements"] = [
         {
@@ -804,7 +805,7 @@ async def test_coordinator_can_reenter_tdd_lane_for_targeted_gap():
         [
             {
                 "items": [
-                    {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test"}
+                    {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
                 ]
             },
             {
@@ -864,6 +865,7 @@ async def test_untraceable_executable_gap_blocks_before_ordinary_tdd():
                 {
                     "ref": "SPEC-UNTRACEABLE",
                     "text": "An invented broad obligation.",
+                    "modality": "required", "source_quote": "Clients can add resources", "subject": "resources",
                     "kind": "validation",
                     "evidence_kind": "test",
                 }

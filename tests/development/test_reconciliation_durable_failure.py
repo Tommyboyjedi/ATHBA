@@ -37,7 +37,7 @@ def test_completed_tdd_preserved_cli_blocks_and_restart_does_not_repeat(tmp_path
         if request.purpose == 'athba_specification_checklist':
             result = await original(self, request)
             payload = json.loads(result.text)
-            payload['items'].append({'ref': 'CHK-2', 'text': 'Second independent criterion.', 'kind': 'behavior'})
+            payload['items'].append({'ref': 'CHK-2', 'text': 'Second independent criterion.', 'kind': 'behavior', 'modality': 'required', 'source_quote': json.loads(request.prompt)['requirement_text'], 'subject': 'ToggleSwitch'})
             return ReasoningResult(json.dumps(payload))
         if 'checklist_test_reconciliation' not in request.purpose:
             return await original(self, request)

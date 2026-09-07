@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.development.specification_obligations import ObligationModality, grounded_modality
+
 from core.development.tdd_progression_validation import (
     enum_value,
     list_of_strings,
@@ -53,23 +55,31 @@ class SourceRequirementClause:
 
 @dataclass(frozen=True)
 class SpecificationChecklistItem:
-    """One atomic source-specification fact, independent of proof strategy."""
+    """Atomic source fact; modality never implies a proof strategy."""
 
     ref: str
     text: str
     kind: str
+    modality: str = ObligationModality.REQUIRED.value
+    source_quote: str = ""
+    subject: str = ""
 
     def __post_init__(self) -> None:
         require_text(self.ref, "checklist item ref")
         require_text(self.text, "checklist item text")
         object.__setattr__(self, "kind", enum_value(self.kind, ChecklistItemKind, "checklist item kind"))
+        source = self.source_quote or self.text
+        object.__setattr__(self, "modality", (grounded_modality(self.modality, source) if self.source_quote else ObligationModality(self.modality)).value)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"ref": self.ref, "text": self.text, "kind": self.kind}
+        return {"ref": self.ref, "text": self.text, "kind": self.kind,
+                "modality": self.modality, "source_quote": self.source_quote, "subject": self.subject}
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SpecificationChecklistItem":
-        return cls(ref=str(payload["ref"]), text=str(payload["text"]), kind=str(payload["kind"]))
+        return cls(ref=str(payload["ref"]), text=str(payload["text"]), kind=str(payload["kind"]),
+                   modality=str(payload.get("modality", ObligationModality.REQUIRED.value)),
+                   source_quote=str(payload.get("source_quote", "")), subject=str(payload.get("subject", "")))
 
 
 @dataclass(frozen=True)
