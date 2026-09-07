@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
+import core.development.project_environment_lifecycle as lifecycle
 from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_lifecycle import ProjectReadinessVerifier
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
 from core.execution.rack_ai_contract import find_forbidden_resource_selection_keys, to_rack_ai_request
@@ -32,6 +34,64 @@ def commit_on_branch(root, branch, path, content, message):
     revision = commit_file(root, path, content, message)
     subprocess.run(["git", "switch", "main"], cwd=root, check=True)
     return revision
+
+
+class _ReadyGit:
+    def __init__(self):
+        self.calls = 0
+
+    def commit_exists(self, request):
+        self.calls += 1
+        return True
+
+
+def _readiness_project(tmp_path):
+    repository = tmp_path / "repository"
+    (repository / ".git").mkdir(parents=True)
+    executable = tmp_path / "python"
+    executable.write_text("", encoding="utf-8")
+    return type("Project", (), {
+        "repository_root": str(repository),
+        "runtime": type("Runtime", (), {"environment_path": str(executable)})(),
+        "trusted_base_sha": "trusted",
+    })()
+
+
+def test_readiness_probe_imports_pytest_without_nested_pytest_session(tmp_path, monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    git = _ReadyGit()
+
+    ProjectReadinessVerifier(git).assert_ready(_readiness_project(tmp_path))
+
+    assert calls[0][0] == [str(tmp_path / "python"), "-B", "-c", "import pytest"]
+    assert calls[0][1]["timeout"] == lifecycle.PYTEST_RUNTIME_READINESS_TIMEOUT_SECONDS
+    assert git.calls == 1
+
+
+def test_readiness_probe_import_failure_is_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        lifecycle.subprocess, "run",
+        lambda command, **kwargs: type("Result", (), {"returncode": 1})(),
+    )
+
+    with pytest.raises(ValueError, match="ATHBA pytest runtime is unavailable"):
+        ProjectReadinessVerifier(_ReadyGit()).assert_ready(_readiness_project(tmp_path))
+
+
+def test_readiness_probe_timeout_is_fail_closed(tmp_path, monkeypatch):
+    def timeout(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", timeout)
+
+    with pytest.raises(ValueError, match="ATHBA pytest runtime is unavailable"):
+        ProjectReadinessVerifier(_ReadyGit()).assert_ready(_readiness_project(tmp_path))
 
 
 def test_project_persists_reloads_and_reuses_runtime(tmp_path):
