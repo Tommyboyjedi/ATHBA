@@ -41,6 +41,13 @@ class RoutedChecklistReconciler:
         ):
             return EvidenceResult(EvidenceStatus.UNSUPPORTED, EvidencePolicy.UNSUPPORTED,
                                   self.catalog.semantic_revision, ("source provenance mismatch",)).to_record(item)
+        if decision.policy == EvidencePolicy.ENGINEERING:
+            return EvidenceResult(
+                EvidenceStatus.ENGINEERING_COVERED, EvidencePolicy.ENGINEERING,
+                self.catalog.semantic_revision,
+                ("Required engineering quality is governed by ATHBA coding/engineering policy, "
+                 "not independently proven by product behavioral acceptance.",),
+            ).to_record(item)
         if decision.policy == EvidencePolicy.BEHAVIORAL:
             result = await self.behavioral.reconcile(ChecklistReconciliationRequest(
                 request.project_id, item.ref, item.text, request.accepted))

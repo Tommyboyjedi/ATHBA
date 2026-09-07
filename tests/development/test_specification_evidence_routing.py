@@ -70,7 +70,7 @@ async def test_signalboard_original_wording_is_not_strengthened():
         fact["ref"] = f"SPEC-{index}"
     checklist = await SpecificationChecklistPlanner(FakeReasoningGateway([{"items": facts}])).create_checklist(ChecklistAtomizationRequest("p", REGRESSION))
     assert [entry.modality for entry in checklist.items] == ["non_goal"] * 5 + ["required"] * 3
-    assert [EvidencePolicyRouter().route(entry).policy for entry in checklist.items] == [EvidencePolicy.NON_GOAL] * 5 + [EvidencePolicy.QUALITY] * 2 + [EvidencePolicy.DEPENDENCY]
+    assert [EvidencePolicyRouter().route(entry).policy for entry in checklist.items] == [EvidencePolicy.NON_GOAL] * 5 + [EvidencePolicy.ENGINEERING] * 2 + [EvidencePolicy.DEPENDENCY]
 
 
 @pytest.mark.asyncio
@@ -147,7 +147,7 @@ def test_storage_uses_static_verifier_and_fails_closed_for_opaque_effects(source
     assert result.status == status
 
 
-@pytest.mark.parametrize("text", ["small", "direct", "readable", "beautiful"])
+@pytest.mark.parametrize("text", ["beautiful", "elegant"])
 def test_unsupported_quality_never_uses_unit_tests(text):
     result = verify(item(f"Keep it {text}.", subject=text, kind="quality"))
     assert result.status == EvidenceStatus.UNSUPPORTED
@@ -282,3 +282,99 @@ def test_storage_does_not_infer_effects_from_arbitrary_internal_names(source):
 def test_storage_opaque_protocol_effects_are_unsupported(source):
     obligation = item("The component must not persist.", modality="forbidden", subject="persist")
     assert verify(obligation, snapshot(source)).status == EvidenceStatus.UNSUPPORTED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quality", ["small", "direct", "readable"])
+async def test_known_engineering_quality_is_traceable_nonblocking_and_never_semantically_proven(tmp_path, monkeypatch, quality):
+    wording = f"Keep the component {quality}."
+    fact = item(wording, subject=quality, kind="quality")
+    atomizer = SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [fact.to_dict()]}]))
+    checklist = await atomizer.create_checklist(ChecklistAtomizationRequest("p", wording))
+    preserved = checklist.to_dict()
+    obligation = checklist.items[0]
+    assert EvidencePolicyRouter().route(obligation).policy == EvidencePolicy.ENGINEERING
+    gateway = FakeReasoningGateway([])
+    catalog = GitAcceptedTestCatalog(tmp_path, "a" * 40)
+
+    def forbidden_inspection(*args):
+        raise AssertionError("Engineering-policy delegation must not inspect source or run static proof")
+
+    monkeypatch.setattr(GitSpecificationSnapshot, "read", forbidden_inspection)
+    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
+    record = await routed.reconcile(RoutedChecklistRequest("p", obligation, wording, [], language_id="unknown"))
+    assert record["answer"] == "NOT_APPLICABLE"
+    assert record["evidence_policy"] == "engineering_policy"
+    assert record["evidence_status"] == "covered_by_engineering_policy"
+    assert record["source_item"] == fact.to_dict()
+    assert record["source_item"]["modality"] == "required"
+    assert record["source_item"]["kind"] == "quality"
+    assert record["accepted_test_names"] == []
+    assert record["response_attempts"] == []
+    assert "not independently proven" in record["rationale"]
+    assert reconciliation_satisfied((record,))
+    assert checklist.to_dict() == preserved
+    assert gateway.requests == []
+
+
+def engineering_record():
+    from core.development.specification_evidence_policy import EvidenceResult
+    obligation = item("Keep the component direct.", subject="direct", kind="quality")
+    return EvidenceResult(EvidenceStatus.ENGINEERING_COVERED, EvidencePolicy.ENGINEERING,
+                          "a" * 40, ("delegated, not proven",)).to_record(obligation)
+
+
+@pytest.mark.parametrize("field", ["answer", "evidence_policy", "evidence_status", "findings", "accepted_test_names", "response_attempts", "source_item", "checklist_ref"])
+def test_incomplete_engineering_not_applicable_records_do_not_pass(field):
+    record = engineering_record()
+    record.pop(field)
+    assert not reconciliation_satisfied((record,))
+
+
+@pytest.mark.parametrize("field,value", [
+    ("kind", "behavior"), ("kind", "constraint"), ("modality", "non_goal"),
+    ("modality", "forbidden"), ("subject", "beautiful"), ("subject", "dependency-free"),
+    ("subject", "existing coding-principles limits"), ("source_quote", ""),
+    ("source_quote", "Keep the component unreadable."), ("ref", "OTHER"),
+])
+def test_engineering_coverage_requires_a_matching_required_known_quality_source(field, value):
+    record = engineering_record()
+    record["source_item"][field] = value
+    assert not reconciliation_satisfied((record,))
+
+
+@pytest.mark.parametrize("record", [
+    {"answer": "NOT_APPLICABLE"},
+    {"answer": "NOT_APPLICABLE", "evidence_policy": "engineering_policy", "evidence_status": "covered_by_engineering_policy", "findings": []},
+])
+def test_arbitrary_not_applicable_is_not_a_completion_escape(record):
+    assert not reconciliation_satisfied((record,))
+
+
+def test_engineering_coverage_cannot_hide_other_failures_or_claim_test_evidence():
+    record = engineering_record()
+    assert not reconciliation_satisfied((record, {"answer": "NO"}))
+    for field in ("findings", "accepted_test_names", "response_attempts"):
+        invalid = dict(record)
+        invalid[field] = ["unexpected evidence"]
+        assert not reconciliation_satisfied((invalid,))
+
+
+@pytest.mark.asyncio
+async def test_compound_quality_keeps_dependency_failure_independent(tmp_path):
+    wording = "Keep the component small, direct and dependency-free."
+    facts = [replace(item(wording, subject=subject, kind="quality"), ref=f"SPEC-{index}").to_dict()
+             for index, subject in enumerate(("small", "direct", "dependency-free"))]
+    checklist = await SpecificationChecklistPlanner(FakeReasoningGateway([{"items": facts}])).create_checklist(ChecklistAtomizationRequest("p", wording))
+    _repository(tmp_path)
+    (tmp_path / "reservation_book.py").write_text("import requests\n")
+    revision = _commit_all(tmp_path, "external dependency")
+    gateway = FakeReasoningGateway([])
+    catalog = GitAcceptedTestCatalog(tmp_path, revision)
+    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
+    records = tuple([await routed.reconcile(RoutedChecklistRequest("p", fact, wording, [])) for fact in checklist.items])
+    assert [record["evidence_policy"] for record in records] == ["engineering_policy", "engineering_policy", "dependency_free"]
+    assert [record["answer"] for record in records] == ["NOT_APPLICABLE", "NOT_APPLICABLE", "NO"]
+    assert reconciliation_satisfied(records[:2])
+    assert not reconciliation_satisfied(records)
+    assert gateway.requests == []

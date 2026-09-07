@@ -11,6 +11,7 @@ from core.development.specification_domain import SourceRequirementClause, Speci
 from core.development.specification_obligations import EvidencePolicy, ObligationModality, explicit_modality
 
 ChecklistItem = SpecificationChecklistItem | SourceRequirementClause
+ENGINEERING_PROFILE_QUALITIES = frozenset({"small", "direct", "readable"})
 
 
 class EvidenceStatus(str, Enum):
@@ -18,6 +19,7 @@ class EvidenceStatus(str, Enum):
     FAIL = "fail"
     UNSUPPORTED = "unsupported_evidence_policy"
     NOT_REQUIRED = "not_required"
+    ENGINEERING_COVERED = "covered_by_engineering_policy"
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,7 @@ class EvidenceResult:
 
     def to_record(self, item: ChecklistItem) -> dict[str, object]:
         answer = "YES" if self.status == EvidenceStatus.PASS else "NO"
-        if self.status == EvidenceStatus.NOT_REQUIRED:
+        if self.status in {EvidenceStatus.NOT_REQUIRED, EvidenceStatus.ENGINEERING_COVERED}:
             answer = "NOT_APPLICABLE"
         return {"checklist_ref": item.ref, "answer": answer,
                 "accepted_test_names": [], "rationale": "; ".join(self.details),
@@ -100,6 +102,8 @@ def _policy(kind: str, modality: ObligationModality, subject: str) -> EvidencePo
         return EvidencePolicy.STORAGE
     if modality == ObligationModality.FORBIDDEN and kind in {"constraint", "quality"}:
         return EvidencePolicy.PUBLIC_SURFACE
+    if kind == "quality" and modality == ObligationModality.REQUIRED and subject.strip() in ENGINEERING_PROFILE_QUALITIES:
+        return EvidencePolicy.ENGINEERING
     if kind in {"constraint", "quality"}:
         return EvidencePolicy.QUALITY
     return EvidencePolicy.BEHAVIORAL
@@ -111,5 +115,32 @@ def reconciliation_satisfied(records: tuple[dict[str, object], ...]) -> bool:
             and item.get("evidence_policy") == EvidencePolicy.NON_GOAL.value
             and item.get("evidence_status") == EvidenceStatus.NOT_REQUIRED.value
             and item.get("findings") == []
-        ) for item in records
+        ) or engineering_policy_covered(item) for item in records
     )
+
+
+def engineering_policy_covered(record: dict[str, object]) -> bool:
+    """Accept only the explicit delegation record, never arbitrary NOT_APPLICABLE."""
+    if not (
+        record.get("answer") == "NOT_APPLICABLE"
+        and record.get("evidence_policy") == EvidencePolicy.ENGINEERING.value
+        and record.get("evidence_status") == EvidenceStatus.ENGINEERING_COVERED.value
+        and record.get("findings") == []
+        and record.get("accepted_test_names") == []
+        and record.get("response_attempts") == []
+    ):
+        return False
+    source = record.get("source_item")
+    if not isinstance(source, dict) or source.get("modality") != ObligationModality.REQUIRED.value:
+        return False
+    try:
+        item = SpecificationChecklistItem.from_dict(source)
+        return (
+            item.ref == record.get("checklist_ref")
+            and bool(item.source_quote)
+            and bool(item.subject)
+            and bool(re.search(r"\b" + re.escape(item.subject.lower()) + r"\b", item.source_quote.lower()))
+            and EvidencePolicyRouter().route(item).policy == EvidencePolicy.ENGINEERING
+        )
+    except (KeyError, TypeError, ValueError):
+        return False

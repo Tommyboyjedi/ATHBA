@@ -18,6 +18,7 @@ class EvidencePolicy(str, Enum):
     PUBLIC_SURFACE = "forbidden_public_surface"
     NON_GOAL = "non_goal_scope"
     QUALITY = "static_quality"
+    ENGINEERING = "engineering_policy"
     UNSUPPORTED = "unsupported_evidence_policy"
 
 

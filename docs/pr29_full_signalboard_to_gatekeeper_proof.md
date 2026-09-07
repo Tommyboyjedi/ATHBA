@@ -664,3 +664,25 @@ mypy for all 12 changed/new production modules, compileall, and diff-check passe
 The earlier full run was intentionally interrupted after 360 passes because review
 changed the source; it is retained as incomplete, not counted as a validation pass.
 Evidence: `evidence/pr29-modality-evidence-routing-20260907/`.
+
+## 2026-09-07: engineering-quality policy coverage
+
+The known atomic qualities `small`, `direct`, and `readable` remain required
+quality items in the independent original-source checklist. Final reconciliation
+now records `engineering_policy` / `covered_by_engineering_policy` with
+`NOT_APPLICABLE`: enforcement is delegated to ATHBA's engineering/coding-quality
+policy, not claimed as semantic or mathematical proof. No test evidence, LLM
+judgment, or source inspection is used for this delegation. Completion accepts
+only the matching typed coverage record with a traceable required quality item;
+arbitrary `NOT_APPLICABLE` records do not qualify.
+
+Dependency-free remains a separate deterministic dependency obligation, including
+in compound requirements. Existing measurable coding-principles limits still use
+their deterministic verifier. Unknown/unconfigured quality language (for example,
+beautiful) remains `unsupported_evidence_policy` and fails closed. The
+latest-payload Gatekeeper semantic issue and all behavioral reconciliation
+prompts/semantics remain intentionally untouched. No live model calls or proof
+runs were made; `MODEL_CALLS_MADE=0`. No commit or push is part of this correction.
+
+Validation: focused 105 passed; full deterministic suite 806 passed (exit 0).
+Coding-principles, configured and changed-module mypy, compileall, and diff-check passed.

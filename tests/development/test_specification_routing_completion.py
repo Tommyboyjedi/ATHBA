@@ -13,9 +13,9 @@ from tests.development.test_pr23_strict_tdd_runner import prevent_live_boundarie
 
 @pytest.mark.parametrize("unsupported", [False, True])
 def test_mixed_final_routing_preserves_completed_work_and_original_checklist(tmp_path, monkeypatch, capsys, unsupported):
-    source = fixture.REQUIREMENT + " Deletion is not required. Component must be dependency-free."
+    source = fixture.REQUIREMENT + " Deletion is not required. Component must be dependency-free. Keep the component small, direct and readable."
     if unsupported:
-        source += " Keep the component direct."
+        source += " Make the component beautiful."
     monkeypatch.setattr(fixture, "REQUIREMENT", source)
     original = fixture.Reasoning.reason
     state, evidence = tmp_path / "state", tmp_path / "evidence"
@@ -39,8 +39,10 @@ def test_mixed_final_routing_preserves_completed_work_and_original_checklist(tmp
                 ("Deletion is not required.", "non_goal", "Deletion", "constraint"),
                 ("Component must be dependency-free.", "required", "dependency-free", "quality"),
             ]
+            obligations.extend(("Keep the component small, direct and readable.", "required", quality, "quality")
+                               for quality in ("small", "direct", "readable"))
             if unsupported:
-                obligations.append(("Keep the component direct.", "required", "direct", "quality"))
+                obligations.append(("Make the component beautiful.", "required", "beautiful", "quality"))
             for index, (text, modality, subject, kind) in enumerate(obligations, start=2):
                 payload["items"].append(dict(ref=f"CHK-{index}", text=text, source_quote=text,
                                              modality=modality, subject=subject, kind=kind))
@@ -64,10 +66,11 @@ def test_mixed_final_routing_preserves_completed_work_and_original_checklist(tmp
     assert current.canonical_development_base == before["sha"]
     assert frozen_files() == before["files"]
     results = current.final_reconciliation
-    assert [record["answer"] for record in results] == ["YES", "NOT_APPLICABLE", "YES"] + (["NO"] if unsupported else [])
+    assert [record["answer"] for record in results] == ["YES", "NOT_APPLICABLE", "YES"] + ["NOT_APPLICABLE"] * 3 + (["NO"] if unsupported else [])
     assert results[1]["evidence_policy"] == "non_goal_scope"
     assert results[2]["evidence_policy"] == "dependency_free"
     assert all(record["accepted_test_names"] == [] for record in results[1:])
+    assert all(record["evidence_status"] == "covered_by_engineering_policy" for record in results[3:6])
     if unsupported:
         assert current.blocked_reason == "specification_gatekeeper_failed"
         assert results[-1]["evidence_status"] == "unsupported_evidence_policy"
