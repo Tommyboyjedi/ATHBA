@@ -4,7 +4,9 @@ from dataclasses import replace
 
 import pytest
 
-from core.development.specification_atomization import ChecklistAtomizationRequest, SpecificationChecklistPlanner
+from core.development.specification_atomization import (
+    ChecklistAtomizationFailure, ChecklistAtomizationRequest, SpecificationChecklistPlanner,
+)
 from core.development.specification_domain import SpecificationChecklistItem
 from core.development.specification_evidence_policy import (
     EvidencePolicyRouter, EvidenceStatus, RevisionFile, SpecificationSnapshot, reconciliation_satisfied,
@@ -86,8 +88,10 @@ async def test_atomizer_rejects_missing_modality_or_source_drift(mutation):
         fact.update(modality="required", source_quote="Deletion")
     else:
         fact["source_quote"] = "Deletion is optional."
-    with pytest.raises(ValueError):
-        await SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [fact]}])).create_checklist(ChecklistAtomizationRequest("p", source))
+    with pytest.raises(ChecklistAtomizationFailure):
+        await SpecificationChecklistPlanner(FakeReasoningGateway([
+            {"items": [fact]}, {"items": [fact]},
+        ])).create_checklist(ChecklistAtomizationRequest("p", source))
 
 
 def test_non_goal_absence_never_demands_test_proof():

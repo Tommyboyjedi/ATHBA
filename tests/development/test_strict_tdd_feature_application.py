@@ -4,7 +4,9 @@ import pytest
 
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
 from core.development.project_environment import ProjectEnvironmentService
+from core.development.specification_atomization import ChecklistAtomizationFailure
 from core.development.specification_domain import (
+    ChecklistAtomizationAttempt,
     SourceRequirementClause,
     SpecificationChecklist,
     SpecificationChecklistItem,
@@ -65,6 +67,16 @@ class Gatekeeper:
         self.requests.append(value)
         item = SpecificationChecklistItem("CHK-1", "Widget grows.", "behavior")
         return SpecificationGatekeeperRunState(SpecificationChecklist(value.contract.project_id, value.contract.requirement_source, [item]))
+
+
+class FailingGatekeeper:
+    def __init__(self, failure):
+        self.failure = failure
+        self.requests = []
+
+    async def ensure_state(self, value):
+        self.requests.append(value)
+        raise self.failure
 
 
 class Scenarios:
@@ -129,6 +141,29 @@ def service(tmp_path, planned):
         )
     )
     return application, planner, gatekeeper, scenarios, reconciler
+
+
+@pytest.mark.asyncio
+async def test_initial_atomization_failure_is_durably_blocked_without_a_third_submission(tmp_path):
+    application, _planner, _gatekeeper, scenarios, reconciler = service(tmp_path, contract("feature"))
+    attempts = (
+        ChecklistAtomizationAttempt("{not json", "specification checklist response was not valid JSON"),
+        ChecklistAtomizationAttempt("{still invalid", "specification checklist response was not valid JSON"),
+    )
+    gatekeeper = FailingGatekeeper(ChecklistAtomizationFailure(attempts))
+    application.gatekeeper = gatekeeper
+
+    result = await application.run(request())
+
+    persisted = application.states.load("feature")
+    assert result.current_status == persisted.status == "blocked"
+    assert result.blocked_reason == persisted.blocked_reason == "specification_checklist_atomization_failed"
+    assert persisted.atomization_failure == attempts
+    assert len(gatekeeper.requests) == 1
+    assert scenarios.requests == reconciler.calls == []
+    replay = await application.run(request())
+    assert replay == result
+    assert len(gatekeeper.requests) == 1
 
 
 @pytest.mark.asyncio

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from core.development.tdd_progression import SpecificationChecklist, SpecificationChecklistItem
+from core.development.specification_domain import ChecklistAtomizationAttempt
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 
 
@@ -16,6 +17,23 @@ from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 class ChecklistAtomizationRequest:
     project_id: str
     requirement_text: str
+
+
+MAX_ATOMIZER_SUBMISSIONS = 2
+
+
+class ChecklistAtomizationFailure(Exception):
+    def __init__(self, attempts: tuple[ChecklistAtomizationAttempt, ...]):
+        if len(attempts) != MAX_ATOMIZER_SUBMISSIONS:
+            raise ValueError("atomization failure requires both bounded attempts")
+        self.attempts = attempts
+        super().__init__("specification checklist atomization failed after bounded schema repair")
+
+
+@dataclass(frozen=True)
+class ChecklistAtomizationResult:
+    checklist: SpecificationChecklist
+    attempts: tuple[ChecklistAtomizationAttempt, ...]
 
 
 @dataclass(frozen=True)
@@ -59,16 +77,27 @@ class SpecificationChecklistPlanner:
         self.gateway = gateway
 
     async def create_checklist(self, request: ChecklistAtomizationRequest) -> SpecificationChecklist:
+        return (await self.atomize(request)).checklist
+
+    async def atomize(self, request: ChecklistAtomizationRequest) -> ChecklistAtomizationResult:
         result = await self.gateway.reason(_reasoning_request(request))
-        payload = _json_object(result.text, label="specification checklist")
-        raw_items = payload.get("items")
-        if not isinstance(raw_items, list):
-            raise ValueError("specification checklist response must include an items list")
-        return SpecificationChecklist(
-            project_id=request.project_id,
-            requirement_text=request.requirement_text,
-            items=[_grounded_item(dict(item), request.requirement_text) for item in raw_items],
-        )
+        try:
+            checklist = _decode_checklist(request, result.text)
+        except (ValueError, KeyError, TypeError) as error:
+            initial_attempt = ChecklistAtomizationAttempt(result.text, str(error))
+            repaired = await self.gateway.reason(_atomization_repair_request(request, result.text, str(error)))
+            try:
+                checklist = _decode_checklist(request, repaired.text)
+            except (ValueError, KeyError, TypeError) as repair_error:
+                raise ChecklistAtomizationFailure((
+                    initial_attempt,
+                    ChecklistAtomizationAttempt(repaired.text, str(repair_error)),
+                )) from repair_error
+            return ChecklistAtomizationResult(
+                checklist,
+                (initial_attempt, ChecklistAtomizationAttempt(repaired.text)),
+            )
+        return ChecklistAtomizationResult(checklist, (ChecklistAtomizationAttempt(result.text),))
 
     async def split_item(self, request: ChecklistSplitRequest) -> ChecklistSplitResponse:
         result = await self.gateway.reason(_split_reasoning_request(request))
@@ -113,6 +142,33 @@ def _reasoning_request(request: ChecklistAtomizationRequest) -> ReasoningRequest
     )
 
 
+def _atomization_repair_request(
+    request: ChecklistAtomizationRequest,
+    invalid_response: str,
+    validation_error: str,
+) -> ReasoningRequest:
+    return ReasoningRequest(
+        purpose="athba_specification_checklist_repair",
+        prompt=json.dumps({
+            "instruction": "Repair the invalid ATHBA Specification Gatekeeper checklist. Return the complete corrected checklist as raw JSON only.",
+            "project_id": request.project_id,
+            "original_requirement": request.requirement_text,
+            "invalid_checklist_draft": invalid_response,
+            "validation_error": validation_error,
+            "required_output_schema": _checklist_output_schema(),
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+                "return the complete corrected checklist",
+            ],
+        }, indent=2, sort_keys=True),
+        project_id=request.project_id,
+        requires_large_context=False,
+    )
+
+
 def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
     return json.dumps(
         {
@@ -127,18 +183,7 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
                 "include exactly one top-level items array",
                 "do not add extra fields outside the required schema",
             ],
-            "required_output_schema": {
-                "items": [
-                    {
-                        "ref": "string",
-                        "text": "string",
-                        "kind": "behavior|validation|invariant|constraint|quality",
-                        "modality": "required|forbidden|non_goal",
-                        "source_quote": "verbatim contiguous excerpt from requirement_text",
-                        "subject": "verbatim capability or quality phrase within source_quote",
-                    }
-                ]
-            },
+            "required_output_schema": _checklist_output_schema(),
             "rules": [
                 "one semantic obligation per item",
                 "modality is mandatory: required, forbidden, or non_goal; kind remains independent",
@@ -160,6 +205,31 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
         },
         indent=2,
         sort_keys=True,
+    )
+
+
+def _checklist_output_schema() -> dict[str, object]:
+    return {
+        "items": [{
+            "ref": "string",
+            "text": "string",
+            "kind": "behavior|validation|invariant|constraint|quality",
+            "modality": "required|forbidden|non_goal",
+            "source_quote": "verbatim contiguous excerpt from requirement_text",
+            "subject": "verbatim capability or quality phrase within source_quote",
+        }]
+    }
+
+
+def _decode_checklist(request: ChecklistAtomizationRequest, response: str) -> SpecificationChecklist:
+    payload = _json_object(response, label="specification checklist")
+    raw_items = payload.get("items")
+    if not isinstance(raw_items, list):
+        raise ValueError("specification checklist response must include an items list")
+    return SpecificationChecklist(
+        project_id=request.project_id,
+        requirement_text=request.requirement_text,
+        items=[_grounded_item(dict(item), request.requirement_text) for item in raw_items],
     )
 
 

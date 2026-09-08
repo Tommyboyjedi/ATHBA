@@ -5,6 +5,7 @@ import pytest
 
 from core.development.behavior_contract_coordinator import BehaviorContractCoordinator, SemanticReviewRequest, StepDecisionRequest
 from core.development.specification_gap_adapter import matching_contract_source_refs_for_clause
+from core.development.specification_atomization import ChecklistAtomizationFailure, MAX_ATOMIZER_SUBMISSIONS
 from core.development.specification_gatekeeper import (
     ChecklistAtomizationRequest,
     GatekeeperAssessmentRequest,
@@ -127,6 +128,19 @@ def requirement_text() -> str:
         "The implementation must be in-memory only, dependency-free, small, direct, readable Python 3.14, "
         "suitable for pytest, and free of unnecessary abstractions."
     )
+
+
+def non_goal_checklist_payload(source="Deletion is optional.", *, kind="constraint", modality="non_goal"):
+    return {
+        "items": [{
+            "ref": "SPEC-NON-GOAL",
+            "text": source,
+            "kind": kind,
+            "modality": modality,
+            "source_quote": source,
+            "subject": "Deletion",
+        }]
+    }
 
 
 def checklist_payload():
@@ -307,18 +321,93 @@ async def test_gatekeeper_atomization_request_remains_independent_of_development
 
 
 @pytest.mark.asyncio
-async def test_malformed_or_invalid_checklist_output_fails_closed():
-    planner = SpecificationChecklistPlanner(FakeReasoningGateway(["not json"]))
-    with pytest.raises(ValueError, match="specification checklist response was not valid JSON"):
-        await planner.create_checklist(
-            ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
-        )
+async def test_valid_atomization_uses_one_submission_and_records_it():
+    gateway = FakeReasoningGateway([checklist_payload()])
+    result = await SpecificationChecklistPlanner(gateway).atomize(
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    )
 
-    bad_kind = SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [{"ref": "SPEC-1", "text": "x", "kind": "string", "modality": "required", "source_quote": "x", "subject": "x"}]}]))
-    with pytest.raises(ValueError, match="unsupported checklist item kind"):
-        await bad_kind.create_checklist(
-            ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
-        )
+    assert result.checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
+    assert len(gateway.requests) == len(result.attempts) == 1
+    assert gateway.requests[0].purpose == "athba_specification_checklist"
+    assert result.attempts[0].validation_error is None
+
+
+@pytest.mark.asyncio
+async def test_non_goal_kind_is_repaired_without_reinterpreting_it():
+    source = "Deletion is optional."
+    malformed = non_goal_checklist_payload(source, kind="non_goal", modality="required")
+    repaired = non_goal_checklist_payload(source)
+    gateway = FakeReasoningGateway([malformed, repaired])
+
+    result = await SpecificationChecklistPlanner(gateway).atomize(ChecklistAtomizationRequest("p", source))
+
+    assert result.checklist.items[0].kind == "constraint"
+    assert result.checklist.items[0].modality == "non_goal"
+    assert len(gateway.requests) == len(result.attempts) == 2
+    assert "unsupported checklist item kind: non_goal" in str(result.attempts[0].validation_error)
+    repair_prompt = json.loads(gateway.requests[1].prompt)
+    assert gateway.requests[1].purpose == "athba_specification_checklist_repair"
+    assert repair_prompt["original_requirement"] == source
+    assert repair_prompt["validation_error"] == result.attempts[0].validation_error
+    assert repair_prompt["required_output_schema"]["items"][0]["kind"] == "behavior|validation|invariant|constraint|quality"
+    assert repair_prompt["required_output_schema"]["items"][0]["modality"] == "required|forbidden|non_goal"
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_is_repaired_through_normal_validation():
+    gateway = FakeReasoningGateway(["{not json", checklist_payload()])
+
+    checklist = await SpecificationChecklistPlanner(gateway).create_checklist(
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    )
+
+    assert checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_specification_checklist", "athba_specification_checklist_repair",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_grounding_is_repaired_through_normal_validation():
+    malformed = checklist_payload()
+    malformed["items"][0]["source_quote"] = "Invented requirement."
+    gateway = FakeReasoningGateway([malformed, checklist_payload()])
+
+    checklist = await SpecificationChecklistPlanner(gateway).create_checklist(
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    )
+
+    assert checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
+    assert len(gateway.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_malformed_repair_fails_closed_after_exactly_two_durable_attempts():
+    source = "Deletion is optional."
+    gateway = FakeReasoningGateway([
+        non_goal_checklist_payload(source, kind="non_goal", modality="required"),
+        "{not json",
+        checklist_payload(),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).create_checklist(ChecklistAtomizationRequest("p", source))
+
+    failure = raised.value
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS == len(failure.attempts)
+    assert failure.attempts[0].response == json.dumps(non_goal_checklist_payload(source, kind="non_goal", modality="required"))
+    assert failure.attempts[0].validation_error == "unsupported checklist item kind: non_goal"
+    assert failure.attempts[1].response == "{not json"
+    assert failure.attempts[1].validation_error == "specification checklist response was not valid JSON"
+    assert len(gateway.responses) == 1
+
+
+def test_non_goal_remains_invalid_as_kind_and_valid_as_modality():
+    source = "Deletion is optional."
+    with pytest.raises(ValueError, match="unsupported checklist item kind: non_goal"):
+        SpecificationChecklistItem("SPEC-1", source, "non_goal", "non_goal", source, "Deletion")
+    assert SpecificationChecklistItem("SPEC-1", source, "constraint", "non_goal", source, "Deletion").modality == "non_goal"
 
 
 def test_checklist_round_trip_defaults_and_duplicates_are_validated():

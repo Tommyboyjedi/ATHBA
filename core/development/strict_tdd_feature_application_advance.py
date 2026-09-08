@@ -12,6 +12,7 @@ from core.development.behavior_contract_domain import BehaviorContract, Behavior
 from core.development.project_environment import DevelopmentProject
 from core.development.behavior_contract_coordinator import ContractPlanningRequest
 from core.development.specification_assessment import GatekeeperStateRequest
+from core.development.specification_atomization import ChecklistAtomizationFailure
 from core.development.strict_tdd_feature_application import (
     FeatureReconciliationRequest,
     FeatureScenarioRequest,
@@ -125,7 +126,17 @@ async def _persist_checklist(
     project: DevelopmentProject,
 ) -> FeatureAdvanceResult:
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
-    checklist = await service.gatekeeper.ensure_state(GatekeeperStateRequest(contract, None))
+    try:
+        checklist = await service.gatekeeper.ensure_state(GatekeeperStateRequest(contract, None))
+    except ChecklistAtomizationFailure as error:
+        blocked = replace(
+            state,
+            status=StrictTddFeatureStatus.BLOCKED.value,
+            blocked_reason="specification_checklist_atomization_failed",
+            atomization_failure=error.attempts,
+        )
+        service.states.save(blocked)
+        return _result_for(FeatureTransitionKind.BLOCKED, blocked, project, blocked.blocked_reason)
     updated = replace(
         state,
         status=StrictTddFeatureStatus.RUNNING.value,

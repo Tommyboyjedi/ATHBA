@@ -9,6 +9,7 @@ from typing import Any
 
 from core.development.reconciliation_response import ReconciliationFailure
 from core.development.behavior_replan_domain import BehaviorReplanRecord
+from core.development.specification_domain import ChecklistAtomizationAttempt
 
 
 class StrictTddFeatureStatus(str, Enum):
@@ -97,6 +98,7 @@ class StrictTddFeatureState:
     reconciliation_failure: ReconciliationFailure | None = None
     behavior_replans: tuple[BehaviorReplanRecord, ...] = ()
     reconciliation_progress: tuple[dict[str, object], ...] = ()
+    atomization_failure: tuple[ChecklistAtomizationAttempt, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -118,6 +120,7 @@ class StrictTddFeatureState:
             "behavior_replans": [item.to_dict() for item in self.behavior_replans],
             "reconciliation_failure": None if self.reconciliation_failure is None else self.reconciliation_failure.to_dict(),
             "completed_behaviors": [asdict(item) for item in self.completed_behaviors],
+            "atomization_failure": [item.to_dict() for item in self.atomization_failure],
         }
 
     @classmethod
@@ -142,6 +145,7 @@ class StrictTddFeatureState:
             None if payload.get("reconciliation_failure") is None else ReconciliationFailure.from_dict(payload["reconciliation_failure"]),
             tuple(BehaviorReplanRecord.from_dict(item) for item in payload.get("behavior_replans", ())),
             tuple(dict(item) for item in payload.get("reconciliation_progress", ())),
+            tuple(ChecklistAtomizationAttempt.from_dict(dict(item)) for item in payload.get("atomization_failure", ())),
         )
 
 
