@@ -6,6 +6,7 @@ from core.development.specification_evidence_policy import reconciliation_satisf
 from dataclasses import replace
 
 from core.development.reconciliation_response import ReconciliationFailure
+from core.development.reconciliation_progress import incompatible
 
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
 from core.development.project_environment import DevelopmentProject
@@ -79,6 +80,15 @@ async def advance(
         return _select_behavior(service, state, project, behavior.ref)
     if not state.final_reconciliation:
         return await _reconcile(service, state, project, contract)
+    if state.reconciliation_progress:
+        try:
+            restored = await service.reconciler.reconcile(FeatureReconciliationRequest(
+                contract, state.completed_behaviors, dict(state.gatekeeper_payload or {}),
+                str(state.canonical_development_base), state.reconciliation_progress))
+            if restored != state.final_reconciliation:
+                raise incompatible("completed reconciliation differs from durable progress")
+        except ReconciliationFailure as error:
+            return _reconciliation_blocked(service, state, project, error)
     completed = replace(state, status=StrictTddFeatureStatus.COMPLETED.value)
     service.states.save(completed)
     return _result_for(FeatureTransitionKind.FEATURE_COMPLETED, completed, project)
@@ -143,19 +153,20 @@ async def _reconcile(
     project: DevelopmentProject,
     contract: BehaviorContract,
 ) -> FeatureAdvanceResult:
+    def checkpoint(progress: tuple[dict[str, object], ...]) -> None:
+        nonlocal state
+        state = replace(state, reconciliation_progress=progress)
+        service.states.save(state)
+
     try:
         reconciliation = await service.reconciler.reconcile(
             FeatureReconciliationRequest(
                 contract, state.completed_behaviors, dict(state.gatekeeper_payload or {}),
-                str(state.canonical_development_base),
+                str(state.canonical_development_base), state.reconciliation_progress, checkpoint,
             )
         )
     except ReconciliationFailure as error:
-        blocked = replace(state, status=StrictTddFeatureStatus.BLOCKED.value,
-                          blocked_reason=error.kind.value, reconciliation_failure=error)
-        service.states.save(blocked)
-        return _result_for(FeatureTransitionKind.BLOCKED, blocked, project,
-                           error.kind.value, reasoning=bool(error.attempts))
+        return _reconciliation_blocked(service, state, project, error)
     all_yes = reconciliation_satisfied(reconciliation)
     updated = replace(
         state,
@@ -173,6 +184,15 @@ async def _reconcile(
             reasoning=True,
         )
     return _result_for(FeatureTransitionKind.RECONCILIATION_COMPLETED, updated, project, reasoning=True)
+
+
+def _reconciliation_blocked(service: StrictTddFeatureApplicationService, state: StrictTddFeatureState,
+                            project: DevelopmentProject, error: ReconciliationFailure) -> FeatureAdvanceResult:
+    blocked = replace(state, status=StrictTddFeatureStatus.BLOCKED.value,
+                      blocked_reason=error.kind.value, reconciliation_failure=error)
+    service.states.save(blocked)
+    return _result_for(FeatureTransitionKind.BLOCKED, blocked, project,
+                       error.kind.value, reasoning=bool(error.attempts))
 
 
 def _next_behavior(state: StrictTddFeatureState, contract: BehaviorContract):

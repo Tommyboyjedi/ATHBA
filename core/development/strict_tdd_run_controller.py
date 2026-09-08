@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from core.development.strict_tdd_feature_application import StrictTddFeatureApplicationService
+from core.development.reconciliation_resume import reconciliation_resume_available
 from core.development.strict_tdd_lifecycle_evidence import (
     LifecycleEventAppendRequest,
     LifecycleEventDraft,
@@ -86,7 +87,10 @@ class StrictTddRunController:
         if state.pending_transition_receipt is not None:
             return _deliver(self, request, state, context, state.pending_transition_receipt)
         if state.transition_in_flight is not None:
-            return _recover_required(self, request, state, context)
+            if not reconciliation_resume_available(self.application.states.load(request.project_id)):
+                return _recover_required(self, request, state, context)
+            state = replace(state, status=StrictTddRunStatus.RUNNING, reason=None)
+
         if state.status in {StrictTddRunStatus.COMPLETED, StrictTddRunStatus.BLOCKED, StrictTddRunStatus.STALLED, StrictTddRunStatus.RECOVERY_REQUIRED, StrictTddRunStatus.TRANSITION_LIMIT_REACHED}:
             return _report_result(self, context, state, None)
         marker = StrictTddTransitionInFlight(state.total_application_transition_count + 1)

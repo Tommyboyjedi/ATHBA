@@ -39,6 +39,15 @@ def test_completed_tdd_preserved_cli_blocks_and_restart_does_not_repeat(tmp_path
             payload = json.loads(result.text)
             payload['items'].append({'ref': 'CHK-2', 'text': 'Second independent criterion.', 'kind': 'behavior', 'modality': 'required', 'source_quote': json.loads(request.prompt)['requirement_text'], 'subject': 'ToggleSwitch'})
             return ReasoningResult(json.dumps(payload))
+        if request.purpose == 'athba_specification_checklist_split':
+            self.call_count += 1
+            self.log.append(request)
+            # Keep CHK-1 unresolved so CHK-2 still exercises the intended
+            # malformed-response/provider failure after a completed NO record.
+            return ReasoningResult(json.dumps({
+                'disposition': 'unsplittable',
+                'rationale': 'No smaller grounded obligation is available in this scenario.',
+            }))
         if 'checklist_test_reconciliation' not in request.purpose:
             return await original(self, request)
         self.call_count += 1
@@ -75,6 +84,18 @@ def test_completed_tdd_preserved_cli_blocks_and_restart_does_not_repeat(tmp_path
     assert diagnostic.checklist_ref == 'CHK-2'
     assert diagnostic.completed_results[0]['answer'] == 'NO'
     assert diagnostic.completed_results[0]['checklist_ref'] == 'CHK-1'
+    unresolved = diagnostic.completed_results[0]
+    assert unresolved['status'] == 'unsplittable'
+    assert unresolved['blocked_reason'] == 'specification_gatekeeper_unsplittable'
+    split_requests = [request for request in log if request.purpose == 'athba_specification_checklist_split']
+    assert len(split_requests) == 1
+    split_prompt = json.loads(split_requests[0].prompt)
+    assert split_prompt['parent']['ref'] == 'CHK-1'
+    assert split_prompt['individual_test_no_results'] == unresolved['individual_test_attempts']
+    assert [(attempt['test_name'], attempt['answer']) for attempt in unresolved['individual_test_attempts']] == [
+        ('tests/test_toggle_switch.py::test_B_1', 'NO')
+    ]
+    assert split_prompt['final_trusted_revision'] == before['sha']
     assert diagnostic.accepted_test_names == ('tests/test_toggle_switch.py::test_B_1',)
     assert len(diagnostic.attempts) == (2 if failure == 'malformed' else 1)
     persisted = StrictTddRunStateRepository(state / 'runs').load('toggle-run')

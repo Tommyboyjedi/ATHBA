@@ -17,13 +17,18 @@ from core.development.project_environment import ProjectEnvironmentService
 from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
 from core.development.scenario_drafting import ScenarioDraftingService
 from core.development.scenario_drafting_domain import ScenarioDraftRequest, ScenarioRepositoryFacts
+from core.development.checklist_reconciliation_tree import (
+    ChecklistReconciliationTree, ChecklistTreeContext, validate_persisted_tree,
+)
+from core.development.reconciliation_progress import ReconciliationJournal, ReconciliationJournalRequest, evidence_digest
+from core.development.specification_domain import SpecificationChecklistItem
 from core.development.specification_reconciliation import (
     ChecklistItemReconciler,
     CompletedMicrocycleEvidenceCollector,
     GitAcceptedTestCatalog,
 )
 from core.development.reconciliation_response import ReconciliationFailure
-from core.development.specification_evidence_routing import RoutedChecklistReconciler, RoutedChecklistRequest, required_source_subjects
+from core.development.specification_evidence_routing import RoutedChecklistReconciler, required_source_subjects
 from core.development.microcycle_domain import MicrocycleState
 from core.development.strict_microcycle import StrictMicrocycleRequest, StrictMicrocycleService
 from core.development.strict_tdd_feature_application import (
@@ -80,15 +85,28 @@ class CompletedFeatureReconciler:
         requested_subjects = required_source_subjects(gatekeeper.checklist)
         languages = {state.model.language_id for state in states}
         language = next(iter(languages)) if len(languages) == 1 else ""
+        identity = evidence_digest({
+            "checklist": gatekeeper.checklist.to_dict(), "language": language,
+            "repository": str(self.repository_root.resolve()),
+            "accepted": [{"evidence": evidence.to_dict(), "verified_source": catalog.verified_source(evidence)}
+                         for evidence in sorted(accepted, key=lambda entry: entry.test_name)],
+        })
+        journal = ReconciliationJournal(ReconciliationJournalRequest(
+            request.canonical_revision, identity, request.reconciliation_progress, request.checkpoint,
+            tuple(gatekeeper.checklist.item_refs())))
+        roots = [SpecificationChecklistItem.from_dict(item.to_dict()) for item in gatekeeper.checklist.items]
+        validate_persisted_tree(journal, roots)
+        tree = ChecklistReconciliationTree(journal, self.reasoning_gateway)
         results: list[dict[str, object]] = []
-        for item in gatekeeper.checklist.items:
+        for item in roots:
             try:
-                result = await item_reconciler.reconcile(
-                    RoutedChecklistRequest(gatekeeper.checklist.project_id, item, gatekeeper.checklist.requirement_text, accepted, language, requested_subjects)
-                )
+                context = ChecklistTreeContext(item_reconciler, gatekeeper.checklist.project_id,
+                    gatekeeper.checklist.requirement_text, accepted, language,
+                    requested_subjects, request.canonical_revision, item)
+                results.extend(await tree.reconcile(context))
             except ReconciliationFailure as error:
-                raise replace(error, completed_results=tuple(results)) from error
-            results.append(result)
+                completed = tuple(dict(entry.result) for entry in journal.items if entry.result is not None)
+                raise replace(error, completed_results=completed) from error
         return tuple(results)
 
     def _state(self, scenario_id: str):

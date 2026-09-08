@@ -8,9 +8,11 @@ import json
 import subprocess
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
+from typing import Callable
 
 from core.development.reconciliation_response import ReconciliationAttempt, ReconciliationFailure
 from core.development.reconciliation_submission import ReconciliationSubmission
+from core.development.reconciliation_progress import IndividualEvidenceProgress, evidence_digest, incompatible
 from core.development.microcycle_domain import MicrocycleState
 from core.development.tdd_progression import BehaviorContractRunState, SpecificationChecklist
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
@@ -48,6 +50,7 @@ class ChecklistTestReconciliation:
     rationale: str
     response_attempts: tuple[ReconciliationAttempt, ...] = ()
     supplied_test_names: tuple[str, ...] = ()
+    individual_test_attempts: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         if self.answer not in {"YES", "NO"}:
@@ -65,6 +68,7 @@ class ChecklistTestReconciliation:
             "rationale": self.rationale,
             "supplied_test_names": list(self.supplied_test_names),
             "response_attempts": [asdict(attempt) for attempt in self.response_attempts],
+            "individual_test_attempts": [dict(attempt) for attempt in self.individual_test_attempts],
         }
 
 
@@ -74,6 +78,9 @@ class ChecklistReconciliationRequest:
     checklist_ref: str
     checklist_text: str
     accepted: list[AcceptedTestEvidence]
+    progress: tuple[IndividualEvidenceProgress, ...] = ()
+    checkpoint: Callable[[tuple[IndividualEvidenceProgress, ...]], None] | None = None
+    before_call: Callable[[], None] | None = None
 
 
 class GitAcceptedTestCatalog:
@@ -193,30 +200,77 @@ class ChecklistItemReconciler:
         self.catalog = catalog
 
     async def reconcile(self, request: ChecklistReconciliationRequest) -> ChecklistTestReconciliation:
+        """Ask the independent Gatekeeper about one verified test at a time.
+
+        Test identity ordering is stable and no requirement, frontier, or planner
+        provenance participates in selection.  A YES is terminal for this item.
+        """
+        attempts: list[dict[str, object]] = []
+        submissions: list[ReconciliationAttempt] = []
         verified = []
-        for evidence in request.accepted:
+        for evidence in sorted(request.accepted, key=lambda value: value.test_name):
             source = _catalog_verified_source(self.catalog, evidence)
-            verified.append(
-                replace(
-                    evidence,
-                    test_source=source,
-                    final_revision_verified=source is not None,
-                )
-            )
-        prompt_request = replace(request, accepted=verified)
-        try:
-            submission = await ReconciliationSubmission(self.gateway).submit(_reasoning_request(prompt_request))
-        except ReconciliationFailure as error:
-            raise replace(error, checklist_ref=request.checklist_ref,
-                          accepted_test_names=tuple(item.test_name for item in request.accepted)) from error
-        response = submission.response
-        if response.answer == "NO":
-            result = ChecklistTestReconciliation(request.checklist_ref, "NO", [], response.rationale)
-        else:
-            result = _verified_yes_or_no(request.checklist_ref, response.rationale,
-                                         request.accepted, list(response.selected_test_names), self.catalog)
-        return replace(result, response_attempts=submission.attempts,
-                       supplied_test_names=tuple(item.test_name for item in request.accepted))
+            if source is not None:
+                verified.append(replace(evidence, test_source=source, final_revision_verified=True))
+        if len({evidence.test_name for evidence in verified}) != len(verified):
+            raise incompatible("duplicate verified accepted-test identity")
+        progress = list(request.progress)
+        _validate_individual_progress(request, verified, self.catalog)
+        for index, evidence in enumerate(verified):
+            if index < len(progress):
+                saved = progress[index]
+                attempts.append(saved.to_dict())
+                submissions.extend(saved.response_attempts)
+                if saved.answer == "YES":
+                    return ChecklistTestReconciliation(request.checklist_ref, "YES", [evidence.test_name],
+                        saved.rationale, tuple(submissions), (evidence.test_name,), tuple(attempts))
+                continue
+            single = replace(request, accepted=[evidence])
+            if request.before_call is not None:
+                request.before_call()
+            try:
+                submission = await ReconciliationSubmission(self.gateway).submit(_reasoning_request(single))
+            except ReconciliationFailure as error:
+                raise replace(error, checklist_ref=request.checklist_ref,
+                              accepted_test_names=(evidence.test_name,)) from error
+            submissions.extend(submission.attempts)
+            response = submission.response
+            if response.answer == "YES":
+                result = _verified_yes_or_no(request.checklist_ref, response.rationale,
+                                             [evidence], list(response.selected_test_names), self.catalog)
+            else:
+                result = ChecklistTestReconciliation(request.checklist_ref, "NO", [], response.rationale)
+            saved = IndividualEvidenceProgress(request.checklist_ref, evidence.test_name,
+                evidence_digest(evidence.to_dict()), getattr(self.catalog, "semantic_revision", ""),
+                index, result.answer, result.rationale, submission.attempts)
+            progress.append(saved)
+            if request.checkpoint is not None:
+                request.checkpoint(tuple(progress))
+            attempts.append(saved.to_dict())
+            if result.answer == "YES":
+                return replace(result, response_attempts=tuple(submissions),
+                               supplied_test_names=(evidence.test_name,),
+                               individual_test_attempts=tuple(attempts))
+        rationale = (attempts[-1]["rationale"] if attempts else
+                     "No accepted final-revision-verified test was available for this checklist item.")
+        return ChecklistTestReconciliation(
+            request.checklist_ref, "NO", [], str(rationale),
+            tuple(submissions), tuple(item.test_name for item in verified), tuple(attempts),
+        )
+
+
+def _validate_individual_progress(request: ChecklistReconciliationRequest, verified: list[AcceptedTestEvidence],
+                                  catalog: GitAcceptedTestCatalog) -> None:
+    if len(request.progress) > len(verified):
+        raise incompatible("stored individual evidence exceeds verified evidence")
+    for index, saved in enumerate(request.progress):
+        evidence = verified[index]
+        if (saved.checklist_ref != request.checklist_ref or saved.test_name != evidence.test_name
+                or saved.evaluation_order != index
+                or saved.trusted_revision != getattr(catalog, "semantic_revision", "")
+                or saved.evidence_identity != evidence_digest(evidence.to_dict())
+                or (saved.answer == "YES" and index != len(request.progress) - 1)):
+            raise incompatible("individual evidence identity, revision, or evaluation order changed")
 
 
 class TestEvidenceReconciler:
@@ -308,7 +362,7 @@ def _reconciliation_prompt(
             "instruction": "Act as ATHBA's test-evidence reconciler. Return raw JSON only.",
             "checklist_item": {"ref": checklist_ref, "text": checklist_text},
             "accepted_tdd_tests": [entry.to_dict() for entry in accepted],
-            "question": "Is there an accepted unit test that proves this checklist item?",
+            "question": "Does this one accepted unit test prove this checklist item?",
             "required_output": {
                 "answer": "YES|NO",
                 "selected_test_names": ["pytest node ids, only when answer is YES"],
@@ -316,7 +370,7 @@ def _reconciliation_prompt(
             },
             "rules": [
                 "read the supplied test_source and judge the observable behavior it actually proves",
-                "answer YES only when one or more listed accepted tests directly prove the item",
+                "answer YES only when the single listed accepted test directly proves the item",
                 "answer NO when evidence is absent, indirect, or uncertain",
                 "select only tests with final_revision_verified=true",
                 "do not infer semantics merely from requirement references or test names",

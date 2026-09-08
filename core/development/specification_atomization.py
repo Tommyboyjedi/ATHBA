@@ -4,7 +4,9 @@ import json
 import re
 
 from core.development.specification_obligations import grounded_modality
-from dataclasses import dataclass
+from core.development.checklist_split_progress import ChecklistSplitAncestry, rejected_split
+from dataclasses import dataclass, field
+from typing import Sequence
 
 from core.development.tdd_progression import SpecificationChecklist, SpecificationChecklistItem
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
@@ -14,6 +16,40 @@ from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 class ChecklistAtomizationRequest:
     project_id: str
     requirement_text: str
+
+
+@dataclass(frozen=True)
+class ChecklistSplitRequest:
+    project_id: str
+    requirement_text: str
+    parent_ref: str
+    parent_text: str
+    parent_kind: str
+    parent_modality: str
+    parent_source_quote: str
+    parent_subject: str
+    individual_no_results: Sequence[dict[str, object]]
+    final_revision: str
+    ancestry: ChecklistSplitAncestry = field(default_factory=ChecklistSplitAncestry)
+
+
+@dataclass(frozen=True)
+class ChecklistSplitResponse:
+    disposition: str
+    rationale: str
+    children: tuple[SpecificationChecklistItem, ...] = ()
+    attempted_response: str = ""
+    rejection_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.disposition not in {"split", "unsplittable"}:
+            raise ValueError("checklist split disposition must be split or unsplittable")
+        if not self.rationale.strip():
+            raise ValueError("checklist split rationale is required")
+        if self.disposition == "split" and len(self.children) < 2:
+            raise ValueError("checklist split requires at least two children")
+        if self.disposition == "unsplittable" and self.children:
+            raise ValueError("unsplittable checklist split cannot contain children")
 
 
 class SpecificationChecklistPlanner:
@@ -33,6 +69,36 @@ class SpecificationChecklistPlanner:
             requirement_text=request.requirement_text,
             items=[_grounded_item(dict(item), request.requirement_text) for item in raw_items],
         )
+
+    async def split_item(self, request: ChecklistSplitRequest) -> ChecklistSplitResponse:
+        result = await self.gateway.reason(_split_reasoning_request(request))
+        try:
+            split = _decode_split(request, result.text)
+        except (ValueError, KeyError, TypeError) as error:
+            return ChecklistSplitResponse("unsplittable", str(error), attempted_response=result.text,
+                                          rejection_reason="invalid_split_response")
+        return split
+
+
+def _decode_split(request: ChecklistSplitRequest, response: str) -> ChecklistSplitResponse:
+    payload = _json_object(response, label="checklist split")
+    disposition, rationale = payload.get("disposition"), payload.get("rationale")
+    if not isinstance(disposition, str) or not isinstance(rationale, str):
+        raise ValueError("checklist split requires disposition and rationale")
+    if disposition == "unsplittable":
+        return ChecklistSplitResponse(disposition, rationale, attempted_response=response)
+    raw_children = payload.get("children")
+    if disposition != "split" or not isinstance(raw_children, list):
+        raise ValueError("checklist split response is invalid")
+    parent = SpecificationChecklistItem(request.parent_ref, request.parent_text,
+        request.parent_kind, request.parent_modality, request.parent_source_quote, request.parent_subject)
+    children = tuple(_validated_children(parent, request.requirement_text, raw_children))
+    reason = rejected_split(parent, children, request.ancestry)
+    if reason is not None:
+        return ChecklistSplitResponse("unsplittable", rationale, attempted_response=response,
+                                      rejection_reason=reason)
+    return ChecklistSplitResponse("split", rationale, children, response)
+
 
 
 def _reasoning_request(request: ChecklistAtomizationRequest) -> ReasoningRequest:
@@ -122,3 +188,41 @@ def _grounded_item(payload: dict[str, object], source: str) -> SpecificationChec
     context = source[left:right] if not re.search(r"[.!?]$", item.source_quote) else source[left:end]
     grounded_modality(item.modality, context)
     return item
+
+
+
+def _validated_children(parent: SpecificationChecklistItem, source: str, raw_children: list[object]) -> list[SpecificationChecklistItem]:
+    if len(raw_children) < 2:
+        raise ValueError("checklist split requires at least two children")
+    children: list[SpecificationChecklistItem] = []
+    for index, raw in enumerate(raw_children, 1):
+        if not isinstance(raw, dict):
+            raise ValueError("checklist split children must be objects")
+        payload = dict(raw)
+        payload["ref"] = f"{parent.ref}-S{index:03d}"
+        child = _grounded_item(payload, source)
+        children.append(child)
+    return children
+
+
+def _split_reasoning_request(request: ChecklistSplitRequest) -> ReasoningRequest:
+    return ReasoningRequest(
+        purpose="athba_specification_checklist_split",
+        project_id=request.project_id,
+        requires_large_context=False,
+        prompt=json.dumps({
+            "instruction": "Act as ATHBA's independent Specification Gatekeeper atomizer. Return raw JSON only.",
+            "original_requirement": request.requirement_text,
+            "parent": {"ref": request.parent_ref, "text": request.parent_text, "kind": request.parent_kind,
+                       "modality": request.parent_modality, "source_quote": request.parent_source_quote,
+                       "subject": request.parent_subject},
+            "individual_test_no_results": list(request.individual_no_results),
+            "final_trusted_revision": request.final_revision,
+            "question": "Split this unresolved checklist item into two or more smaller independent specification obligations that together preserve the parent.",
+            "required_output": {"disposition": "split|unsplittable", "rationale": "string",
+                "children": [{"text": "string", "kind": "behavior|validation|invariant|constraint|quality",
+                "modality": "required|forbidden|non_goal", "source_quote": "verbatim source excerpt", "subject": "source phrase"}]},
+            "rules": ["do not select tests", "do not inspect Behavior Planner output", "do not inspect production code",
+                      "do not add obligations", "preserve modality", "return unsplittable if no grounded progress is possible"],
+        }, sort_keys=True),
+    )

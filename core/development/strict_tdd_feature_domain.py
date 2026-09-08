@@ -96,6 +96,7 @@ class StrictTddFeatureState:
     evidence_refs: tuple[str, ...] = ()
     reconciliation_failure: ReconciliationFailure | None = None
     behavior_replans: tuple[BehaviorReplanRecord, ...] = ()
+    reconciliation_progress: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -140,6 +141,7 @@ class StrictTddFeatureState:
             tuple(str(item) for item in payload.get("evidence_refs", ())),
             None if payload.get("reconciliation_failure") is None else ReconciliationFailure.from_dict(payload["reconciliation_failure"]),
             tuple(BehaviorReplanRecord.from_dict(item) for item in payload.get("behavior_replans", ())),
+            tuple(dict(item) for item in payload.get("reconciliation_progress", ())),
         )
 
 

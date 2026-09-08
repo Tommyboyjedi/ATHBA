@@ -178,7 +178,7 @@ async def test_reconciler_rejects_accepted_test_missing_from_final_trusted_revis
 
     assert results[0].answer == "NO"
     assert results[0].accepted_test_names == []
-    assert "preserved" in results[0].rationale
+    assert results[0].individual_test_attempts == ()
 
 
 @pytest.mark.asyncio
@@ -198,7 +198,7 @@ async def test_reconciler_rejects_changed_test_body_at_final_trusted_revision(tm
 
     assert results[0].answer == "NO"
     assert results[0].accepted_test_names == []
-    assert "preserved" in results[0].rationale
+    assert results[0].individual_test_attempts == ()
 
 
 @pytest.mark.asyncio
@@ -232,7 +232,4 @@ async def test_changed_test_source_is_not_supplied_as_trusted_evidence(tmp_path)
     await TestEvidenceReconciler(
         gateway, GitAcceptedTestCatalog(tmp_path, final_revision)
     ).reconcile(_checklist(), _run_state(accepted_revision))
-    evidence = json.loads(gateway.requests[0].prompt)["accepted_tdd_tests"][0]
-    assert evidence["test_source"] is None
-    assert evidence["final_revision_verified"] is False
-    assert "assert False" not in gateway.requests[0].prompt
+    assert gateway.requests == []

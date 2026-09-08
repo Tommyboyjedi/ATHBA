@@ -686,3 +686,77 @@ runs were made; `MODEL_CALLS_MADE=0`. No commit or push is part of this correcti
 
 Validation: focused 105 passed; full deterministic suite 806 passed (exit 0).
 Coding-principles, configured and changed-module mypy, compileall, and diff-check passed.
+
+## 2026-09-07: isolated behavioral Gatekeeper evidence
+
+The controlled diagnostic remains the historical evidence for the overload defect:
+all five accepted tests produced `NO`; REQ-003 alone produced `YES`; and REQ-002
+with REQ-003 produced `YES`. This proves that the failure was evidence overload,
+not an absence of accepted test evidence.
+
+Behavioral final reconciliation now presents one final-revision-verified accepted
+test at a time in stable order. The first `YES` wins and records its individual
+attempt; no remaining accepted test is evaluated and no combined-test call is
+used. If every individual test answers `NO`, the independent Specification
+Gatekeeper atomizer receives only the source requirement, unresolved checklist
+item, final revision, and recorded NO rationales. It can produce grounded,
+deterministically identified children, which are reconciled recursively. An
+unsplittable or non-progressing split remains a typed Gatekeeper blocker.
+
+The atomizer does not select tests or inspect Behavior Planner output or production
+code. Deterministic evidence-routing policies, including dependency, storage, and
+engineering policy handling, remain outside this behavioral loop.
+
+
+## 2026-09-08: progressing splits and durable individual reconciliation
+
+The existing one-test-at-a-time Gatekeeper contract is unchanged: stable test
+identity order, stop at the first verified YES, and split only after all individual
+tests answer NO. There is no combined-test fallback or Behavior Planner input.
+
+Split progress is checked deterministically using NFKC Unicode normalization,
+case folding, and collapsed whitespace over text, kind, modality, source quote,
+and subject. Generated refs are excluded. Child fingerprints reject unchanged
+parents, duplicates, and ancestor items; sorted child structures reject repeated
+ancestor decompositions even with reordered children. The existing depth bound is
+retained as a named limit. Rejection durably records the parent, raw attempted
+split, reason, ancestry/depth, triggering individual NO evidence, and trusted
+revision, with specification_gatekeeper_unsplittable. No model judges progress.
+
+Typed item and individual-evidence checkpoints use the existing atomic feature
+repository and reconciliation_progress field. Each verified answer is saved before
+the next call; each split and its exact deterministic child refs is saved before
+child recursion. Checkpoints upsert by checklist ref, so restarts restore completed
+items, split parents, completed children, and partial-child evaluation prefixes
+without appending duplicate attempts, split records, children, or completions.
+
+Every checkpoint is bound to the trusted final revision and a deterministic digest
+of the original checklist, repository identity, language, accepted evidence, and
+Git-verified final test sources. Each individual result also retains checklist ref,
+test identity, verified evidence digest, trusted revision, evaluation ordinal,
+answer, rationale, and response attempts. Resume rebuilds the evidence binding
+before reuse; mismatches become reconciliation_incompatible_progress and preserve
+the prior progress. Final feature completion revalidates saved reconciliation too.
+
+The run controller permits recovery only for the reconciliation phase backed by
+feature checkpoints and completed behaviors. Other interrupted stages retain their
+existing recovery rule. A call-start marker without a durably saved result blocks
+as reconciliation_interrupted_call rather than resubmitting an uncertain call.
+This covers the unavoidable process-death window during an external invocation.
+Completed result checkpoints and persisted splits resume automatically.
+
+Fake-only tests reload state through fresh repositories and reconcilers, exercise
+multiple restarts, and kill a separate process immediately after atomic saves
+before resuming through the real CLI/controller. Tests cover unchanged/duplicate
+children, reordered and restored ancestor splits, durable blockers, isolated
+A/B/C evaluation, first-YES completion, deterministic child refs, partial children,
+evidence/revision mismatch, and idempotent terminal replay. They retain completed
+TDD state and use no live model or Rack AI calls. No fresh SignalBoard proof,
+commit, or push is part of this task.
+
+Validation: focused 137 passed; full suite 830 passed in 482.88 seconds (exit 0).
+Coding-principles, configured mypy (29 files), explicit changed-module/test mypy
+(8 files), compileall, and diff-check passed. MODEL_CALLS_MADE=0.
+Evidence: evidence/pr29-gatekeeper-resume-20260908/. Starting HEAD remains
+c634c589291a68b954cf41caf49673a7c2a1bc91. All task changes remain uncommitted
+and unpushed; pre-existing work and historical evidence are preserved.

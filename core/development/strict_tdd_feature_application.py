@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import Callable, Protocol
 
 from core.development.behavior_replan_domain import BehaviorReplanPolicy
 from core.development.scenario_drafting_domain import ScenarioDraftRunState
@@ -50,6 +50,8 @@ class FeatureReconciliationRequest:
     completed_behaviors: tuple[CompletedBehaviorReference, ...]
     gatekeeper_payload: dict[str, object]
     canonical_revision: str
+    reconciliation_progress: tuple[dict[str, object], ...] = ()
+    checkpoint: Callable[[tuple[dict[str, object], ...]], None] | None = None
 
 
 class FeatureScenarioExecutor(Protocol):

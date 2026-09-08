@@ -29,8 +29,11 @@ class Catalog:
         self.preserved = preserved
         self.calls = []
 
-    def contains(self, evidence):
+    def verified_source(self, evidence):
         self.calls.append(evidence)
+        return "def test_value():\n    assert True" if self.preserved else None
+
+    def contains(self, evidence):
         return self.preserved
 
 
@@ -51,7 +54,7 @@ async def test_valid_response_records_verified_result(answer):
     result = await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, catalog)).reconcile(item())
     assert result.answer == answer
     assert result.accepted_test_names == names
-    assert len(catalog.calls) == (1 if answer == 'YES' else 0)
+    assert len(catalog.calls) == 1
     assert len(result.response_attempts) == 1
     assert result.response_attempts[0].outcome == 'valid'
     assert result.supplied_test_names == (item().accepted[0].test_name,)
@@ -137,7 +140,7 @@ async def test_unverified_yes_is_legitimate_no_not_protocol_failure(names, prese
     gateway = Gateway([output('YES', names)])
     result = await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog(preserved))).reconcile(item())
     assert result.answer == 'NO' and result.accepted_test_names == []
-    assert len(gateway.requests) == 1
+    assert len(gateway.requests) == (0 if not preserved else 1)
 
 
 @pytest.mark.asyncio
@@ -165,3 +168,38 @@ async def test_repair_cannot_invent_or_change_a_decision(first, second):
     with pytest.raises(ReconciliationFailure):
         await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog())).reconcile(item())
     assert len(gateway.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_behavioral_evidence_is_isolated_and_stops_on_third_yes():
+    accepted = [
+        AcceptedTestEvidence(f"tests/test_value.py::test_REQ_00{index}", "tests/test_value.py", f"B-{index}", [], "red", "final")
+        for index in range(1, 6)
+    ]
+    gateway = Gateway([
+        output("NO"), output("NO"), output("YES", [accepted[2].test_name]),
+    ])
+    result = await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog())).reconcile(
+        ChecklistReconciliationRequest("signal-board", "get_latest_payload",
+            "The system must allow asking for the latest payload for a signal and return the most recently published value.", accepted)
+    )
+    assert result.answer == "YES"
+    assert result.accepted_test_names == [accepted[2].test_name]
+    assert [attempt["test_name"] for attempt in result.individual_test_attempts] == [item.test_name for item in accepted[:3]]
+    assert len(gateway.requests) == 3
+    assert all(len(json.loads(request.prompt)["accepted_tdd_tests"]) == 1 for request in gateway.requests)
+
+
+@pytest.mark.asyncio
+async def test_first_individual_yes_makes_one_call():
+    accepted = [
+        AcceptedTestEvidence("tests/test_value.py::test_REQ_001", "tests/test_value.py", "B-1", [], "red", "final"),
+        AcceptedTestEvidence("tests/test_value.py::test_REQ_002", "tests/test_value.py", "B-2", [], "red", "final"),
+    ]
+    gateway = Gateway([output("YES", [accepted[0].test_name])])
+    result = await ChecklistItemReconciler(gateway, cast(GitAcceptedTestCatalog, Catalog())).reconcile(
+        ChecklistReconciliationRequest("project", "CHK-1", "Independent item", accepted)
+    )
+    assert result.answer == "YES"
+    assert len(gateway.requests) == 1
+    assert len(result.individual_test_attempts) == 1

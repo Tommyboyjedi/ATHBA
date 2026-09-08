@@ -14,6 +14,7 @@ from core.development.behavior_contract_domain import BehaviorContract, Behavior
 from core.development.behavior_replan_domain import BehaviorReplanPhase
 from core.development.microcycle_revision_store import MicrocycleRevisionRepository
 from core.development.specification_domain import SourceRequirementClause
+from core.development.specification_reconciliation import CompletedMicrocycleEvidenceCollector, GitAcceptedTestCatalog
 from core.development.strict_tdd_feature_composition import StrictTddCompositionRequest, StrictTddFeatureCompositionFactory
 from core.development.strict_tdd_feature_domain import StrictTddFeatureRequest
 from core.development.strict_tdd_transitions import FeatureTransitionKind
@@ -211,7 +212,23 @@ async def test_split_children_use_real_tdd_preserve_tests_and_resume_composition
     assert len(gatekeeper.requests) == 1
     assert state.gatekeeper_payload == before.gatekeeper_payload
     assert state.final_reconciliation[0]["answer"] == "YES"
-    accepted = state.final_reconciliation[0]["accepted_test_names"]
+    # This fake answers YES on the first supplied test; reconciliation records
+    # that single winner, not the complete preserved accepted-test catalogue.
+    record = state.final_reconciliation[0]
+    assert record["accepted_test_names"] == ["tests/test_0.py::test_REQ_001"]
+    assert record["supplied_test_names"] == record["accepted_test_names"]
+    assert [(attempt["test_name"], attempt["answer"]) for attempt in record["individual_test_attempts"]] == [
+        ("tests/test_0.py::test_REQ_001", "YES")
+    ]
+    reconciliation_requests = [request for request in reasoning.requests if request.purpose == "athba_checklist_test_reconciliation"]
+    assert len(reconciliation_requests) == 1
+    assert test_names(json.loads(reconciliation_requests[0].prompt)) == record["accepted_test_names"]
+    microcycles = [composition.application.reconciler.state_store.load(completed.scenario_id) for completed in state.completed_behaviors]
+    evidence = CompletedMicrocycleEvidenceCollector().collect(microcycles)
+    catalog = GitAcceptedTestCatalog(repository, state.canonical_development_base)
+    assert len(evidence) == len(state.completed_behaviors)
+    assert all(catalog.contains(item) for item in evidence)
+    accepted = [item.test_name for item in evidence]
     assert any("REQ_005_S001" in name for name in accepted)
     assert any(("REQ_005_S002_S002" if recursive else "REQ_005_S002") in name for name in accepted)
     assert selected == ["REQ-001", "REQ-002", "REQ-003", "REQ-004", "REQ-005", "REQ-005-S001", "REQ-005-S002", *(["REQ-005-S002-S001", "REQ-005-S002-S002"] if recursive else []), "REQ-006"]

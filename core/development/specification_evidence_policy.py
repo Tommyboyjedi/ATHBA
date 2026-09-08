@@ -109,13 +109,14 @@ def _policy(kind: str, modality: ObligationModality, subject: str) -> EvidencePo
     return EvidencePolicy.BEHAVIORAL
 
 def reconciliation_satisfied(records: tuple[dict[str, object], ...]) -> bool:
-    return bool(records) and all(
+    active = [item for item in records if item.get("status") != "superseded"]
+    return bool(active) and all(
         item.get("answer") == "YES" or (
             item.get("answer") == "NOT_APPLICABLE"
             and item.get("evidence_policy") == EvidencePolicy.NON_GOAL.value
             and item.get("evidence_status") == EvidenceStatus.NOT_REQUIRED.value
             and item.get("findings") == []
-        ) or engineering_policy_covered(item) for item in records
+        ) or engineering_policy_covered(item) for item in active
     )
 
 

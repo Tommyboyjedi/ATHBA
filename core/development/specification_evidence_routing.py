@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import Callable
+
+from core.development.reconciliation_progress import IndividualEvidenceProgress
 
 from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
 from core.development.specification_evidence_policy import (
@@ -24,6 +27,9 @@ class RoutedChecklistRequest:
     accepted: list[AcceptedTestEvidence]
     language_id: str = "python"
     required_subjects: tuple[str, ...] = ()
+    progress: tuple[IndividualEvidenceProgress, ...] = ()
+    checkpoint: Callable[[tuple[IndividualEvidenceProgress, ...]], None] | None = None
+    before_call: Callable[[], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,7 +56,8 @@ class RoutedChecklistReconciler:
             ).to_record(item)
         if decision.policy == EvidencePolicy.BEHAVIORAL:
             result = await self.behavioral.reconcile(ChecklistReconciliationRequest(
-                request.project_id, item.ref, item.text, request.accepted))
+                request.project_id, item.ref, item.text, request.accepted,
+                request.progress, request.checkpoint, request.before_call))
             return result.to_dict()
         snapshot = GitSpecificationSnapshot(self.catalog.repository_root).read(self.catalog.semantic_revision)
         adapter = self.adapters.for_language(request.language_id)

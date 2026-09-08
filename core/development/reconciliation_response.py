@@ -12,6 +12,8 @@ class ReconciliationFailureKind(str, Enum):
     SCHEMA = "reconciliation_invalid_response"
     SEMANTIC = "reconciliation_invalid_answer"
     PROVIDER = "reconciliation_provider_failure"
+    INCOMPATIBLE_PROGRESS = "reconciliation_incompatible_progress"
+    INTERRUPTED = "reconciliation_interrupted_call"
 
 
 @dataclass(frozen=True)
