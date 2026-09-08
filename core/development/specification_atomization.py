@@ -156,6 +156,10 @@ def _atomization_repair_request(
             "invalid_checklist_draft": invalid_response,
             "validation_error": validation_error,
             "required_output_schema": _checklist_output_schema(),
+            "rules": _atomization_rules(),
+            "repair_rules": [
+                "correct every contract violation visible in the complete invalid draft, not only the single validation error reported",
+            ],
             "output_rules": [
                 "return raw JSON only",
                 "do not wrap the JSON in Markdown",
@@ -184,28 +188,35 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
                 "do not add extra fields outside the required schema",
             ],
             "required_output_schema": _checklist_output_schema(),
-            "rules": [
-                "one semantic obligation per item",
-                "modality is mandatory: required, forbidden, or non_goal; kind remains independent",
-                "not required, optional, and out of scope mean non_goal, not forbidden",
-                "do not implement and must not exist mean forbidden",
-                "retain verbatim source_quote and subject; never strengthen wording",
-                "split enumerated capabilities and compound quality requirements into separate items",
-                "preserve happy paths",
-                "preserve failure cases",
-                "preserve invariants",
-                "preserve constraints",
-                "preserve explicit quality and non-functional requirements where applicable",
-                "do not invent unrelated requirements",
-                "do not merge distinct behaviors simply because they appear in the same sentence",
-                "kind must be one of behavior, validation, invariant, constraint, quality",
-                "return specification facts only; do not select tests, reviews, mechanical checks, or any proof method",
-                "do not include worker ids, model ids, GPU ids, endpoints, or ports",
-            ],
+            "rules": _atomization_rules(),
         },
         indent=2,
         sort_keys=True,
     )
+
+
+def _atomization_rules() -> list[str]:
+    return [
+        "one semantic obligation per item",
+        "every checklist item ref must be unique within the complete checklist",
+        "modality is mandatory: required, forbidden, or non_goal; kind remains independent",
+        "not required, optional, and out of scope mean modality=non_goal",
+        "must not, do not implement, and must not exist mean modality=forbidden",
+        "never convert non_goal into forbidden merely to satisfy kind validation",
+        "non_goal must never be a kind",
+        "retain verbatim source_quote and subject; never strengthen wording",
+        "split enumerated capabilities and compound quality requirements into separate items",
+        "preserve happy paths",
+        "preserve failure cases",
+        "preserve invariants",
+        "preserve constraints",
+        "preserve explicit quality and non-functional requirements where applicable",
+        "do not invent unrelated requirements",
+        "do not merge distinct behaviors simply because they appear in the same sentence",
+        "kind must be one of behavior, validation, invariant, constraint, quality",
+        "return specification facts only; do not select tests, reviews, mechanical checks, or any proof method",
+        "do not include worker ids, model ids, GPU ids, endpoints, or ports",
+    ]
 
 
 def _checklist_output_schema() -> dict[str, object]:

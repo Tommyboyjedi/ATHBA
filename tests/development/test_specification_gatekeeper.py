@@ -143,6 +143,48 @@ def non_goal_checklist_payload(source="Deletion is optional.", *, kind="constrai
     }
 
 
+HISTORICAL_SIGNALBOARD_REQUIREMENT = (
+    "SignalBoard starts empty. SignalBoard publishes and retrieves payloads. "
+    "No persistence, deletion, subscriptions, validation rules, or concurrency are required."
+)
+
+
+def historical_signalboard_checklist(*, kind="constraint", modality="non_goal", unique_refs=True):
+    non_goal_source = "No persistence, deletion, subscriptions, validation rules, or concurrency are required."
+    subjects = ("persistence", "deletion", "subscriptions", "validation rules", "concurrency")
+    refs = [f"REQ-{index:03d}" for index in range(7, 12)] if unique_refs else ["REQ-007"] * len(subjects)
+    behavior_items = [
+        {
+            "ref": "REQ-001",
+            "text": "SignalBoard starts empty.",
+            "kind": "behavior",
+            "modality": "required",
+            "source_quote": "SignalBoard starts empty.",
+            "subject": "SignalBoard",
+        },
+        {
+            "ref": "REQ-002",
+            "text": "SignalBoard publishes and retrieves payloads.",
+            "kind": "behavior",
+            "modality": "required",
+            "source_quote": "SignalBoard publishes and retrieves payloads.",
+            "subject": "SignalBoard",
+        },
+    ]
+    non_goal_items = [
+        {
+            "ref": ref,
+            "text": non_goal_source,
+            "kind": kind,
+            "modality": modality,
+            "source_quote": non_goal_source,
+            "subject": subject,
+        }
+        for ref, subject in zip(refs, subjects)
+    ]
+    return {"items": [*behavior_items, *non_goal_items]}
+
+
 def checklist_payload():
     return {
         "items": [
@@ -352,6 +394,62 @@ async def test_non_goal_kind_is_repaired_without_reinterpreting_it():
     assert repair_prompt["validation_error"] == result.attempts[0].validation_error
     assert repair_prompt["required_output_schema"]["items"][0]["kind"] == "behavior|validation|invariant|constraint|quality"
     assert repair_prompt["required_output_schema"]["items"][0]["modality"] == "required|forbidden|non_goal"
+
+
+@pytest.mark.asyncio
+async def test_historical_non_goal_and_duplicate_ref_pattern_repairs_the_complete_checklist():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(),
+    ])
+
+    result = await SpecificationChecklistPlanner(gateway).atomize(
+        ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
+    )
+
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS == len(result.attempts)
+    assert [item.modality for item in result.checklist.items[-5:]] == ["non_goal"] * 5
+    assert len(result.checklist.item_refs()) == len(set(result.checklist.item_refs()))
+    initial_prompt = json.loads(gateway.requests[0].prompt)
+    repair_prompt = json.loads(gateway.requests[1].prompt)
+    assert initial_prompt["rules"] == repair_prompt["rules"]
+    assert "every checklist item ref must be unique within the complete checklist" in repair_prompt["rules"]
+    assert "never convert non_goal into forbidden merely to satisfy kind validation" in repair_prompt["rules"]
+    assert repair_prompt["repair_rules"] == [
+        "correct every contract violation visible in the complete invalid draft, not only the single validation error reported",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_forbidden_repair_of_not_required_source_fails_closed():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(modality="forbidden"),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).atomize(
+            ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
+        )
+
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
+    assert raised.value.attempts[1].validation_error == "specification modality contradicts original source wording"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_ref_repair_fails_closed():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(unique_refs=False),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).atomize(
+            ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
+        )
+
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
+    assert raised.value.attempts[1].validation_error.startswith("duplicate checklist item refs")
 
 
 @pytest.mark.asyncio
