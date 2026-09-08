@@ -159,6 +159,8 @@ def _atomization_repair_request(
             "rules": _atomization_rules(),
             "repair_rules": [
                 "correct every contract violation visible in the complete invalid draft, not only the single validation error reported",
+                "do not shorten a source_quote if doing so removes wording necessary to establish modality",
+                "when repairing another field such as kind, retain already-valid provenance unless changing it is necessary to satisfy the contract",
             ],
             "output_rules": [
                 "return raw JSON only",
@@ -204,6 +206,11 @@ def _atomization_rules() -> list[str]:
         "must not, do not implement, and must not exist mean modality=forbidden",
         "never convert non_goal into forbidden merely to satisfy kind validation",
         "non_goal must never be a kind",
+        "source_quote must contain enough contiguous original wording to establish the declared modality",
+        "for modality=non_goal, source_quote must retain not required, optional, out of scope, or No ... are required wording",
+        "for modality=forbidden, source_quote must retain must not, shall not, do not implement, forbidden, or prohibited wording",
+        "when one compound source sentence establishes modality for several atomic items, those items may reuse the same full source_quote while subject narrows each obligation",
+        "source_quote need not be unique across checklist items",
         "retain verbatim source_quote and subject; never strengthen wording",
         "split enumerated capabilities and compound quality requirements into separate items",
         "preserve happy paths",

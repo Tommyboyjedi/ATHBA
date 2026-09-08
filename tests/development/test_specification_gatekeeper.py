@@ -149,9 +149,19 @@ HISTORICAL_SIGNALBOARD_REQUIREMENT = (
 )
 
 
-def historical_signalboard_checklist(*, kind="constraint", modality="non_goal", unique_refs=True):
+def historical_signalboard_checklist(
+    *,
+    kind="constraint",
+    modality="non_goal",
+    unique_refs=True,
+    shortened_non_goal_quotes=False,
+):
     non_goal_source = "No persistence, deletion, subscriptions, validation rules, or concurrency are required."
     subjects = ("persistence", "deletion", "subscriptions", "validation rules", "concurrency")
+    quotes = (
+        ("No persistence", "deletion", "subscriptions", "validation rules", "concurrency")
+        if shortened_non_goal_quotes else (non_goal_source,) * len(subjects)
+    )
     refs = [f"REQ-{index:03d}" for index in range(7, 12)] if unique_refs else ["REQ-007"] * len(subjects)
     behavior_items = [
         {
@@ -177,10 +187,10 @@ def historical_signalboard_checklist(*, kind="constraint", modality="non_goal", 
             "text": non_goal_source,
             "kind": kind,
             "modality": modality,
-            "source_quote": non_goal_source,
+            "source_quote": quote,
             "subject": subject,
         }
-        for ref, subject in zip(refs, subjects)
+        for ref, subject, quote in zip(refs, subjects, quotes)
     ]
     return {"items": [*behavior_items, *non_goal_items]}
 
@@ -408,16 +418,43 @@ async def test_historical_non_goal_and_duplicate_ref_pattern_repairs_the_complet
     )
 
     assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS == len(result.attempts)
-    assert [item.modality for item in result.checklist.items[-5:]] == ["non_goal"] * 5
+    non_goal_items = result.checklist.items[-5:]
+    assert [item.modality for item in non_goal_items] == ["non_goal"] * 5
+    assert [item.source_quote for item in non_goal_items] == [
+        "No persistence, deletion, subscriptions, validation rules, or concurrency are required.",
+    ] * 5
+    assert [item.subject for item in non_goal_items] == [
+        "persistence", "deletion", "subscriptions", "validation rules", "concurrency",
+    ]
     assert len(result.checklist.item_refs()) == len(set(result.checklist.item_refs()))
     initial_prompt = json.loads(gateway.requests[0].prompt)
     repair_prompt = json.loads(gateway.requests[1].prompt)
     assert initial_prompt["rules"] == repair_prompt["rules"]
     assert "every checklist item ref must be unique within the complete checklist" in repair_prompt["rules"]
     assert "never convert non_goal into forbidden merely to satisfy kind validation" in repair_prompt["rules"]
+    assert "source_quote must contain enough contiguous original wording to establish the declared modality" in repair_prompt["rules"]
+    assert "source_quote need not be unique across checklist items" in repair_prompt["rules"]
     assert repair_prompt["repair_rules"] == [
         "correct every contract violation visible in the complete invalid draft, not only the single validation error reported",
+        "do not shorten a source_quote if doing so removes wording necessary to establish modality",
+        "when repairing another field such as kind, retain already-valid provenance unless changing it is necessary to satisfy the contract",
     ]
+
+
+@pytest.mark.asyncio
+async def test_shortened_non_goal_quote_repair_fails_closed():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(shortened_non_goal_quotes=True),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).atomize(
+            ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
+        )
+
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
+    assert raised.value.attempts[1].validation_error == "non-goal requires explicit source wording"
 
 
 @pytest.mark.asyncio
