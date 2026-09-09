@@ -6,6 +6,7 @@ from enum import Enum
 from hashlib import sha256
 import json
 
+from core.development.behavior_replan_domain import BehaviorReplanBlocker
 from core.development.strict_tdd_lifecycle_evidence import (
     LifecycleEventDraft,
     StrictTddLifecycleEventKind,
@@ -116,7 +117,9 @@ class StrictTddTransitionEventProjector:
         status = _event_status(path)
         draft = LifecycleEventDraft(
             identity,
-            _event_kind(path, transition.project_disposition),
+            (StrictTddLifecycleEventKind.BEHAVIOR_UNSPLITTABLE
+             if transition.blocker_or_replan_reason == BehaviorReplanBlocker.UNSPLITTABLE.value
+             else _event_kind(path, transition.project_disposition)),
             status,
             evidence,
             scenario_id=transition.scenario_id,
@@ -167,6 +170,10 @@ def _event_identity(
 def _event_kind(path: StrictTddTransitionPath, project_disposition: ProjectTransitionDisposition | None) -> StrictTddLifecycleEventKind:
     if path.feature_kind == FeatureTransitionKind.PROJECT_LOADED and project_disposition == ProjectTransitionDisposition.CREATED:
         return StrictTddLifecycleEventKind.PROJECT_CREATED
+    if path.feature_kind == FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED:
+        return StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_REQUIRED
+    if path.feature_kind == FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED:
+        return StrictTddLifecycleEventKind.BEHAVIOR_REPLAN_REQUIRED
     if path.microcycle_kind is not None:
         return _MICROCYCLE_EVENTS[path.microcycle_kind]
     if path.scenario_kind is not None:
@@ -196,6 +203,12 @@ def _message(path: StrictTddTransitionPath) -> str:
 
 
 _FEATURE_EVENTS = {
+    FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_REQUIRED,
+    FeatureTransitionKind.BEHAVIOR_REPAIR_RECEIVED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_RECEIVED,
+    FeatureTransitionKind.BEHAVIOR_REPAIR_APPLIED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_APPLIED,
+    FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED: StrictTddLifecycleEventKind.BEHAVIOR_REPLAN_REQUIRED,
+    FeatureTransitionKind.BEHAVIOR_SPLIT_RECEIVED: StrictTddLifecycleEventKind.BEHAVIOR_SPLIT_RECEIVED,
+    FeatureTransitionKind.BEHAVIOR_SPLIT: StrictTddLifecycleEventKind.BEHAVIOR_SPLIT,
     FeatureTransitionKind.PROJECT_LOADED: StrictTddLifecycleEventKind.PROJECT_LOADED,
     FeatureTransitionKind.CONTRACT_PERSISTED: StrictTddLifecycleEventKind.BEHAVIOR_CONTRACT_COMPLETED,
     FeatureTransitionKind.GATEKEEPER_PERSISTED: StrictTddLifecycleEventKind.GATEKEEPER_COMPLETED,
@@ -211,6 +224,8 @@ _SCENARIO_EVENTS = {
     ScenarioTransitionKind.DRAFT_CANDIDATE_SUBMITTED: StrictTddLifecycleEventKind.SCENARIO_DRAFTING_COMPLETED,
     ScenarioTransitionKind.INTENT_APPROVED: StrictTddLifecycleEventKind.SCENARIO_INTENT_COMPLETED,
     ScenarioTransitionKind.INTENT_REPAIR_REQUIRED: StrictTddLifecycleEventKind.SCENARIO_INTENT_COMPLETED,
+    ScenarioTransitionKind.INTENT_PROTOCOL_FAILURE: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
+    ScenarioTransitionKind.SCENARIO_HARNESS_FAILURE: StrictTddLifecycleEventKind.TRANSITION_BLOCKED,
     ScenarioTransitionKind.REVISION_INITIALISED: StrictTddLifecycleEventKind.WORKING_REF_CREATED,
     ScenarioTransitionKind.MICROCYCLE_ADVANCED: StrictTddLifecycleEventKind.FRONTIER_MATERIALISED,
     ScenarioTransitionKind.PROJECT_SYNCHRONISED: StrictTddLifecycleEventKind.SCENARIO_COMPLETED,

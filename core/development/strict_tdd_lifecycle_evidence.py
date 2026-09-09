@@ -25,6 +25,13 @@ class StrictTddLifecycleEventKind(str, Enum):
     BEHAVIOR_CONTRACT_STARTED = 'behavior_contract_started'
     BEHAVIOR_CONTRACT_COMPLETED = 'behavior_contract_completed'
     BEHAVIOR_SELECTED = 'behavior_selected'
+    BEHAVIOR_REPLAN_REQUIRED = 'behavior_replan_required'
+    BEHAVIOR_REPAIR_REQUIRED = "behavior_repair_required"
+    BEHAVIOR_REPAIR_RECEIVED = "behavior_repair_received"
+    BEHAVIOR_REPAIR_APPLIED = "behavior_repair_applied"
+    BEHAVIOR_SPLIT_RECEIVED = 'behavior_split_received'
+    BEHAVIOR_SPLIT = 'behavior_split'
+    BEHAVIOR_UNSPLITTABLE = 'behavior_unsplittable'
     SCENARIO_DRAFTING_STARTED = 'scenario_drafting_started'
     SCENARIO_DRAFTING_COMPLETED = 'scenario_drafting_completed'
     SCENARIO_INTENT_STARTED = 'scenario_intent_started'

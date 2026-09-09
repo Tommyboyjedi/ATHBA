@@ -77,3 +77,41 @@ async def test_single_behavior_completion_needs_no_next_scenario_starter():
     assert result.behavior_review.verdict == APPROVED
     assert result.behavior_review.next_behavior_ticket is None
     assert len(reviewer.requests) == 1
+
+@pytest.mark.asyncio
+async def test_protocol_failure_is_durable_and_restart_never_rereviews_or_starts_next_behavior():
+    from core.development.microcycle_domain import BehaviorReviewProtocolFailure, MicrocycleState
+
+    class ProtocolFailureReviewer:
+        def __init__(self):
+            self.calls = 0
+
+        async def review(self, request):
+            self.calls += 1
+            return BehaviorReviewProtocolFailure(
+                "athba_senior_behavior_review",
+                2,
+                "first-digest",
+                "repair-digest",
+                "not valid JSON",
+                None,
+                ("reasoning:athba_senior_behavior_review", "reasoning:athba_senior_behavior_review_json_repair"),
+            )
+
+    reviewer = ProtocolFailureReviewer()
+    starter = Starter()
+    state = replace(initial_state(), completion=ScenarioCompletion("scenario_complete", "canonical"))
+    service = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer, starter))
+
+    failed = await service.complete(BehaviorCompletionCommand(state))
+    reloaded = MicrocycleState.from_dict(failed.to_dict())
+    resumed = await service.complete(BehaviorCompletionCommand(reloaded))
+
+    assert failed.behavior_review.verdict == "protocol_failure"
+    assert failed.behavior_review.attempts == 1
+    assert failed.behavior_review.protocol_failure.response_attempts == 2
+    assert failed.completion.completed_revision == "canonical"
+    assert reloaded == failed
+    assert resumed == failed
+    assert reviewer.calls == 1
+    assert starter.requests == []

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from core.development.strict_tdd_feature_application import StrictTddFeatureApplicationService
+from core.development.reconciliation_resume import reconciliation_resume_available
 from core.development.strict_tdd_lifecycle_evidence import (
     LifecycleEventAppendRequest,
     LifecycleEventDraft,
@@ -86,13 +87,26 @@ class StrictTddRunController:
         if state.pending_transition_receipt is not None:
             return _deliver(self, request, state, context, state.pending_transition_receipt)
         if state.transition_in_flight is not None:
-            return _recover_required(self, request, state, context)
+            if not reconciliation_resume_available(self.application.states.load(request.project_id)):
+                return _recover_required(self, request, state, context)
+            state = replace(state, status=StrictTddRunStatus.RUNNING, reason=None)
+
         if state.status in {StrictTddRunStatus.COMPLETED, StrictTddRunStatus.BLOCKED, StrictTddRunStatus.STALLED, StrictTddRunStatus.RECOVERY_REQUIRED, StrictTddRunStatus.TRANSITION_LIMIT_REACHED}:
             return _report_result(self, context, state, None)
         marker = StrictTddTransitionInFlight(state.total_application_transition_count + 1)
         running = replace(state, status=StrictTddRunStatus.RUNNING, reason=None, transition_in_flight=marker)
         self.states.save(running)
-        transition = await self.application.advance(request.feature_request())
+        try:
+            transition = await self.application.advance(request.feature_request())
+        except Exception:
+            self.states.save(
+                replace(
+                    running,
+                    transition_in_flight=None,
+                    reason="application_transition_exception_before_receipt",
+                )
+            )
+            raise
         receipt = self.receipts.create(transition, marker.occurrence)
         pending = replace(running, transition_in_flight=None, pending_transition_receipt=receipt)
         self.states.save(pending)
@@ -145,7 +159,20 @@ def _resume(self, request: StrictTddRunRequest, context: StrictTddLifecycleRunCo
     state = _required_state(self, request)
     if state.project_id != request.project_id or state.immutable_identity_hash != request.immutable_identity_hash:
         raise ValueError("strict TDD resume request identity differs")
-    resumed = replace(state, current_invocation_count=state.current_invocation_count + 1)
+    resumed = replace(
+        state,
+        status=(
+            StrictTddRunStatus.RUNNING
+            if state.status == StrictTddRunStatus.TRANSITION_LIMIT_REACHED
+            else state.status
+        ),
+        reason=(
+            None
+            if state.status == StrictTddRunStatus.TRANSITION_LIMIT_REACHED
+            else state.reason
+        ),
+        current_invocation_count=state.current_invocation_count + 1,
+    )
     self.states.save(resumed)
     event = _append_controller_event(self, context, resumed, StrictTddLifecycleEventKind.RUN_RESUMED, StrictTddLifecycleStatus.STARTED)
     updated = replace(resumed, last_lifecycle_event_id=event.event_id)

@@ -1,4 +1,5 @@
 import pytest
+from dataclasses import replace
 
 from core.development.scenario_drafting import (
     ScenarioDraftWorkUnitFactory,
@@ -87,6 +88,21 @@ def test_generic_work_unit_retains_900_second_fallback():
     assert unit.timeout_seconds == 900
 
 
+def test_scenario_workspace_identity_is_scoped_to_its_persisted_scenario():
+    factory = ScenarioDraftWorkUnitFactory()
+    first_request = replace(_request(), scenario_id="project-alpha--REQ-001")
+    second_request = replace(_request(), scenario_id="project-beta--REQ-001")
+
+    first = factory.build(ScenarioDraftWorkUnitRequest(first_request, 1, None))
+    retry = factory.build(ScenarioDraftWorkUnitRequest(first_request, 2, "repair"))
+    second = factory.build(ScenarioDraftWorkUnitRequest(second_request, 1, None))
+
+    assert first.workspace_identity is not None
+    assert retry.workspace_identity is not None
+    assert second.workspace_identity is not None
+    assert first.workspace_identity.work_id == retry.workspace_identity.work_id
+    assert first.workspace_identity.submission_id != retry.workspace_identity.submission_id
+    assert first.workspace_identity.submission_id != second.workspace_identity.submission_id
 @pytest.mark.parametrize(
     "values",
     [
@@ -95,6 +111,7 @@ def test_generic_work_unit_retains_900_second_fallback():
         {"frontier_developer_seconds": 901},
     ],
 )
+
 def test_policy_rejects_invalid_typed_budget_values(values):
     with pytest.raises(ValueError):
         StrictTddExecutionBudgets(**values)

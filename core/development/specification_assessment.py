@@ -102,13 +102,16 @@ class SpecificationGatekeeper:
     async def ensure_state(self, request: GatekeeperStateRequest) -> SpecificationGatekeeperRunState:
         if request.gatekeeper_state is not None:
             return request.gatekeeper_state
-        checklist = await self.checklist_planner.create_checklist(
+        atomization = await self.checklist_planner.atomize(
             ChecklistAtomizationRequest(
                 project_id=request.contract.project_id,
                 requirement_text=request.contract.requirement_source,
             )
         )
-        return SpecificationGatekeeperRunState(checklist=checklist)
+        return SpecificationGatekeeperRunState(
+            checklist=atomization.checklist,
+            atomization_attempts=list(atomization.attempts),
+        )
 
     async def assess(self, request: GatekeeperAssessmentRequest) -> SpecificationGatekeeperRunState:
         return await self.runner.assess(request)

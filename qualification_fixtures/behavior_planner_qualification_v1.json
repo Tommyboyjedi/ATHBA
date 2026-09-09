@@ -1,0 +1,20 @@
+{
+  "corpus_version": "BPQ-V1",
+  "cases": [
+    {
+      "id": "BPQ-V1-A",
+      "component_name": "ReservationBook",
+      "requirement_text": "Build a small in-memory `ReservationBook` for reservable resources. A resource has a unique id and a positive integer capacity. Clients can add resources, create uniquely identified reservations for a number of units on a resource, cancel reservations, and query remaining availability. Duplicate resource ids and duplicate reservation ids must be rejected. Reservations for unknown resources, cancellations of unknown reservations, invalid/non-positive quantities, and reservations that exceed remaining capacity must be rejected without corrupting state. Cancelling a reservation restores that capacity. The implementation is in-memory only, dependency-free, and should remain small, direct, readable Python rather than introducing unnecessary abstractions."
+    },
+    {
+      "id": "BPQ-V1-B",
+      "component_name": "SignalBoard",
+      "requirement_text": "Build a small in-memory SignalBoard for named signals. A new board starts with no published signals. People can publish a payload under a signal name. The board remembers only the most recently published payload for each name. Publishing another payload under the same name replaces the previous current value for that name, while other signal names remain unaffected. It must be possible to ask for the latest payload for a signal and receive the most recently published value. No persistence, deletion, subscriptions, validation rules, or concurrency are required. Keep the component small, direct and dependency-free."
+    },
+    {
+      "id": "BPQ-V1-C",
+      "component_name": "ParcelLocker",
+      "requirement_text": "Build a small in-memory ParcelLocker register for a bank of lockers. Lockers can be registered by a unique label and begin empty. A parcel can be placed into an empty locker using a unique collection code. The same locker cannot hold more than one parcel at a time, and a collection code cannot identify more than one active parcel. A parcel can be collected by its collection code, after which the locker becomes empty and can be used again. Attempts to register the same locker twice, use an unknown locker, place a parcel in an occupied locker, reuse an active collection code, or collect with an unknown code must be rejected without changing existing records. It should be possible to ask whether a locker is currently available. Everything is in memory only and the component should remain small, direct and dependency-free."
+    }
+  ]
+}

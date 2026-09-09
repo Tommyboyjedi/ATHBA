@@ -46,6 +46,8 @@ from core.development.strict_tdd_feature_execution import (
     StrictFeatureScenarioExecutor,
 )
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
+from core.development.strict_tdd_feature_composition import StrictTddCompositionRequest, StrictTddFeatureCompositionFactory
+from core.execution.profiled_workspace_gateway import ProfiledWorkspaceExecutionGateway
 from core.execution.reasoning_gateway import ReasoningResult
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
@@ -133,6 +135,13 @@ class Gatekeeper:
         return SpecificationGatekeeperRunState(checklist)
 
 
+def test_default_composition_uses_profiled_v2_workspace_gateway(tmp_path):
+    composition = StrictTddFeatureCompositionFactory().build(StrictTddCompositionRequest(tmp_path / "state", tmp_path / "repository", "feature", DeterministicReasoning()))
+    assert isinstance(composition.rack_ai, ProfiledWorkspaceExecutionGateway)
+    assert composition.rack_ai.port.__class__.__name__ == "RackAiWorkspaceConnector"
+    assert composition.rack_ai.port.transport.__class__.__name__ == "RackAiWorkspaceCliTransport"
+
+
 def feature_request():
     return StrictTddFeatureRequest(
         "feature", "Widget exposes value 1.", "python", "pytest", ("widget.py",),
@@ -155,7 +164,7 @@ def feature_contract():
 async def test_real_git_feature_composition_runs_lifecycle_and_reconciles_only_completed_evidence(tmp_path):
     state_root = tmp_path / "state"
     environment = ProjectEnvironmentService(
-        state_root / "projects", python_executable="/srv/ATHBA/.venv/bin/python"
+        state_root / "projects"
     )
     project = environment.create_or_load_python_project("feature")
     repository = Path(project.repository_root)

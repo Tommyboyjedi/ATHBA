@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
-from typing import Protocol
+from dataclasses import dataclass, field, replace
+from typing import Callable, Protocol
+
+from core.development.behavior_replan_domain import BehaviorReplanPolicy
+from core.development.scenario_drafting_domain import ScenarioDraftRunState
 
 from core.development.behavior_contract_coordinator import BehaviorContractPlanner, ContractPlanningRequest
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
@@ -25,6 +28,12 @@ class FeatureScenarioRequest:
     contract: BehaviorContract
     behavior: BehaviorContractRequirement
     canonical_development_base: str
+    prior_completed_test_nodes: tuple[str, ...] = ()
+    scenario_id: str | None = None
+
+    @property
+    def selected_scenario_id(self) -> str:
+        return self.scenario_id or f"{self.project.project_id}--{self.behavior.ref}"
 
 
 @dataclass(frozen=True)
@@ -38,6 +47,7 @@ class FeatureScenarioResult:
     working_revision: str | None
     evidence_refs: tuple[str, ...] = ()
     blocked_reason: str | None = None
+    draft_state: ScenarioDraftRunState | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +56,8 @@ class FeatureReconciliationRequest:
     completed_behaviors: tuple[CompletedBehaviorReference, ...]
     gatekeeper_payload: dict[str, object]
     canonical_revision: str
+    reconciliation_progress: tuple[dict[str, object], ...] = ()
+    checkpoint: Callable[[tuple[dict[str, object], ...]], None] | None = None
 
 
 class FeatureScenarioExecutor(Protocol):
@@ -68,6 +80,7 @@ class StrictTddFeatureDependencies:
     gatekeeper: SpecificationGatekeeper
     scenarios: FeatureScenarioExecutor
     reconciler: FeatureReconciler
+    replan_policy: BehaviorReplanPolicy = field(default_factory=BehaviorReplanPolicy)
 
 
 class StrictTddFeatureApplicationService:
@@ -80,6 +93,7 @@ class StrictTddFeatureApplicationService:
         self.gatekeeper = dependencies.gatekeeper
         self.scenarios = dependencies.scenarios
         self.reconciler = dependencies.reconciler
+        self.replan_policy = dependencies.replan_policy
 
     async def run(self, request: StrictTddFeatureRequest) -> StrictTddFeatureResult:
         from core.development.strict_tdd_feature_application_advance import StrictTddFeatureRunLoop

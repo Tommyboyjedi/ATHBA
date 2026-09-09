@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -27,7 +28,8 @@ from core.development.python_test_runtime import PythonPytestRuntime
 from core.filesystem_policy import resolve_identifier_path
 
 
-DEFAULT_ATHBA_PYTHON = "/srv/ATHBA/.venv/bin/python"
+DEFAULT_ATHBA_PYTHON = sys.executable
+PYTEST_RUNTIME_READINESS_TIMEOUT_SECONDS = 5
 
 
 @dataclass(frozen=True)
@@ -83,12 +85,16 @@ class ProjectReadinessVerifier:
             raise ValueError("project repository is not initialized")
         if not Path(project.runtime.environment_path).is_file():
             raise ValueError("ATHBA runtime executable is unavailable")
-        runtime_check = subprocess.run(
-            [project.runtime.environment_path, "-B", "-m", "pytest", "--version"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            runtime_check = subprocess.run(
+                [project.runtime.environment_path, "-B", "-c", "import pytest"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PYTEST_RUNTIME_READINESS_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise ValueError("ATHBA pytest runtime is unavailable") from error
         if runtime_check.returncode != 0:
             raise ValueError("ATHBA pytest runtime is unavailable")
         if not self.git.commit_exists(CommitLookupRequest(root, project.trusted_base_sha)):

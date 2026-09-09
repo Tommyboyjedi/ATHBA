@@ -77,6 +77,7 @@ class StrictTddRunEvidenceSnapshotCollector:
         if pending is not None:
             values.append(pending.scenario_id)
         values.extend(item.scenario_id for item in getattr(feature, "completed_behaviors"))
+        values.extend(item.request.tester_failures.scenario_id for item in getattr(feature, "behavior_replans", ()))
         return tuple(dict.fromkeys(values))
 
 

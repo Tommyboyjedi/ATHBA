@@ -8,6 +8,7 @@ import pytest
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -37,7 +38,7 @@ class Reasoning:
         values = {
             "athba_source_requirement_clauses": {"clauses":[{"ref":"SRC-1","text":"Instantiate ToggleSwitch.","kind":"behavior"},{"ref":"SRC-2","text":"New switch is off.","kind":"behavior"},{"ref":"SRC-3","text":"toggle makes switch on.","kind":"behavior"}]},
             "athba_behavior_contract": contract(),
-            "athba_specification_checklist": {"items":[{"ref":"CHK-1","text":"A ToggleSwitch is created off and toggled on.","kind":"behavior"}]},
+            "athba_specification_checklist": {"items":[{"ref":"CHK-1","text":"A ToggleSwitch is created off and toggled on.","kind":"behavior","modality":"required","source_quote":REQUIREMENT,"subject":"ToggleSwitch"}]},
             "athba_scenario_intent_review": {"disposition":"approved","feedback":"scenario observes every behavior","evidence_refs":["SRC-1","SRC-2","SRC-3"]},
             "athba_senior_behavior_review": {"verdict":"approved","rationale":"canonical scenario is green","findings":[],"evidence_refs":["SRC-1","SRC-2","SRC-3"]},
             "athba_checklist_test_reconciliation": {"answer":"YES","selected_test_names":["tests/test_toggle_switch.py::test_B_1"],"rationale":"accepted final test proves it"}}
@@ -161,7 +162,7 @@ def test_cli_happy_path_checkpoints_restarts_completes_and_replays(tmp_path, cap
     resumed = Factory(log, counts)
     assert main(args("resume", state, evidence), resumed) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "completed"
-    assert subprocess.run(["/srv/ATHBA/.venv/bin/python","-m","pytest","-q"], cwd=repository, capture_output=True, text=True, timeout=15).returncode == 0
+    assert subprocess.run([sys.executable,"-m","pytest","-q"], cwd=repository, capture_output=True, text=True, timeout=15).returncode == 0
     resumed_state = microcycles.load(scenario_id)
     assert resumed_state is not None
     assert tuple(

@@ -9,7 +9,7 @@ from core.execution.fake_workspace_execution_port import DeterministicFakeWorksp
 from core.execution.profiled_workspace_gateway import ProfiledWorkspaceExecutionGateway, ProfiledWorkspaceGatewayDependencies
 from core.execution.rack_ai_request import RepositoryBinding
 from core.execution.rack_ai_workspace_connector import RackAiWorkspaceConnector
-from core.execution.workspace_execution_port import WorkspaceExecutionRequest, WorkspaceExecutionStatus
+from core.execution.workspace_execution_port import WorkspaceExecutionRequest, WorkspaceExecutionResult, WorkspaceExecutionStatus
 
 
 def resolver():
@@ -94,6 +94,39 @@ async def test_profiled_gateway_migrates_frontier_work_to_generic_port():
     assert port.submitted[0].identity.work_id == "work"
     assert port.submitted[0].identity.submission_id == "submission"
 
+
+@pytest.mark.asyncio
+async def test_profiled_gateway_preserves_generic_branch_and_worker_provenance():
+    class Port:
+        def submit_workspace_change(self, submitted):
+            return WorkspaceExecutionResult(
+                identity=submitted.identity,
+                status=WorkspaceExecutionStatus.ACCEPTED,
+                branch="rack/change/submission",
+                worktree_ref="/tmp/rack/submission",
+                changed_paths=("src/a.py",),
+                accepted_revision="d" * 40,
+                evidence_refs=("evidence/submission",),
+                execution_provenance={
+                    "worker_id": "local-coder",
+                    "worker_role": "implementer-tester",
+                    "worker_kind": "jcode",
+                    "model_id": "local-coder",
+                    "provider_profile": "local-coder",
+                    "resource_id": "gpu-2060",
+                    "backend": "jcode",
+                    "tool_profile": "minimal",
+                },
+            )
+
+    result = await ProfiledWorkspaceExecutionGateway(ProfiledWorkspaceGatewayDependencies(Port(), resolver())).execute(unit(), binding())
+    assert result.branch == "rack/change/submission"
+    assert result.worktree_path == "/tmp/rack/submission"
+    assert result.policy_evidence is not None
+    assert result.policy_evidence.changed_paths == ["src/a.py"]
+    assert result.worker_provenance is not None
+    assert result.worker_provenance.worker_id == "local-coder"
+    assert result.worker_provenance.tool_profile == "minimal"
 
 def test_tier_policy_escalates_once_then_blocks_after_four_more_failures():
     policy = WorkspaceAttemptPolicy()

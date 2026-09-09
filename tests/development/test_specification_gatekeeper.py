@@ -5,6 +5,7 @@ import pytest
 
 from core.development.behavior_contract_coordinator import BehaviorContractCoordinator, SemanticReviewRequest, StepDecisionRequest
 from core.development.specification_gap_adapter import matching_contract_source_refs_for_clause
+from core.development.specification_atomization import ChecklistAtomizationFailure, MAX_ATOMIZER_SUBMISSIONS
 from core.development.specification_gatekeeper import (
     ChecklistAtomizationRequest,
     GatekeeperAssessmentRequest,
@@ -129,12 +130,77 @@ def requirement_text() -> str:
     )
 
 
+def non_goal_checklist_payload(source="Deletion is optional.", *, kind="constraint", modality="non_goal"):
+    return {
+        "items": [{
+            "ref": "SPEC-NON-GOAL",
+            "text": source,
+            "kind": kind,
+            "modality": modality,
+            "source_quote": source,
+            "subject": "Deletion",
+        }]
+    }
+
+
+HISTORICAL_SIGNALBOARD_REQUIREMENT = (
+    "SignalBoard starts empty. SignalBoard publishes and retrieves payloads. "
+    "No persistence, deletion, subscriptions, validation rules, or concurrency are required."
+)
+
+
+def historical_signalboard_checklist(
+    *,
+    kind="constraint",
+    modality="non_goal",
+    unique_refs=True,
+    shortened_non_goal_quotes=False,
+):
+    non_goal_source = "No persistence, deletion, subscriptions, validation rules, or concurrency are required."
+    subjects = ("persistence", "deletion", "subscriptions", "validation rules", "concurrency")
+    quotes = (
+        ("No persistence", "deletion", "subscriptions", "validation rules", "concurrency")
+        if shortened_non_goal_quotes else (non_goal_source,) * len(subjects)
+    )
+    refs = [f"REQ-{index:03d}" for index in range(7, 12)] if unique_refs else ["REQ-007"] * len(subjects)
+    behavior_items = [
+        {
+            "ref": "REQ-001",
+            "text": "SignalBoard starts empty.",
+            "kind": "behavior",
+            "modality": "required",
+            "source_quote": "SignalBoard starts empty.",
+            "subject": "SignalBoard",
+        },
+        {
+            "ref": "REQ-002",
+            "text": "SignalBoard publishes and retrieves payloads.",
+            "kind": "behavior",
+            "modality": "required",
+            "source_quote": "SignalBoard publishes and retrieves payloads.",
+            "subject": "SignalBoard",
+        },
+    ]
+    non_goal_items = [
+        {
+            "ref": ref,
+            "text": non_goal_source,
+            "kind": kind,
+            "modality": modality,
+            "source_quote": quote,
+            "subject": subject,
+        }
+        for ref, subject, quote in zip(refs, subjects, quotes)
+    ]
+    return {"items": [*behavior_items, *non_goal_items]}
+
+
 def checklist_payload():
     return {
         "items": [
-            {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test"},
-            {"ref": "SPEC-2", "text": "Resource capacity must be positive.", "kind": "validation", "evidence_kind": "test"},
-            {"ref": "SPEC-3", "text": "The implementation must remain readable and free of unnecessary abstractions.", "kind": "quality", "evidence_kind": "review"},
+            {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"},
+            {"ref": "SPEC-2", "text": "Resource capacity must be positive.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"},
+            {"ref": "SPEC-3", "text": "The implementation must remain readable and free of unnecessary abstractions.", "kind": "quality", "evidence_kind": "review", "modality": "required", "source_quote": "free of unnecessary abstractions.", "subject": "unnecessary abstractions"},
         ]
     }
 
@@ -282,6 +348,7 @@ async def test_valid_component_requirement_can_produce_checklist():
         ref="SPEC-1",
         text="A resource has a unique id.",
         kind="validation",
+        modality="required", source_quote="A resource has a unique id and a positive integer capacity.", subject="resource",
     )
 
 
@@ -306,18 +373,176 @@ async def test_gatekeeper_atomization_request_remains_independent_of_development
 
 
 @pytest.mark.asyncio
-async def test_malformed_or_invalid_checklist_output_fails_closed():
-    planner = SpecificationChecklistPlanner(FakeReasoningGateway(["not json"]))
-    with pytest.raises(ValueError, match="specification checklist response was not valid JSON"):
-        await planner.create_checklist(
-            ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+async def test_valid_atomization_uses_one_submission_and_records_it():
+    gateway = FakeReasoningGateway([checklist_payload()])
+    result = await SpecificationChecklistPlanner(gateway).atomize(
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    )
+
+    assert result.checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
+    assert len(gateway.requests) == len(result.attempts) == 1
+    assert gateway.requests[0].purpose == "athba_specification_checklist"
+    assert result.attempts[0].validation_error is None
+
+
+@pytest.mark.asyncio
+async def test_non_goal_kind_is_repaired_without_reinterpreting_it():
+    source = "Deletion is optional."
+    malformed = non_goal_checklist_payload(source, kind="non_goal", modality="required")
+    repaired = non_goal_checklist_payload(source)
+    gateway = FakeReasoningGateway([malformed, repaired])
+
+    result = await SpecificationChecklistPlanner(gateway).atomize(ChecklistAtomizationRequest("p", source))
+
+    assert result.checklist.items[0].kind == "constraint"
+    assert result.checklist.items[0].modality == "non_goal"
+    assert len(gateway.requests) == len(result.attempts) == 2
+    assert "unsupported checklist item kind: non_goal" in str(result.attempts[0].validation_error)
+    repair_prompt = json.loads(gateway.requests[1].prompt)
+    assert gateway.requests[1].purpose == "athba_specification_checklist_repair"
+    assert repair_prompt["original_requirement"] == source
+    assert repair_prompt["validation_error"] == result.attempts[0].validation_error
+    assert repair_prompt["required_output_schema"]["items"][0]["kind"] == "behavior|validation|invariant|constraint|quality"
+    assert repair_prompt["required_output_schema"]["items"][0]["modality"] == "required|forbidden|non_goal"
+
+
+@pytest.mark.asyncio
+async def test_historical_non_goal_and_duplicate_ref_pattern_repairs_the_complete_checklist():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(),
+    ])
+
+    result = await SpecificationChecklistPlanner(gateway).atomize(
+        ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
+    )
+
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS == len(result.attempts)
+    non_goal_items = result.checklist.items[-5:]
+    assert [item.modality for item in non_goal_items] == ["non_goal"] * 5
+    assert [item.source_quote for item in non_goal_items] == [
+        "No persistence, deletion, subscriptions, validation rules, or concurrency are required.",
+    ] * 5
+    assert [item.subject for item in non_goal_items] == [
+        "persistence", "deletion", "subscriptions", "validation rules", "concurrency",
+    ]
+    assert len(result.checklist.item_refs()) == len(set(result.checklist.item_refs()))
+    initial_prompt = json.loads(gateway.requests[0].prompt)
+    repair_prompt = json.loads(gateway.requests[1].prompt)
+    assert initial_prompt["rules"] == repair_prompt["rules"]
+    assert "every checklist item ref must be unique within the complete checklist" in repair_prompt["rules"]
+    assert "never convert non_goal into forbidden merely to satisfy kind validation" in repair_prompt["rules"]
+    assert "source_quote must contain enough contiguous original wording to establish the declared modality" in repair_prompt["rules"]
+    assert "source_quote need not be unique across checklist items" in repair_prompt["rules"]
+    assert repair_prompt["repair_rules"] == [
+        "correct every contract violation visible in the complete invalid draft, not only the single validation error reported",
+        "do not shorten a source_quote if doing so removes wording necessary to establish modality",
+        "when repairing another field such as kind, retain already-valid provenance unless changing it is necessary to satisfy the contract",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_shortened_non_goal_quote_repair_fails_closed():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(shortened_non_goal_quotes=True),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).atomize(
+            ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
         )
 
-    bad_kind = SpecificationChecklistPlanner(FakeReasoningGateway([{"items": [{"ref": "SPEC-1", "text": "x", "kind": "string"}]}]))
-    with pytest.raises(ValueError, match="unsupported checklist item kind"):
-        await bad_kind.create_checklist(
-            ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
+    assert raised.value.attempts[1].validation_error == "non-goal requires explicit source wording"
+
+
+@pytest.mark.asyncio
+async def test_forbidden_repair_of_not_required_source_fails_closed():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(modality="forbidden"),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).atomize(
+            ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
         )
+
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
+    assert raised.value.attempts[1].validation_error == "specification modality contradicts original source wording"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_ref_repair_fails_closed():
+    gateway = FakeReasoningGateway([
+        historical_signalboard_checklist(kind="non_goal", unique_refs=False),
+        historical_signalboard_checklist(unique_refs=False),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).atomize(
+            ChecklistAtomizationRequest("signalboard", HISTORICAL_SIGNALBOARD_REQUIREMENT)
+        )
+
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
+    assert raised.value.attempts[1].validation_error.startswith("duplicate checklist item refs")
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_is_repaired_through_normal_validation():
+    gateway = FakeReasoningGateway(["{not json", checklist_payload()])
+
+    checklist = await SpecificationChecklistPlanner(gateway).create_checklist(
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    )
+
+    assert checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_specification_checklist", "athba_specification_checklist_repair",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_invalid_grounding_is_repaired_through_normal_validation():
+    malformed = checklist_payload()
+    malformed["items"][0]["source_quote"] = "Invented requirement."
+    gateway = FakeReasoningGateway([malformed, checklist_payload()])
+
+    checklist = await SpecificationChecklistPlanner(gateway).create_checklist(
+        ChecklistAtomizationRequest(project_id="reservation-book", requirement_text=requirement_text())
+    )
+
+    assert checklist.item_refs() == ["SPEC-1", "SPEC-2", "SPEC-3"]
+    assert len(gateway.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_malformed_repair_fails_closed_after_exactly_two_durable_attempts():
+    source = "Deletion is optional."
+    gateway = FakeReasoningGateway([
+        non_goal_checklist_payload(source, kind="non_goal", modality="required"),
+        "{not json",
+        checklist_payload(),
+    ])
+
+    with pytest.raises(ChecklistAtomizationFailure) as raised:
+        await SpecificationChecklistPlanner(gateway).create_checklist(ChecklistAtomizationRequest("p", source))
+
+    failure = raised.value
+    assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS == len(failure.attempts)
+    assert failure.attempts[0].response == json.dumps(non_goal_checklist_payload(source, kind="non_goal", modality="required"))
+    assert failure.attempts[0].validation_error == "unsupported checklist item kind: non_goal"
+    assert failure.attempts[1].response == "{not json"
+    assert failure.attempts[1].validation_error == "specification checklist response was not valid JSON"
+    assert len(gateway.responses) == 1
+
+
+def test_non_goal_remains_invalid_as_kind_and_valid_as_modality():
+    source = "Deletion is optional."
+    with pytest.raises(ValueError, match="unsupported checklist item kind: non_goal"):
+        SpecificationChecklistItem("SPEC-1", source, "non_goal", "non_goal", source, "Deletion")
+    assert SpecificationChecklistItem("SPEC-1", source, "constraint", "non_goal", source, "Deletion").modality == "non_goal"
 
 
 def test_checklist_round_trip_defaults_and_duplicates_are_validated():
@@ -597,7 +822,7 @@ def test_gatekeeper_records_explicit_evidence_and_assessment_round_trip():
 async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
     payload = contract_payload()
     payload["source_clauses"] = [
-        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
     ]
     payload["observable_requirements"] = [
         {
@@ -657,7 +882,7 @@ async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
         {
             "project_id": "reservation-book",
             "requirement_text": requirement_text(),
-            "items": [{"ref": "REQ-08", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}],
+            "items": [{"ref": "REQ-08", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}],
         }
     )
     gatekeeper = SpecificationGatekeeper(
@@ -687,7 +912,7 @@ async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
 def test_gap_adapter_uses_contract_source_ref_when_checklist_ref_drifts():
     payload = contract_payload()
     payload["source_clauses"] = [
-        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test"}
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
     ]
     payload["observable_requirements"] = [
         {
@@ -804,7 +1029,7 @@ async def test_coordinator_can_reenter_tdd_lane_for_targeted_gap():
         [
             {
                 "items": [
-                    {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test"}
+                    {"ref": "SPEC-1", "text": "A resource has a unique id.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
                 ]
             },
             {
@@ -864,6 +1089,7 @@ async def test_untraceable_executable_gap_blocks_before_ordinary_tdd():
                 {
                     "ref": "SPEC-UNTRACEABLE",
                     "text": "An invented broad obligation.",
+                    "modality": "required", "source_quote": "Clients can add resources", "subject": "resources",
                     "kind": "validation",
                     "evidence_kind": "test",
                 }

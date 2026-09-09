@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import ast
 from pathlib import Path
 
@@ -32,7 +33,10 @@ class DummyApplication:
 
     async def advance(self, request):
         self.calls += 1
-        return self.transitions.pop(0)
+        result = self.transitions.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
 
 
 class FailingLifecycle(StrictTddLifecycleEventRepository):
@@ -60,7 +64,8 @@ def transition(kind=MicrocycleTransitionKind.FRONTIER_RED_ACCEPTED, available=Tr
 def controller(tmp_path, transitions, lifecycle=None):
     events = lifecycle or StrictTddLifecycleEventRepository(tmp_path / "lifecycle")
     repositories = StrictTddEvidenceRepositories(StrictTddFeatureRepository(tmp_path / "features"), ScenarioDraftStateRepo(tmp_path / "scenarios"), MicrocycleStateRepo(tmp_path / "microcycles"), MicrocycleRevisionRepository(tmp_path / "revisions"), events)
-    return StrictTddRunController(StrictTddRunControllerDependencies(DummyApplication(transitions), StrictTddRunStateRepository(tmp_path / "runs"), events, StrictTddRunEvidenceSnapshotCollector(repositories), StrictTddRunReportWriter(tmp_path / "reports")))
+    return StrictTddRunController(StrictTddRunControllerDependencies(DummyApplication(transitions),  # type: ignore[arg-type]
+         StrictTddRunStateRepository(tmp_path / "runs"), events, StrictTddRunEvidenceSnapshotCollector(repositories), StrictTddRunReportWriter(tmp_path / "reports")))
 
 
 @pytest.mark.asyncio
@@ -89,6 +94,24 @@ async def test_failed_event_delivery_replays_receipt_without_application_call(tm
 
 
 @pytest.mark.asyncio
+async def test_application_exception_clears_observed_inflight_marker_for_resume(tmp_path):
+    value = controller(tmp_path, [OSError("bootstrap unavailable"), transition()])
+
+    with pytest.raises(OSError, match="bootstrap unavailable"):
+        await value.advance(request())
+
+    state = value.states.load("run-one")
+    assert state is not None
+    assert state.transition_in_flight is None
+    assert state.pending_transition_receipt is None
+    assert state.reason == "application_transition_exception_before_receipt"
+
+    resumed = await value.advance(request(StrictTddRunMode.RESUME))
+    assert resumed.status == StrictTddRunStatus.CHECKPOINTED
+    assert value.application.calls == 2
+
+
+@pytest.mark.asyncio
 async def test_inflight_without_receipt_fails_closed(tmp_path):
     value = controller(tmp_path, [])
     state = StrictTddRunState("run-one", "project-one", request().immutable_identity_hash, StrictTddRunStatus.RUNNING, transition_in_flight=__import__("core.development.strict_tdd_run_domain", fromlist=["StrictTddTransitionInFlight"]).StrictTddTransitionInFlight(1))
@@ -96,6 +119,24 @@ async def test_inflight_without_receipt_fails_closed(tmp_path):
     result = await value.advance(request(StrictTddRunMode.RESUME))
     assert result.status == StrictTddRunStatus.RECOVERY_REQUIRED
     assert value.application.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_resume_reopens_transition_limited_run(tmp_path):
+    value = controller(tmp_path, [transition()])
+    state = StrictTddRunState(
+        "run-one",
+        "project-one",
+        request().immutable_identity_hash,
+        StrictTddRunStatus.TRANSITION_LIMIT_REACHED,
+        reason="controller_transition_limit_reached",
+    )
+    value.states.save(state)
+
+    resumed = await value.advance(request(StrictTddRunMode.RESUME))
+
+    assert resumed.status == StrictTddRunStatus.CHECKPOINTED
+    assert value.application.calls == 1
 
 
 def test_controller_is_not_a_feature_router_or_live_executor():
@@ -106,3 +147,28 @@ def test_controller_is_not_a_feature_router_or_live_executor():
     assert "subprocess" not in source
     assert "pytest" not in source
     assert "git" not in source.lower()
+
+@pytest.mark.asyncio
+async def test_durable_nested_progress_with_same_path_does_not_stall(tmp_path):
+    first = transition()
+    second = replace(first, fingerprint=replace(first.fingerprint, retry_counts=(1,), pending_action="scenario_intent_review"))
+    value = controller(tmp_path, [first, second])
+
+    started = await value.advance(replace(request(), requested_checkpoint=None))
+    resumed = await value.advance(replace(request(StrictTddRunMode.RESUME), requested_checkpoint=None))
+
+    assert started.status == StrictTddRunStatus.RUNNING
+    assert resumed.status == StrictTddRunStatus.RUNNING
+    assert resumed.reason is None
+
+
+@pytest.mark.asyncio
+async def test_identical_nested_state_with_same_path_still_stalls(tmp_path):
+    first = transition()
+    value = controller(tmp_path, [first, first])
+
+    await value.advance(replace(request(), requested_checkpoint=None))
+    repeated = await value.advance(replace(request(StrictTddRunMode.RESUME), requested_checkpoint=None))
+
+    assert repeated.status == StrictTddRunStatus.STALLED
+    assert repeated.reason == "stable_transition_fingerprint_stalled"

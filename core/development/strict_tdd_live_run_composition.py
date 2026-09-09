@@ -7,6 +7,7 @@ from subprocess import run
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
 from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
+from core.development.python_pytest_preflight import PythonProbePreflightError, PythonPytestPreflight
 from core.development.microcycle_revision_store import MicrocycleRevisionRepository
 from core.development.strict_tdd_feature_composition import (
     StrictTddCompositionRequest,
@@ -73,11 +74,15 @@ class GitRevisionSource:
 class StrictTddLiveRunCompositionFactory:
     """Wires production ports without doing strict-TDD application work."""
 
-    def __init__(self, versions: GitRevisionSource | None = None):
+    def __init__(self, versions: GitRevisionSource | None = None, preflight: PythonPytestPreflight | None = None):
         self.versions = versions or GitRevisionSource()
+        self.preflight = preflight or PythonPytestPreflight()
 
     def build(self, request: StrictTddLiveRunCompositionRequest) -> StrictTddLiveRunComposition:
         config = request.configuration
+        diagnostic = self.preflight.check(config.state_root / "probe-preflight")
+        if diagnostic.kind != "green":
+            raise PythonProbePreflightError(diagnostic)
         reasoning = request.reasoning_gateway or self._live_reasoning(config)
         feature = StrictTddFeatureCompositionFactory().build(
             StrictTddCompositionRequest(

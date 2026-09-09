@@ -19,6 +19,11 @@ from core.development.deterministic_regression import (
     REGRESSION_CLEAR,
 )
 from core.development.microcycle_revision_service import MicrocycleRevisionLifecycle
+from core.development.python_pytest_adapter import (
+    PYTHON_PYTEST_ADAPTER_ID,
+    PythonPytestModuleMergeRequest,
+    PythonPytestModuleMerger,
+)
 from core.development.microcycle_revision_state import (
     RevisionBindingRequest,
     RevisionCompletionRequest,
@@ -90,7 +95,7 @@ class GitFrontierMaterialiser:
         try:
             target = _safe_test_path(worktree, request.test_path)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(request.artifact.complete_source, encoding="utf-8")
+            target.write_text(_materialised_test_source(target, request.artifact), encoding="utf-8")
             _git(worktree, "add", "--", request.test_path)
             changed = tuple(line for line in _git(worktree, "diff", "--cached", "--name-only").splitlines() if line)
             if changed not in {(request.test_path,), ()}:
@@ -105,8 +110,22 @@ class GitFrontierMaterialiser:
             _discard_worktree(root, worktree)
             raise
 
+
     def cleanup(self, candidate: FrontierCandidate) -> None:
         _discard_worktree(candidate.repository_root, candidate.project_root)
+
+def _materialised_test_source(target: Path, artifact: MaterialisedTestArtifact) -> str:
+    if artifact.adapter_id != PYTHON_PYTEST_ADAPTER_ID:
+        return artifact.complete_source
+    trusted = target.read_text(encoding="utf-8") if target.exists() else ""
+    return PythonPytestModuleMerger().merge(
+        PythonPytestModuleMergeRequest(
+            trusted,
+            artifact.complete_source,
+            artifact.canonical_test_identity,
+        )
+    )
+
 
 
 @dataclass(frozen=True)
@@ -213,8 +232,6 @@ class StrictMicrocycleRequest:
     include_accepted_regression_suite: bool = True
     revision_lifecycle: MicrocycleRevisionLifecycle | None = None
     revision_binding_request: RevisionBindingRequest | None = None
-
-
 @dataclass(frozen=True)
 class StrictMicrocycleDependencies:
     state_store: MicrocycleStateStore
@@ -403,7 +420,7 @@ class StrictMicrocycleService:
         artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, base))
         candidate = self.candidates.materialise(FrontierCandidateRequest(artifact, request.repository_root, state.model.test_path))
         try:
-            diagnostic = adapter.execute_frontier(FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path))
+            diagnostic = adapter.execute_frontier(FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path))
             prior = BoundaryOutcome.GREEN.value if state.frontier.index else None
             assessment = adapter.classify_boundary(BoundaryClassificationRequest(diagnostic, candidate.artifact, state.fragments[state.frontier.index], prior))
             state = _record_execution(state, base, assessment)
@@ -630,6 +647,8 @@ def _record_execution(state: MicrocycleState, base: str, assessment: BoundaryAss
 def _record_developer(state: MicrocycleState, base: str, result: WorkUnitExecutionResult) -> MicrocycleState:
     counts = _counts_for(state, base)
     attempt = DeveloperAttempt(
+
+
         counts.developer_attempts + 1, state.frontier.index, base, result.accepted_revision,
         tuple(item for item in (result.evidence_location, result.error) if item),
     )
@@ -650,6 +669,7 @@ def _advance(state: MicrocycleState, base: str) -> MicrocycleState:
         regression=RegressionState("pending", state.regression.command),
         candidate_chain_revision=base,
     )
+
 
 
 def _working_binding(request: StrictMicrocycleRequest, expected_revision: str) -> RepositoryBinding:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -17,12 +17,18 @@ from core.development.project_environment import ProjectEnvironmentService
 from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
 from core.development.scenario_drafting import ScenarioDraftingService
 from core.development.scenario_drafting_domain import ScenarioDraftRequest, ScenarioRepositoryFacts
+from core.development.checklist_reconciliation_tree import (
+    ChecklistReconciliationTree, ChecklistTreeContext, validate_persisted_tree,
+)
+from core.development.reconciliation_progress import ReconciliationJournal, ReconciliationJournalRequest, evidence_digest
+from core.development.specification_domain import SpecificationChecklistItem
 from core.development.specification_reconciliation import (
     ChecklistItemReconciler,
-    ChecklistReconciliationRequest,
     CompletedMicrocycleEvidenceCollector,
     GitAcceptedTestCatalog,
 )
+from core.development.reconciliation_response import ReconciliationFailure
+from core.development.specification_evidence_routing import RoutedChecklistReconciler, required_source_subjects
 from core.development.microcycle_domain import MicrocycleState
 from core.development.strict_microcycle import StrictMicrocycleRequest, StrictMicrocycleService
 from core.development.strict_tdd_feature_application import (
@@ -75,13 +81,32 @@ class CompletedFeatureReconciler:
         states = [self._state(item.scenario_id) for item in request.completed_behaviors]
         accepted = CompletedMicrocycleEvidenceCollector().collect(states)
         catalog = GitAcceptedTestCatalog(self.repository_root, request.canonical_revision)
-        item_reconciler = ChecklistItemReconciler(self.reasoning_gateway, catalog)
+        item_reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(self.reasoning_gateway, catalog), catalog)
+        requested_subjects = required_source_subjects(gatekeeper.checklist)
+        languages = {state.model.language_id for state in states}
+        language = next(iter(languages)) if len(languages) == 1 else ""
+        identity = evidence_digest({
+            "checklist": gatekeeper.checklist.to_dict(), "language": language,
+            "repository": str(self.repository_root.resolve()),
+            "accepted": [{"evidence": evidence.to_dict(), "verified_source": catalog.verified_source(evidence)}
+                         for evidence in sorted(accepted, key=lambda entry: entry.test_name)],
+        })
+        journal = ReconciliationJournal(ReconciliationJournalRequest(
+            request.canonical_revision, identity, request.reconciliation_progress, request.checkpoint,
+            tuple(gatekeeper.checklist.item_refs())))
+        roots = [SpecificationChecklistItem.from_dict(item.to_dict()) for item in gatekeeper.checklist.items]
+        validate_persisted_tree(journal, roots)
+        tree = ChecklistReconciliationTree(journal, self.reasoning_gateway)
         results: list[dict[str, object]] = []
-        for item in gatekeeper.checklist.items:
-            result = await item_reconciler.reconcile(
-                ChecklistReconciliationRequest(request.contract.project_id, item.ref, item.text, accepted)
-            )
-            results.append(result.to_dict())
+        for item in roots:
+            try:
+                context = ChecklistTreeContext(item_reconciler, gatekeeper.checklist.project_id,
+                    gatekeeper.checklist.requirement_text, accepted, language,
+                    requested_subjects, request.canonical_revision, item)
+                results.extend(await tree.reconcile(context))
+            except ReconciliationFailure as error:
+                completed = tuple(dict(entry.result) for entry in journal.items if entry.result is not None)
+                raise replace(error, completed_results=completed) from error
         return tuple(results)
 
     def _state(self, scenario_id: str):
@@ -91,11 +116,20 @@ class CompletedFeatureReconciler:
         return state
 
 
+def canonical_test_node_for(contract: BehaviorContract, behavior_ref: str) -> str:
+    index = contract.requirement_refs().index(behavior_ref)
+    test_path = contract.test_paths[min(index, len(contract.test_paths) - 1)]
+    name = "test_" + "".join(char if char.isalnum() else "_" for char in behavior_ref).strip("_")
+    return f"{test_path}::{name}"
+
+
 def _ticket_for(request: FeatureScenarioRequest) -> TddStepProposal:
     index = request.contract.requirement_refs().index(request.behavior.ref)
     test_path = request.contract.test_paths[min(index, len(request.contract.test_paths) - 1)]
     production_path = request.contract.production_paths[0]
-    name = "test_" + "".join(char if char.isalnum() else "_" for char in request.behavior.ref).strip("_")
+    name = canonical_test_node_for(request.contract, request.behavior.ref).partition("::")[2]
+    # TODO(cleanup): Behavior Planner test_hint is stored as red_objective here, but the
+    # strict-TDD Tester payload does not consume red_objective. Wire the advisory hint through or remove the dead handoff.
     return TddStepProposal(
         request.behavior.ref, [request.behavior.ref], request.behavior.summary,
         f"{test_path}::{name}", request.behavior.observable_outcome, test_path, production_path,

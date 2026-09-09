@@ -13,7 +13,10 @@ from core.development.deterministic_regression import REGRESSION_CLEAR, Determin
 from core.development.microcycle_domain import (
     BoundaryAssessment,
     BoundaryDiagnostic,
+    BehaviorReviewProtocolFailure,
+    BehaviorReviewState,
     BoundaryOutcome,
+    MicrocyclePendingAction,
     LanguageAdapterCatalog,
     LanguageAdapterDescriptor,
     RegressionState,
@@ -210,3 +213,52 @@ def test_gatekeeper_collector_excludes_incomplete_or_abandoned_scenarios():
         (completed.model.canonical_test_identity, "base")
     ]
     assert evidence[0].requirement_refs == list(completed.scenario_draft.source_requirement_refs)
+
+
+@pytest.mark.asyncio
+async def test_persisted_behavior_review_protocol_failure_blocks_resume_without_reasoning_or_rack_work(tmp_path):
+    failure = BehaviorReviewProtocolFailure(
+        "athba_senior_behavior_review",
+        2,
+        "first-digest",
+        "repair-digest",
+        "not valid JSON",
+        None,
+        ("reasoning:athba_senior_behavior_review", "reasoning:athba_senior_behavior_review_json_repair"),
+    )
+    initial = initial_state()
+    state = replace(
+        initial,
+        completion=ScenarioCompletion("scenario_complete", "canonical"),
+        behavior_review=BehaviorReviewState(
+            "protocol_failure",
+            1,
+            failure.evidence_refs,
+            protocol_failure=failure,
+        ),
+        pending_action=MicrocyclePendingAction.BLOCKED.value,
+    )
+    store = MemoryStore()
+    store.save(state)
+
+    class Reviewer:
+        def __init__(self):
+            self.calls = 0
+
+        async def review(self, value):
+            self.calls += 1
+            raise AssertionError("persisted protocol failure must not be rereviewed")
+
+    reviewer = Reviewer()
+    completion = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer))
+    outcome = await service(
+        store,
+        CandidateRepository(tmp_path, {"base": ""}),
+        Gateway([]),
+        completion=completion,
+    ).run(request(tmp_path, state))
+
+    assert outcome.status == "behavior_review_protocol_failure"
+    assert outcome.state.completion.completed_revision == "canonical"
+    assert outcome.state.behavior_review.protocol_failure == failure
+    assert reviewer.calls == 0
