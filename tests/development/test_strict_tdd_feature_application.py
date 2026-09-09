@@ -132,7 +132,7 @@ class Reconciler:
 
 
 def service(tmp_path, planned):
-    environment = ProjectEnvironmentService(tmp_path / "projects", python_executable="/srv/ATHBA/.venv/bin/python")
+    environment = ProjectEnvironmentService(tmp_path / "projects")
     planner, gatekeeper, scenarios, reconciler = Planner(planned), Gatekeeper(), Scenarios(), Reconciler()
     application = StrictTddFeatureApplicationService(
         StrictTddFeatureDependencies(

@@ -94,6 +94,14 @@ def test_readiness_probe_timeout_is_fail_closed(tmp_path, monkeypatch):
         ProjectReadinessVerifier(_ReadyGit()).assert_ready(_readiness_project(tmp_path))
 
 
+def test_project_default_runtime_uses_current_python_executable(tmp_path):
+    environment = ProjectEnvironmentService(tmp_path / "projects")
+
+    project = environment.create_or_load_python_project("default-runtime")
+
+    assert project.runtime.environment_path == sys.executable
+
+
 def test_project_persists_reloads_and_reuses_runtime(tmp_path):
     first = service(tmp_path).create_or_load_python_project("proof-one")
     second = service(tmp_path).create_or_load_python_project("proof-one")

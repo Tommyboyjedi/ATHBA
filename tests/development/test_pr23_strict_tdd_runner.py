@@ -8,6 +8,7 @@ import pytest
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -161,7 +162,7 @@ def test_cli_happy_path_checkpoints_restarts_completes_and_replays(tmp_path, cap
     resumed = Factory(log, counts)
     assert main(args("resume", state, evidence), resumed) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "completed"
-    assert subprocess.run(["/srv/ATHBA/.venv/bin/python","-m","pytest","-q"], cwd=repository, capture_output=True, text=True, timeout=15).returncode == 0
+    assert subprocess.run([sys.executable,"-m","pytest","-q"], cwd=repository, capture_output=True, text=True, timeout=15).returncode == 0
     resumed_state = microcycles.load(scenario_id)
     assert resumed_state is not None
     assert tuple(

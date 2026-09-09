@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from core.development.python_test_runtime import PythonPytestRuntime
 from core.filesystem_policy import resolve_identifier_path
 
 
-DEFAULT_ATHBA_PYTHON = "/srv/ATHBA/.venv/bin/python"
+DEFAULT_ATHBA_PYTHON = sys.executable
 PYTEST_RUNTIME_READINESS_TIMEOUT_SECONDS = 5
 
 

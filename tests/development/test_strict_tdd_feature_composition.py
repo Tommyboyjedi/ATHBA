@@ -164,7 +164,7 @@ def feature_contract():
 async def test_real_git_feature_composition_runs_lifecycle_and_reconciles_only_completed_evidence(tmp_path):
     state_root = tmp_path / "state"
     environment = ProjectEnvironmentService(
-        state_root / "projects", python_executable="/srv/ATHBA/.venv/bin/python"
+        state_root / "projects"
     )
     project = environment.create_or_load_python_project("feature")
     repository = Path(project.repository_root)
