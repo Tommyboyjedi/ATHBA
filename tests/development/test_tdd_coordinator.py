@@ -4,7 +4,7 @@ import pytest
 
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.progression import ExecutionAttemptRecord
-from core.development.tdd_coordinator import DeveloperWorkUnitFactory, TddCoordinator, TesterWorkUnitFactory
+from core.development.tdd_coordinator import DeveloperWorkUnitFactory, TddCoordinator, TddCoordinatorDependencies, TesterWorkUnitFactory
 from core.development.tdd_progression import TddBehavior, TddBehaviorProgress, TddPhase, TddPhaseState, TddSnapshot
 from core.execution.rack_ai_contract import (
     RepositoryBinding,
@@ -47,6 +47,18 @@ def binding(base_sha="a" * 40) -> RepositoryBinding:
     return RepositoryBinding(repository_id="task-queue-fixture", base_ref="main", base_sha=base_sha)
 
 
+def coordinator(gateway: FakeGateway, repo: TddStateRepo) -> TddCoordinator:
+    return TddCoordinator(
+        TddCoordinatorDependencies(
+            gateway=gateway,
+            repository_binding=binding(),
+            state_repo=repo,
+            tester_factory=TesterWorkUnitFactory(),
+            developer_factory=DeveloperWorkUnitFactory(),
+        )
+    )
+
+
 def accepted(work_unit_id: str, revision: str) -> WorkUnitExecutionResult:
     return WorkUnitExecutionResult(
         work_unit_id=work_unit_id,
@@ -78,7 +90,7 @@ async def test_red_runs_before_green(tmp_path):
         }
     )
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1])
 
     assert gateway.calls == [("b1--red", "a" * 40), ("b1--green", "b" * 40)]
     assert result.completed_behavior_ids == ["b1"]
@@ -97,7 +109,7 @@ async def test_green_base_matches_red_accepted_revision_and_next_red_uses_prior_
         }
     )
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1, b2])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1, b2])
 
     assert gateway.calls == [
         ("b1--red", "a" * 40),
@@ -113,7 +125,7 @@ async def test_rejected_red_stops_cycle(tmp_path):
     b1 = behavior("b1", "add task", "tests/test_task_queue.py::test_add_task")
     gateway = FakeGateway(results={"b1--red": rejected("b1--red")})
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1])
 
     assert gateway.calls == [("b1--red", "a" * 40)]
     assert result.blocked_behavior_id == "b1"
@@ -136,7 +148,7 @@ async def test_red_unexpected_pass_is_reported_as_already_satisfied(tmp_path):
         }
     )
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1])
 
     assert result.blocked_phase == TddPhase.RED.value
     assert result.blocked_reason == "red phase found behavior already satisfied before RED"
@@ -157,7 +169,7 @@ async def test_accepted_red_without_revision_stops_cycle(tmp_path):
         }
     )
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1])
 
     assert gateway.calls == [("b1--red", "a" * 40)]
     assert result.blocked_phase == TddPhase.RED.value
@@ -174,7 +186,7 @@ async def test_rejected_green_stops_cycle(tmp_path):
         }
     )
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1])
 
     assert gateway.calls == [("b1--red", "a" * 40), ("b1--green", "b" * 40)]
     assert result.blocked_phase == TddPhase.GREEN.value
@@ -196,7 +208,7 @@ async def test_accepted_green_without_revision_stops_cycle(tmp_path):
         }
     )
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1])
 
     assert result.blocked_phase == TddPhase.GREEN.value
     assert result.blocked_reason == "accepted green phase missing trusted accepted revision"
@@ -272,6 +284,26 @@ def test_state_persists_phase_and_revisions(tmp_path):
     assert loaded.behaviors["b1"].current_phase == TddPhase.COMPLETE.value
 
 
+def test_state_persists_repository_environment_resources(tmp_path):
+    repo = TddStateRepo(tmp_path)
+    snapshot = TddSnapshot(
+        project_id="task-queue",
+        repository_binding=RepositoryBinding(
+            repository_id="task-queue-fixture",
+            base_ref="main",
+            base_sha="c" * 40,
+            environment_resources=["/srv/env/python-314", "/srv/env/pytest"],
+        ),
+        current_trusted_revision="c" * 40,
+    )
+
+    repo.save(snapshot)
+    loaded = repo.load("task-queue")
+
+    assert loaded is not None
+    assert loaded.repository_binding.environment_resources == ["/srv/env/python-314", "/srv/env/pytest"]
+
+
 @pytest.mark.asyncio
 async def test_resume_does_not_rerun_completed_red(tmp_path):
     b1 = behavior("b1", "add task", "tests/test_task_queue.py::test_add_task")
@@ -304,7 +336,7 @@ async def test_resume_does_not_rerun_completed_red(tmp_path):
     )
     gateway = FakeGateway(results={"b1--green": accepted("b1--green", "c" * 40)})
 
-    result = await TddCoordinator(gateway, binding(), repo).run([b1])
+    result = await coordinator(gateway, repo).run([b1])
 
     assert gateway.calls == [("b1--green", "b" * 40)]
     assert result.completed_behavior_ids == ["b1"]
@@ -352,7 +384,7 @@ async def test_resume_does_not_rerun_completed_green(tmp_path):
         }
     )
 
-    result = await TddCoordinator(gateway, binding(), repo).run([b1, b2])
+    result = await coordinator(gateway, repo).run([b1, b2])
 
     assert gateway.calls == [("b2--red", "c" * 40), ("b2--green", "d" * 40)]
     assert result.completed_behavior_ids == ["b1", "b2"]
@@ -363,7 +395,7 @@ async def test_transport_failure_blocks_phase(tmp_path):
     b1 = behavior("b1", "add task", "tests/test_task_queue.py::test_add_task")
     gateway = FakeGateway(results={}, transport_error_for="b1--red")
 
-    result = await TddCoordinator(gateway, binding(), TddStateRepo(tmp_path)).run([b1])
+    result = await coordinator(gateway, TddStateRepo(tmp_path)).run([b1])
 
     assert result.blocked_phase == TddPhase.RED.value
     assert result.attempts[-1].status == "transport_error"

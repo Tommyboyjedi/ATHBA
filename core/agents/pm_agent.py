@@ -1,6 +1,6 @@
 from core.agents.behaviors.behavior_loader import BehaviorLoader
-from core.agents.helpers.llm_exchange import LlmExchange
-from core.agents.interfaces import IAgent
+from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
+from core.agents.interfaces import BehaviorExecution
 from core.controllers.project_controller import ProjectsController
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.project import Project
@@ -9,7 +9,7 @@ from core.datastore.repos.ticket_repo import TicketRepo
 from core.services.session_service import SessionService
 from llm_service.enums.eagent import EAgent
 
-class PmAgent(IAgent):
+class PmAgent:
 
 
     def __init__(self, session: Projses):
@@ -23,13 +23,14 @@ class PmAgent(IAgent):
 
     async def run(self, content: str, request) -> list[ChatMessage]:
         self.request = request
-        response = await LlmExchange(agent=self, session=self._session, content=content).get_intent()
+        response = await LlmExchange(LlmExchangeRequest(agent=self, session=self._session, content=content)).get_intent()
         results = []
         print("LLM INTENT:", response.intent)
         print("LLM RAW RESPONSE:", repr(response.response))
 
+        execution = BehaviorExecution(agent=self, message=content, intent=response)
         for behavior in self.behaviors:
-            messages = await behavior.run(self, content, response)
+            messages = await behavior.run(execution)
             if messages:
                 if isinstance(messages, list):
                     results.extend(messages)

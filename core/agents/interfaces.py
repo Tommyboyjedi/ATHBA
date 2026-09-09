@@ -1,56 +1,44 @@
-from abc import ABC, abstractmethod
-from typing import List
+from __future__ import annotations
 
-from core.dataclasses.agent_message import AgentMessage
+from dataclasses import dataclass
+from typing import Protocol
+
+from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from llm_service.enums.eagent import EAgent
 
 
-class IAgent(ABC):
-    @abstractmethod
-    def run(self, content: str):
-        pass
+class IAgent(Protocol):
+    async def run(self, content: str, request=None):
+        ...
 
-    @abstractmethod
     def report(self) -> dict:
-        pass
-
+        ...
 
     @property
-    @abstractmethod
     def name(self) -> str:
-        """
-        The name of the agent.
-        """
-        pass
+        ...
 
     @property
-    @abstractmethod
     def llm_prompt(self) -> str:
-        """
-        The name of the agent.
-        """
-        pass
+        ...
 
     @property
-    @abstractmethod
     def agent_type(self) -> EAgent:
-        pass
+        ...
 
     @property
-    @abstractmethod
     def session(self):
-        """
-        The session associated with the agent.
-        """
-        pass
+        ...
 
 
-class AgentBehavior(ABC):
-    @abstractmethod
-    async def run(self, agent: IAgent, message: str, intent: LlmIntent) -> bool:
-        """
-        Process the incoming message. If this behavior can handle it,
-        return an AgentMessage. Otherwise, return None.
-        """
-        pass
+@dataclass(frozen=True)
+class BehaviorExecution:
+    agent: IAgent
+    message: str
+    intent: LlmIntent
+
+
+class AgentBehavior(Protocol):
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
+        ...

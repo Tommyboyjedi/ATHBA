@@ -1,6 +1,7 @@
 from ninja import Router
 from django.shortcuts import render
 from uuid import UUID
+from core.datastore.repos.mongo_requests import SpecVersionCreateRequest
 from core.datastore.repos.spec_version_repo import SpecVersionRepo
 
 router = Router(tags=["Spec"])
@@ -23,5 +24,7 @@ async def get_spec(request, project_id: UUID):
 async def patch_spec(request, project_id: UUID):
     data = await request.body()
     content = data.decode("utf-8")
-    await spec_repo.add_version(project_id, content, author="PM")
+    await spec_repo.add_version(
+        SpecVersionCreateRequest(project_id=project_id, content=content, author="PM")
+    )
     return { "status": "ok" }

@@ -1,3 +1,10 @@
+"""Legacy local model-management watchdog.
+
+This module implements the old in-process model TTL and host-pressure logic for
+`llm_service`. It is quarantined compatibility code rather than part of the
+modern ATHBA versus Rack AI ownership boundary.
+"""
+
 import asyncio
 import threading
 import time

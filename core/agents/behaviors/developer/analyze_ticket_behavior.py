@@ -4,12 +4,12 @@ Analyze Ticket Behavior for Developer Agent.
 This behavior analyzes ticket requirements to understand what needs to be implemented.
 """
 
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 
 
-class AnalyzeTicketBehavior(AgentBehavior):
+class AnalyzeTicketBehavior:
     """
     Behavior for analyzing ticket requirements.
     
@@ -22,7 +22,7 @@ class AnalyzeTicketBehavior(AgentBehavior):
     
     intent = ["analyze_ticket"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the analyze ticket behavior.
         
@@ -34,6 +34,10 @@ class AnalyzeTicketBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
@@ -79,13 +83,8 @@ Please provide:
 """
         
         try:
-            from core.agents.helpers.llm_exchange import LlmExchange
-            llm_exchange = LlmExchange(
-                agent=agent,
-                session=agent.session,
-                content=analysis_prompt,
-                use_cloud=False
-            )
+            from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
+            llm_exchange = LlmExchange(LlmExchangeRequest(agent=agent, session=agent.session, content=analysis_prompt, use_cloud=False))
             
             analysis = await llm_exchange.get_response()
         except Exception as e:

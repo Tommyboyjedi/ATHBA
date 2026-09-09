@@ -1,6 +1,6 @@
 from core.agents.behaviors.behavior_loader import BehaviorLoader
-from core.agents.helpers.llm_exchange import LlmExchange
-from core.agents.interfaces import IAgent
+from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.project import Project
 from core.dataclasses.projses import Projses
@@ -10,7 +10,7 @@ from core.services.project_service import ProjectsService
 from llm_service.enums.eagent import EAgent
 
 
-class ArchitectAgent(IAgent):
+class ArchitectAgent:
     def __init__(self, session: Projses):
         self._session = session
         self._session.agent_name = self.name
@@ -28,17 +28,13 @@ class ArchitectAgent(IAgent):
     async def initialize(self):
         self._project = await ProjectsService().get_project_by_id(self._session.project_id)
 
-    async def run(self, content: str) -> list[ChatMessage]:
-        response = await LlmExchange(
-            agent=self,
-            session=self._session,
-            content=content,
-            use_cloud=True,
-        ).get_intent()
+    async def run(self, content: str, request=None) -> list[ChatMessage]:
+        response = await LlmExchange(LlmExchangeRequest(agent=self, session=self._session, content=content, use_cloud=True)).get_intent()
         results = []
 
+        execution = BehaviorExecution(agent=self, message=content, intent=response)
         for behavior in self.behaviors:
-            messages = await behavior.run(self, content, response)
+            messages = await behavior.run(execution)
             if messages:
                 if isinstance(messages, list):
                     results.extend(messages)

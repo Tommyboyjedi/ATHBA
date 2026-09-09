@@ -1,3 +1,10 @@
+"""Legacy local LLM server for the older ATHBA chat stack.
+
+The modern ATHBA architecture uses provider-neutral reasoning plus Rack AI
+execution. This module remains only as quarantined compatibility runtime for the
+older local `LlmExchange` path.
+"""
+
 import os
 import time
 import asyncio

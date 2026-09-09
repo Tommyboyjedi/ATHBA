@@ -1,26 +1,26 @@
-import json
 import os
 from pathlib import Path
 
+from core.atomic_json_file import read_json_file, write_json_atomically
 from core.development.progression import CoordinationSnapshot
+from core.filesystem_policy import resolve_identifier_path
 
 
 class WorkUnitStateRepo:
     def __init__(self, root: str | Path | None = None):
         state_root = root or os.environ.get("ATHBA_STATE_ROOT") or "state/work-unit-runs"
-        self.root = Path(state_root)
+        self.root = Path(state_root).resolve()
 
     def load(self, project_id: str) -> CoordinationSnapshot | None:
         path = self._path_for(project_id)
         if not path.exists():
             return None
-        return CoordinationSnapshot.from_dict(json.loads(path.read_text(encoding="utf-8")))
+        return CoordinationSnapshot.from_dict(read_json_file(path))
 
     def save(self, snapshot: CoordinationSnapshot) -> Path:
         path = self._path_for(snapshot.project_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(snapshot.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+        write_json_atomically(path, snapshot.to_dict())
         return path
 
     def _path_for(self, project_id: str) -> Path:
-        return self.root / f"{project_id}.json"
+        return resolve_identifier_path(self.root, project_id, "project id").with_suffix(".json")

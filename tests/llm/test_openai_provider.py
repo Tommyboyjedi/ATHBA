@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from core.llm.contracts.exceptions import ValidationError
+from core.llm.contracts.provider import ProviderRequest
 from core.llm.providers.openai_provider import OpenAIProvider
 
 
@@ -19,21 +20,13 @@ def env(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
 
+def sample_request(schema):
+    return ProviderRequest(prompt="hi", model="gpt", response_schema=schema)
+
+
 def test_openai_provider_happy_path(schema, monkeypatch):
-    payload = {
-        "response": "ok",
-        "intent": "greet",
-        "agents_routing": [],
-        "entities": {},
-    }
-    api_response = {
-        "output": [
-            {
-                "content": [{"text": json.dumps(payload)}],
-            }
-        ],
-        "usage": {"input_tokens": 5, "output_tokens": 7},
-    }
+    payload = {"response": "ok", "intent": "greet", "agents_routing": [], "entities": {}}
+    api_response = {"output": [{"content": [{"text": json.dumps(payload)}]}], "usage": {"input_tokens": 5, "output_tokens": 7}}
     url = "https://api.openai.com/v1/responses"
 
     def fake_post(url, headers, json, timeout):
@@ -42,7 +35,7 @@ def test_openai_provider_happy_path(schema, monkeypatch):
     monkeypatch.setattr(httpx, "post", fake_post)
 
     provider = OpenAIProvider()
-    result = provider.invoke("hi", model="gpt", response_schema=schema)
+    result = provider.invoke(sample_request(schema))
 
     assert json.loads(result.text) == payload
     assert result.usage == {"input_tokens": 5, "output_tokens": 7}
@@ -50,21 +43,8 @@ def test_openai_provider_happy_path(schema, monkeypatch):
 
 
 def test_openai_provider_retries_on_429_then_succeeds(schema, monkeypatch):
-    payload = {
-        "response": "ok",
-        "intent": "greet",
-        "agents_routing": [],
-        "entities": {},
-    }
-    api_response = {
-        "output": [
-            {
-                "content": [{"text": json.dumps(payload)}],
-            }
-        ],
-        "usage": {"input_tokens": 1, "output_tokens": 1},
-    }
-
+    payload = {"response": "ok", "intent": "greet", "agents_routing": [], "entities": {}}
+    api_response = {"output": [{"content": [{"text": json.dumps(payload)}]}], "usage": {"input_tokens": 1, "output_tokens": 1}}
     url = "https://api.openai.com/v1/responses"
     responses = [
         httpx.Response(429, request=httpx.Request("POST", url)),
@@ -78,21 +58,14 @@ def test_openai_provider_retries_on_429_then_succeeds(schema, monkeypatch):
     monkeypatch.setattr(time, "sleep", lambda *_: None)
 
     provider = OpenAIProvider(max_retries=2)
-    result = provider.invoke("hi", model="gpt", response_schema=schema)
+    result = provider.invoke(sample_request(schema))
     assert json.loads(result.text)["intent"] == "greet"
     assert result.usage == {"input_tokens": 1, "output_tokens": 1}
 
 
 def test_openai_provider_schema_violation(monkeypatch, schema):
-    bad_payload = {"response": "oops"}  # missing required fields
-    api_response = {
-        "output": [
-            {
-                "content": [{"text": json.dumps(bad_payload)}],
-            }
-        ],
-        "usage": {"input_tokens": 1, "output_tokens": 1},
-    }
+    bad_payload = {"response": "oops"}
+    api_response = {"output": [{"content": [{"text": json.dumps(bad_payload)}]}], "usage": {"input_tokens": 1, "output_tokens": 1}}
 
     def fake_post(url, headers, json, timeout):
         return httpx.Response(200, json=api_response, request=httpx.Request("POST", url))
@@ -101,4 +74,4 @@ def test_openai_provider_schema_violation(monkeypatch, schema):
 
     provider = OpenAIProvider()
     with pytest.raises(ValidationError):
-        provider.invoke("hi", model="gpt", response_schema=schema)
+        provider.invoke(sample_request(schema))

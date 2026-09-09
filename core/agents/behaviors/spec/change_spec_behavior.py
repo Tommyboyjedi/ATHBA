@@ -1,17 +1,15 @@
-from core.agents.interfaces import AgentBehavior
-from core.agents.spec_agent import SpecBuilderAgent
-from core.dataclasses.agent_message import AgentMessage
-from core.dataclasses.llm_intent import LlmIntent
+from core.agents.interfaces import BehaviorExecution
+from core.dataclasses.chat_message import ChatMessage
 
 
-class ChangeSpecBehavior(AgentBehavior):
+class ChangeSpecBehavior:
     intent = ["change_spec"]
 
-    async def run(self, agent: SpecBuilderAgent, user_input: str, llm_response: LlmIntent) -> AgentMessage | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
+        llm_response = execution.intent
         if llm_response.intent not in self.intent:
             return None
-
-        return AgentMessage(
-            sender=agent.agent_id,
-            text="✅ This is a stub for ChangeSpecBehavior responding to intent 'change_spec'."
+        content = llm_response.response or (
+            "✅ This is a stub for ChangeSpecBehavior responding to intent 'change_spec'."
         )
+        return [ChatMessage(sender=execution.agent.name, content=content)]

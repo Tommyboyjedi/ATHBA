@@ -1,5 +1,5 @@
 """Repository for managing conversation/chat message storage in MongoDB."""
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import List
 
 from bson import ObjectId
@@ -27,7 +27,7 @@ class ConversationRepo:
 
         await self.col.update_one(
             {"project_id": project_id, "session_id": session_id},
-            {"$push": {"messages": message_dict}, "$set": {"last_updated": datetime.utcnow()}},
+            {"$push": {"messages": message_dict}, "$set": {"last_updated": datetime.now(UTC)}},
             upsert=True,
         )
 
@@ -56,5 +56,5 @@ class ConversationRepo:
     async def clear_conversation(self, session_id: str) -> None:
         await self.col.update_one(
             {"session_id": session_id},
-            {"$set": {"messages": [], "last_updated": datetime.utcnow()}},
+            {"$set": {"messages": [], "last_updated": datetime.now(UTC)}},
         )

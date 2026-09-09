@@ -4,12 +4,12 @@ Verify Pass Behavior for Tester Agent.
 This behavior verifies that all tests pass (TDD GREEN phase).
 """
 
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 
 
-class VerifyPassBehavior(AgentBehavior):
+class VerifyPassBehavior:
     """
     Behavior for verifying tests pass (TDD GREEN phase).
     
@@ -21,7 +21,7 @@ class VerifyPassBehavior(AgentBehavior):
     
     intent = ["verify_pass", "verify", "check_pass", "tdd_green"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the verify pass behavior.
         
@@ -33,6 +33,10 @@ class VerifyPassBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
