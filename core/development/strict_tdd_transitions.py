@@ -53,6 +53,9 @@ class ScenarioTransitionKind(str, Enum):
 
 
 class FeatureTransitionKind(str, Enum):
+    BEHAVIOR_REPAIR_REQUIRED = "behavior_repair_required"
+    BEHAVIOR_REPAIR_RECEIVED = "behavior_repair_received"
+    BEHAVIOR_REPAIR_APPLIED = "behavior_repair_applied"
     PROJECT_LOADED = "project_loaded"
     CONTRACT_PERSISTED = "contract_persisted"
     GATEKEEPER_PERSISTED = "gatekeeper_persisted"
@@ -87,6 +90,7 @@ class StrictTddTransitionPath:
         if self.scenario_kind is not None and self.feature_kind not in {
             FeatureTransitionKind.SCENARIO_ADVANCED,
             FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED,
+            FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED,
             FeatureTransitionKind.BLOCKED,
         }:
             raise ValueError("nested scenario provenance requires a scenario-consuming feature transition")

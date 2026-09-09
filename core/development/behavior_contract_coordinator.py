@@ -13,6 +13,8 @@ from typing import Protocol, cast
 
 from core.development.behavior_replan_domain import BehaviorReplanRequest, BehaviorReplanResponse
 from core.development.behavior_replanning import BehaviorRequirementReplanner
+from core.development.behavior_requirement_repair import BehaviorRequirementRepairPlanner
+from core.development.behavior_requirement_repair_domain import BehaviorRepairRequest
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.contract_run_store import ContractRunStore
 from core.development.failure_progression import (
@@ -354,6 +356,9 @@ class BehaviorContractPlanner:
     def __init__(self, gateway: ReasoningGateway, clause_planner: RequirementClausePlanner | None = None):
         self.gateway = gateway
         self.clause_planner = clause_planner or RequirementClausePlanner(gateway)
+
+    async def repair_requirement(self, request: BehaviorRepairRequest) -> str:
+        return await BehaviorRequirementRepairPlanner(self.gateway).repair(request)
 
     async def replan_requirement(self, request: BehaviorReplanRequest) -> BehaviorReplanResponse:
         return await BehaviorRequirementReplanner(self.gateway).replan(request)
@@ -1894,10 +1899,12 @@ def _contract_prompt(
                 "declare depends_on only for a real prerequisite requirement in this contract; use an empty array when independently executable",
             ],
             "traceability_rules": [
-                "every supplied source clause must be covered by at least one observable requirement source_refs entry",
+                "every supplied source clause must be covered by its appropriate evidence channel; only evidence_kind=test clauses are required to appear in observable requirement source_refs",
+                "every supplied source clause whose evidence_kind is test must be covered by at least one observable requirement source_refs entry",
+                "each observable requirement must include at least one evidence_kind=test source ref; mechanical or review refs may be supplementary but must never be the sole source_refs",
                 "copy source clause refs exactly into source_refs",
                 "do not invent source refs",
-                "do not leave a source clause represented only in invariants, completion_criteria, or error_semantics",
+                "do not leave an evidence_kind=test source clause represented only in invariants, completion_criteria, or error_semantics",
                 "each observable requirement must include a non-empty source_refs array",
             ],
             "domain_rules": [
@@ -1937,7 +1944,11 @@ def _contract_from_response(
 
 
 def _is_recoverable_contract_error(error: ValueError) -> bool:
-    return str(error).startswith("source clauses must be covered by observable requirements:")
+    message = str(error)
+    return (
+        message.startswith("test-evidence source clauses must be covered by observable requirements:")
+        or message.startswith("observable requirements must include at least one test-evidence source clause:")
+    )
 
 
 def _contract_repair_prompt(
@@ -1993,7 +2004,8 @@ def _contract_repair_prompt(
             "repair_rules": [
                 "keep the contract within the supplied repository-relative production and test paths",
                 "preserve valid semantic fields where possible",
-                "every supplied source clause ref must appear in at least one observable_requirements[].source_refs entry",
+                "every supplied source clause ref whose evidence_kind is test must appear in at least one observable_requirements[].source_refs entry",
+                "each observable requirement must include at least one evidence_kind=test source ref; mechanical or review refs may be retained only as supplementary traceability",
                 "do not invent worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
             ],
         },

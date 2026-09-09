@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.development.specification_evidence_policy import reconciliation_satisfied
+from core.development.strict_tdd_feature_execution import canonical_test_node_for
 
 from dataclasses import replace
 
@@ -37,6 +38,10 @@ from core.development.strict_tdd_transitions import (
 
 from core.development.strict_tdd_feature_replan import FeatureReplanContext, advance_replan, replan_pending, require_replan
 
+from core.development.strict_tdd_feature_requirement_repair import (
+    advance_repair, repair_pending, require_repair, selected_scenario_id,
+)
+
 MAX_FEATURE_COMPATIBILITY_TRANSITIONS = 100
 
 
@@ -69,6 +74,8 @@ async def advance(
         return _result_for(FeatureTransitionKind.FEATURE_COMPLETED, state, project)
     if state.status == StrictTddFeatureStatus.BLOCKED.value:
         return _result_for(FeatureTransitionKind.BLOCKED, state, project, state.blocked_reason)
+    if repair_pending(state):
+        return await advance_repair(service, FeatureReplanContext(state, project))
     if replan_pending(state):
         return await advance_replan(service, FeatureReplanContext(state, project))
     if state.pending_completed_behavior is not None:
@@ -152,7 +159,7 @@ def _select_behavior(
     project: DevelopmentProject,
     behavior_ref: str,
 ) -> FeatureAdvanceResult:
-    scenario_id = f"{state.project_id}--{behavior_ref}"
+    scenario_id = selected_scenario_id(state, behavior_ref)
     selected = replace(state, current_scenario_id=scenario_id)
     service.states.save(selected)
     return _result_for(FeatureTransitionKind.BEHAVIOR_SELECTED, selected, project, behavior_ref=behavior_ref)
@@ -229,11 +236,12 @@ async def _advance_scenario(
     project: DevelopmentProject,
     behavior: BehaviorContractRequirement,
 ) -> FeatureAdvanceResult:
+    contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
     request = FeatureScenarioRequest(
-        project,
-        BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None),
-        behavior,
+        project, contract, behavior,
         state.canonical_development_base or project.trusted_base_sha,
+        tuple(canonical_test_node_for(contract, item.behavior_ref) for item in state.completed_behaviors),
+        scenario_id=state.current_scenario_id,
     )
     advanced = await service.scenarios.advance(request)
     outcome = advanced.result
@@ -266,6 +274,11 @@ async def _advance_scenario(
             advanced.microcycle_kind == MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED
             and advanced.blocker_or_replan_reason == "developer_attempts_exhausted"
         )
+        repairing = None if developer_exhaustion else require_repair(state, outcome.draft_state)
+        if repairing is not None:
+            service.states.save(repairing)
+            return _result_for(FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED, repairing, project,
+                               behavior_ref=behavior.ref, scenario_transition=advanced)
         replanning = require_replan(
             state, outcome.draft_state, developer_exhaustion, outcome.evidence_refs
         )
@@ -357,7 +370,7 @@ def _result_for(
         state.canonical_development_base if nested is None else nested.canonical_sha,
         state.working_revision if nested is None else nested.working_sha,
         (len(state.completed_behaviors),) if nested is None else (len(state.completed_behaviors), *nested.retry_counts),
-        _pending_action(state) if nested is None or replan_pending(state) else nested.pending_action,
+        _pending_action(state) if nested is None or replan_pending(state) or repair_pending(state) else nested.pending_action,
     )
     path = StrictTddTransitionPath(
         kind,
@@ -390,6 +403,8 @@ def _result_for(
 
 
 def _pending_action(state: StrictTddFeatureState) -> str:
+    if repair_pending(state):
+        return state.behavior_repairs[-1].phase.value
     if replan_pending(state):
         return state.behavior_replans[-1].phase.value
     if state.status == StrictTddFeatureStatus.PLANNING.value:

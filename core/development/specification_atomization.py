@@ -252,8 +252,17 @@ def _decode_checklist(request: ChecklistAtomizationRequest, response: str) -> Sp
 
 
 def _json_object(text: str, *, label: str) -> dict[str, object]:
+    normalized = text.strip()
+    fenced = re.fullmatch(
+        r"```json[ \t]*\r?\n(?P<body>.*?)\r?\n```",
+        normalized,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    if fenced is not None:
+        normalized = fenced.group("body").strip()
+
     try:
-        payload = json.loads(text)
+        payload = json.loads(normalized)
     except json.JSONDecodeError as error:
         raise ValueError(f"{label} response was not valid JSON") from error
     if not isinstance(payload, dict):

@@ -37,7 +37,7 @@ async def advance(
     executor: StrictFeatureScenarioExecutor,
     request: FeatureScenarioRequest,
 ) -> ScenarioAdvanceResult:
-    scenario_id = f"{request.project.project_id}--{request.behavior.ref}"
+    scenario_id = request.selected_scenario_id
     draft_state = executor.drafting.state_store.load(scenario_id)
     if draft_state is None:
         return await _submit_draft(executor, request, scenario_id)
@@ -80,7 +80,7 @@ async def advance(
             Path(request.project.repository_root),
             request.project.binding().with_base_sha(request.canonical_development_base),
             draft_state.approved_microcycle,
-            (),
+            request.prior_completed_test_nodes,
             True,
             executor.revisions,
             binding_request,
@@ -235,7 +235,7 @@ class StrictFeatureScenarioRunLoop:
                 return outcome
         return FeatureScenarioResult(
             request.behavior.ref,
-            f"{request.project.project_id}--{request.behavior.ref}",
+            request.selected_scenario_id,
             "transition_safety_guard_exhausted",
             f"refs/heads/{request.project.default_ref}",
             request.canonical_development_base,

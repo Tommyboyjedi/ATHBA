@@ -270,3 +270,17 @@ async def test_nested_microcycle_kind_and_effect_flags_are_forwarded_without_rec
     assert advanced.rack_ai_invoked
     assert advanced.deterministic_regression_invoked
     assert advanced.candidate_revision == "c" * 40
+
+@pytest.mark.asyncio
+async def test_completed_behaviors_supply_stable_prior_test_nodes_to_scenarios(tmp_path):
+    application, _planner, _gatekeeper, scenarios, _reconciler = service(tmp_path, contract("prior", 3))
+    request = StrictTddFeatureRequest("prior", "Widget grows.", "python", "pytest", ("widget.py",), ("tests/test_widget.py",), "python", "resume", None, "evidence")
+    for _ in range(12):
+        await application.advance(request)
+        if len(scenarios.requests) == 3:
+            break
+    assert [item.prior_completed_test_nodes for item in scenarios.requests] == [
+        (),
+        ("tests/test_widget.py::test_B_0",),
+        ("tests/test_widget.py::test_B_0", "tests/test_widget.py::test_B_1"),
+    ]

@@ -28,6 +28,12 @@ class FeatureScenarioRequest:
     contract: BehaviorContract
     behavior: BehaviorContractRequirement
     canonical_development_base: str
+    prior_completed_test_nodes: tuple[str, ...] = ()
+    scenario_id: str | None = None
+
+    @property
+    def selected_scenario_id(self) -> str:
+        return self.scenario_id or f"{self.project.project_id}--{self.behavior.ref}"
 
 
 @dataclass(frozen=True)

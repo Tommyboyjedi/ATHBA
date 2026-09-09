@@ -68,17 +68,35 @@ def validate_unique_refs(refs: list[str], label: str) -> None:
 
 
 def validate_contract_source_coverage(contract: BehaviorContract) -> None:
-    clause_refs = contract.source_clause_refs()
-    clause_ref_set = set(clause_refs)
-    seen_source_refs: set[str] = set()
+    clause_by_ref = {clause.ref: clause for clause in contract.source_clauses}
+    test_clause_refs = [
+        clause.ref
+        for clause in contract.source_clauses
+        if clause.evidence_kind == ChecklistEvidenceKind.TEST.value
+    ]
+    seen_test_source_refs: set[str] = set()
+
     for requirement in contract.observable_requirements:
+        requirement_test_refs: list[str] = []
         for source_ref in requirement.source_refs:
-            if source_ref not in clause_ref_set:
+            clause = clause_by_ref.get(source_ref)
+            if clause is None:
                 raise ValueError(f"requirement source refs must exist in source clauses: {source_ref}")
-            seen_source_refs.add(source_ref)
-    uncovered = [ref for ref in clause_refs if ref not in seen_source_refs]
+            if clause.evidence_kind == ChecklistEvidenceKind.TEST.value:
+                requirement_test_refs.append(source_ref)
+                seen_test_source_refs.add(source_ref)
+
+        if not requirement_test_refs:
+            raise ValueError(
+                "observable requirements must include at least one test-evidence source clause: "
+                f"{requirement.ref}"
+            )
+
+    uncovered = [ref for ref in test_clause_refs if ref not in seen_test_source_refs]
     if uncovered:
-        raise ValueError(f"source clauses must be covered by observable requirements: {uncovered}")
+        raise ValueError(
+            f"test-evidence source clauses must be covered by observable requirements: {uncovered}"
+        )
 
 
 def validate_requirement_dependencies(requirements: list[BehaviorContractRequirement]) -> None:

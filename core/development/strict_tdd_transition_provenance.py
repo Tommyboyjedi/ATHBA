@@ -170,6 +170,8 @@ def _event_identity(
 def _event_kind(path: StrictTddTransitionPath, project_disposition: ProjectTransitionDisposition | None) -> StrictTddLifecycleEventKind:
     if path.feature_kind == FeatureTransitionKind.PROJECT_LOADED and project_disposition == ProjectTransitionDisposition.CREATED:
         return StrictTddLifecycleEventKind.PROJECT_CREATED
+    if path.feature_kind == FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED:
+        return StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_REQUIRED
     if path.feature_kind == FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED:
         return StrictTddLifecycleEventKind.BEHAVIOR_REPLAN_REQUIRED
     if path.microcycle_kind is not None:
@@ -201,6 +203,9 @@ def _message(path: StrictTddTransitionPath) -> str:
 
 
 _FEATURE_EVENTS = {
+    FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_REQUIRED,
+    FeatureTransitionKind.BEHAVIOR_REPAIR_RECEIVED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_RECEIVED,
+    FeatureTransitionKind.BEHAVIOR_REPAIR_APPLIED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_APPLIED,
     FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED: StrictTddLifecycleEventKind.BEHAVIOR_REPLAN_REQUIRED,
     FeatureTransitionKind.BEHAVIOR_SPLIT_RECEIVED: StrictTddLifecycleEventKind.BEHAVIOR_SPLIT_RECEIVED,
     FeatureTransitionKind.BEHAVIOR_SPLIT: StrictTddLifecycleEventKind.BEHAVIOR_SPLIT,

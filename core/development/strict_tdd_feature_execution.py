@@ -116,11 +116,18 @@ class CompletedFeatureReconciler:
         return state
 
 
+def canonical_test_node_for(contract: BehaviorContract, behavior_ref: str) -> str:
+    index = contract.requirement_refs().index(behavior_ref)
+    test_path = contract.test_paths[min(index, len(contract.test_paths) - 1)]
+    name = "test_" + "".join(char if char.isalnum() else "_" for char in behavior_ref).strip("_")
+    return f"{test_path}::{name}"
+
+
 def _ticket_for(request: FeatureScenarioRequest) -> TddStepProposal:
     index = request.contract.requirement_refs().index(request.behavior.ref)
     test_path = request.contract.test_paths[min(index, len(request.contract.test_paths) - 1)]
     production_path = request.contract.production_paths[0]
-    name = "test_" + "".join(char if char.isalnum() else "_" for char in request.behavior.ref).strip("_")
+    name = canonical_test_node_for(request.contract, request.behavior.ref).partition("::")[2]
     # TODO(cleanup): Behavior Planner test_hint is stored as red_objective here, but the
     # strict-TDD Tester payload does not consume red_objective. Wire the advisory hint through or remove the dead handoff.
     return TddStepProposal(

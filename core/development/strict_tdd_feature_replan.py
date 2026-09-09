@@ -11,6 +11,7 @@ from core.development.behavior_replan_domain import (
 from core.development.behavior_replan_validation import BehaviorSplitValidationContext, replan_worthy, validate_split
 from core.development.behavior_replanning import BehaviorReplanFailure
 from core.development.project_environment import DevelopmentProject
+from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
 from core.development.scenario_drafting_domain import ScenarioDraftRunState
 from core.development.strict_tdd_feature_application import StrictTddFeatureApplicationService
 from core.development.strict_tdd_feature_domain import StrictTddFeatureState, StrictTddFeatureStatus
@@ -104,6 +105,16 @@ async def advance_replan(
     except ValueError as error:
         return _block(service, context, replace(record, blocker=BehaviorReplanBlocker.INVALID_SPLIT, detail=str(error)))
     superseded = replace(record, phase=BehaviorReplanPhase.SUPERSEDED, structure_digest=digest)
+
+    canonical_revision = state.canonical_development_base
+    if canonical_revision is None:
+        raise ValueError("behavior replan requires a trusted canonical revision")
+    if project.trusted_base_sha != canonical_revision:
+        TrustedProjectRevisionSynchronizer(service.environment).synchronize(
+            project.project_id,
+            canonical_revision,
+        )
+
     updated = replace(_with_record(state, superseded), contract_payload=replacement.to_dict(), current_scenario_id=None)
     service.states.save(updated)
     return _result_for(FeatureTransitionKind.BEHAVIOR_SPLIT, updated, project, behavior_ref=record.request.parent.ref)
