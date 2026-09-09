@@ -26,6 +26,8 @@ fastapi = "^0.115.12"
 psutil = "^7.0.0"
 sse-starlette = "^2.3.5"
 aiohttp = "^3.12.13"
+# Keep the version verified on Python 3.14 CI; 6.8.0 lacked a compatible distribution.
+multidict = "6.7.1"
 gitpython = "^3.1.43"
 
 [tool.poetry.group.dev.dependencies]
@@ -55,8 +57,8 @@ files = [
   "core/development/strict_tdd_transition_provenance.py",
   "core/development/strict_tdd_lifecycle_evidence.py",
   "core/development/strict_tdd_run_domain.py",
-  "core/development/strict_tdd_run_store.py",
   "core/development/strict_tdd_run_reporting.py",
+  "core/development/strict_tdd_run_store.py",
   "core/development/strict_tdd_run_controller.py",
   "core/development/strict_tdd_live_run_composition.py",
   "scripts/run_pr23_strict_tdd_feature.py",
