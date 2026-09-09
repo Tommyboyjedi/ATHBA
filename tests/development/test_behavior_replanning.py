@@ -73,6 +73,7 @@ async def pending_application(tmp_path, payload=None, count=1):
 
     async def execute(value):
         result = await original(value)
+        result = replace(result, canonical_development_base=value.canonical_development_base)
         if value.behavior.ref == planned.observable_requirements[-1].ref:
             draft = exhausted(value.behavior, value.canonical_development_base, f"feature--{value.behavior.ref}")
             return replace(result, scenario_id=draft.scenario_id, status="attempts_exhausted", draft_state=draft,
