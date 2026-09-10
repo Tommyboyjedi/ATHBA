@@ -1,0 +1,78 @@
+{
+  "implementation_revision": "175ff8f69bc1857b449ae3a1051f77d5141fa988",
+  "run_id": "pr30-omission-running-total-20260910T114333Z",
+  "status": "blocked",
+  "reason": "specification_gatekeeper_failed",
+  "completed_behaviors": 4,
+  "transitions": 137,
+  "original_requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "atomization_attempts": 1,
+  "atomization_failure": [],
+  "checklist_creation": "PASS",
+  "reconciliation": [
+    {
+      "checklist_ref": "pr30-001",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test verifies that the RunningTotal class can be instantiated and has a 'total' attribute initialized to 0, confirming the existence of the class.",
+      "revision": null
+    },
+    {
+      "checklist_ref": "pr30-002",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test 'test_REQ_001' explicitly instantiates a RunningTotal object and asserts that its 'total' attribute is equal to 0, directly verifying the requirement that a new instance starts with a total of zero.",
+      "revision": null
+    },
+    {
+      "checklist_ref": "pr30-003",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test 'test_REQ_002' explicitly verifies that calling 'add(amount)' updates the 'total' property by adding both positive (10) and negative (-5) integers, directly confirming the requirement.",
+      "revision": null
+    },
+    {
+      "checklist_ref": "pr30-004",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test verifies that calling the total property (or method) after an addition does not change the value, confirming that accessing the total does not modify the state.",
+      "revision": null
+    },
+    {
+      "checklist_ref": "pr30-005",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test 'test_REQ_004' explicitly adds 3 and -1 to a RunningTotal instance and asserts that the total is 2, directly verifying the checklist item.",
+      "revision": null
+    },
+    {
+      "checklist_ref": "pr30-006",
+      "answer": "YES",
+      "evidence_policy": "dependency_free",
+      "evidence_status": "pass",
+      "rationale": "canonical source and declarations satisfy the bounded static policy",
+      "revision": "8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1"
+    },
+    {
+      "checklist_ref": "pr30-007",
+      "answer": "NO",
+      "evidence_policy": "unsupported_evidence_policy",
+      "evidence_status": "unsupported_evidence_policy",
+      "rationale": "source provenance mismatch",
+      "revision": "8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1"
+    }
+  ],
+  "last_canonical_revision": "8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1",
+  "target_tracked_status": "",
+  "gatekeeper_approved_behavioral_baseline": null,
+  "post_behavior_started": false,
+  "failure_code_location": "core/development/specification_evidence_routing.py:45-49",
+  "manual_target_or_checklist_edits": false,
+  "runtime_archive_files": 28,
+  "runtime_archive_bytes": 48855
+}

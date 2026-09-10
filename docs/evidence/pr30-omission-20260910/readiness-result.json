@@ -1,0 +1,77 @@
+{
+  "elapsed_seconds": 0.1,
+  "finished_at": "2026-09-10T12:04:21.283083+00:00",
+  "ready": true,
+  "result": {
+    "raw": {
+      "background": false,
+      "created_at": 1789041861,
+      "ec_transfer_params": null,
+      "frequency_penalty": 0.0,
+      "id": "resp_a5c07e0b8b43c45e",
+      "incomplete_details": null,
+      "input_messages": null,
+      "instructions": null,
+      "kv_transfer_params": null,
+      "max_output_tokens": 64,
+      "max_tool_calls": null,
+      "metadata": null,
+      "model": "local-primary",
+      "object": "response",
+      "output": [
+        {
+          "content": [
+            {
+              "annotations": [],
+              "logprobs": null,
+              "text": "READY",
+              "type": "output_text"
+            }
+          ],
+          "id": "msg_99a7d5ca71e9ea53",
+          "phase": null,
+          "role": "assistant",
+          "status": "completed",
+          "type": "message"
+        }
+      ],
+      "output_messages": null,
+      "parallel_tool_calls": true,
+      "presence_penalty": 0.0,
+      "previous_response_id": null,
+      "prompt": null,
+      "reasoning": null,
+      "service_tier": "auto",
+      "status": "completed",
+      "temperature": 0.0,
+      "text": null,
+      "tool_choice": "none",
+      "tools": [],
+      "top_logprobs": null,
+      "top_p": 1.0,
+      "truncation": "disabled",
+      "usage": {
+        "input_tokens": 18,
+        "input_tokens_details": {
+          "cached_tokens": 0,
+          "cached_tokens_per_turn": [],
+          "input_tokens_per_turn": []
+        },
+        "output_tokens": 2,
+        "output_tokens_details": {
+          "output_tokens_per_turn": [],
+          "reasoning_tokens": 0,
+          "tool_output_tokens": 0,
+          "tool_output_tokens_per_turn": []
+        },
+        "total_tokens": 20
+      },
+      "user": null
+    },
+    "text": "READY",
+    "usage": {
+      "input_tokens": 18,
+      "output_tokens": 2
+    }
+  }
+}

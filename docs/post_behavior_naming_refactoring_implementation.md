@@ -104,3 +104,15 @@ within one source clause, while retaining the exact path, original modality
 validation and existing repair bound. The original requirement is unchanged.
 See [the correction evidence](evidence/pr30-omission-20260910/README.md) for the
 precise rule, regression, complete validation and fresh proof outcome.
+
+The correction passed 202 focused Gatekeeper/specification tests, 167 PR30 tests,
+and 1,136 full-suite tests on 175ff8f69bc1857b449ae3a1051f77d5141fa988. All static
+gates passed. The fresh original-requirement live proof accepted the omission
+quote in one atomization attempt and completed four behaviors. It then blocked
+after 137 transitions: the unchanged final reconciliation provenance guard in
+specification_evidence_routing.py:45 rejected pr30-007 with source provenance
+mismatch / unsupported_evidence_policy. Six other checklist items returned YES.
+Naming/refactoring was not entered. The final canonical target SHA
+8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1 is not a final Gatekeeper-approved baseline.
+The exact terminal state and packets are preserved in the correction evidence;
+no downstream fix or fixture adaptation was performed after the blocker.

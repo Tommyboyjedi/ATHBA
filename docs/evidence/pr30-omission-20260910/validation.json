@@ -89,6 +89,21 @@
       ],
       "exit_code": 0,
       "seconds": 0.008
+    },
+    {
+      "name": "full",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 621.818,
+      "timeout_seconds": 1200
     }
-  ]
+  ],
+  "implementation_revision": "175ff8f69bc1857b449ae3a1051f77d5141fa988",
+  "source_hashes_unchanged_after_full": true
 }

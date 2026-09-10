@@ -73,3 +73,70 @@ docs/evidence/pr30-20260910/live-requirement.txt with a new identity, without ta
 or checklist edits. Its frozen plan, invocation, state and terminal outcome are
 retained alongside this record. Any subsequent genuine blocker is preserved
 without adapting the fixture or changing another lifecycle boundary.
+
+## Final results
+
+Implementation commits are a107c7ac76255a1246164c26fa0d199855280778 and
+175ff8f69bc1857b449ae3a1051f77d5141fa988. Final validation and the fresh live proof
+used the latter exact revision; its source hashes remained unchanged.
+
+| Check | Result |
+| --- | --- |
+| Focused specification/Gatekeeper tests | 202 passed |
+| PR30 focused tests | 167 passed |
+| Complete ATHBA pytest suite | 1,136 passed in 619.23 seconds |
+| Coding-principles gate | PASS |
+| Configured mypy | PASS, 55 source files |
+| Compileall | PASS |
+| Working and staged diff whitespace checks | PASS |
+
+The earlier full run at a107c7a was intentionally stopped to add coordinated-clause
+coverage. Its exit -15 is retained under superseded-validation/ and is not counted
+as a successful full run. No existing tests were weakened or removed.
+
+### Fresh live outcome: checklist creation PASS; full chain BLOCKED
+
+Fresh identity: pr30-omission-running-total-20260910T114333Z.
+Original requirement SHA256:
+f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78.
+
+The live atomizer returned seven items, including separate dependency-free and
+in-memory obligations. It used the bounded quote
+"Keep the implementation ... in memory", which passed in one attempt without
+repair. The exact original requirement, generated checklist and target code were
+not manually edited.
+
+All four behaviors completed. After 137 transitions, final reconciliation returned
+YES for pr30-001 through pr30-006, then NO for pr30-007:
+
+- status/reason: specification_gatekeeper_failed;
+- evidence policy/status: unsupported_evidence_policy;
+- rationale: source provenance mismatch;
+- source quote: Keep the implementation ... in memory.
+
+The next blocker is the separate literal-substring guard in
+core/development/specification_evidence_routing.py:45-49. It still rejects the
+otherwise validated omission quote before evaluating the in-memory constraint.
+Final reconciliation was explicitly out of scope and remains unchanged. This is
+an ATHBA downstream provenance incompatibility, not a live infrastructure failure.
+No fixture, model, generated checklist or harness was adapted after observing it.
+
+Last canonical target revision:
+8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1.
+It is not a final Gatekeeper-approved behavioral baseline. Neither naming nor
+refactoring started; POST_BEHAVIOR_COMPLETE and the full positive chain are not
+claimed. The runner terminated normally with blocked status (exit 2), after
+1,082.923 seconds. An earlier 300-second workspace timeout was recovered by the
+existing bounded retry policy and is retained in the attempt evidence.
+
+The live-result.json and final-feature-state.json identify the exact terminal
+results. The live/ directory retains the immutable predeclaration and full
+behavioral reports. runtime-state.tar.gz contains this run's durable state and
+all referenced Rack review packets; runtime-state-manifest.json records their
+original paths and SHA256 hashes. target-repository.bundle preserves all local
+target refs and was verified with git bundle verify. Original runtime files and
+the target repository remain intact under /srv/ATHBA/state.
+
+The complete positive PR30 proof remains blocked on the downstream final
+reconciliation provenance guard. The atomization correction is deterministically
+green and directly demonstrated on the real local path.
