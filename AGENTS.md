@@ -22,4 +22,12 @@ This separation exists to keep ATHBA portable to another execution backend and t
 
 Do not modify Rack AI from an ATHBA task. Preserve the ownership boundary described in `agent.MD`, `docs/athba_rack_ai_workspace_boundary_rationale.md`, and the repository architecture documentation.
 
+## Post-behavior naming and refactoring
+
+When implementing or modifying the lifecycle that follows a successfully Gatekeeper-approved behavioral delivery, `docs/post_behavior_naming_refactoring_lifecycle.md` is the authoritative contract.
+
+The order is fixed: explicit Behavior-to-code naming reconciliation first, iterative refactoring second. Keep assessor model context intentionally tiny. Naming may change production and test code only for the exact approved identifier rename; refactoring may change production code only and tests remain read-only. Every candidate must pass the accepted tests and the existing Specification Gatekeeper reconciliation before its revision can be promoted.
+
+Do not restore the broader paused PR21 Engineering Quality Gate design unless the user explicitly requests it.
+
 Do not merge unless explicitly instructed.
