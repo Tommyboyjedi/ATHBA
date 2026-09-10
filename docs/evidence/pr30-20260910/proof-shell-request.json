@@ -1,0 +1,34 @@
+{
+  "athba_revision": "32dfe17d4969927a784305d2892f63b927e76f35",
+  "command": [
+    "/srv/ATHBA/.venv/bin/python",
+    "-B",
+    "-m",
+    "scripts.run_pr30_post_behavior_proof",
+    "--run-id",
+    "pr30-live-running-total-20260910",
+    "--project-id",
+    "pr30-live-running-total-20260910",
+    "--requirement-file",
+    "docs/evidence/pr30-20260910/live-requirement.txt",
+    "--state-root",
+    "/srv/ATHBA/state",
+    "--evidence-root",
+    "/srv/ATHBA/docs/evidence/pr30-20260910/live",
+    "--reasoning-model",
+    "local-primary",
+    "--production-path",
+    "running_total.py",
+    "--test-path",
+    "tests/test_running_total.py"
+  ],
+  "cwd": "/srv/ATHBA",
+  "endpoint": "http://127.0.0.1:8017/v1",
+  "environment_keys_set": [
+    "OPENAI_API_BASE",
+    "OPENAI_API_KEY",
+    "DJANGO_SECRET_KEY",
+    "PYTHONPATH"
+  ],
+  "started_at": "2026-09-10T09:29:28.410215+00:00"
+}

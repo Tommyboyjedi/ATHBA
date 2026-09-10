@@ -61,8 +61,23 @@
       "exit_code": 0,
       "name": "diff-check",
       "seconds": 0.01
+    },
+    {
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings"
+      ],
+      "exit_code": 0,
+      "name": "full",
+      "seconds": 619.78,
+      "timeout_seconds": 1200
     }
   ],
+  "implementation_revision": "32dfe17d4969927a784305d2892f63b927e76f35",
+  "source_hashes_unchanged_after_full": true,
   "sources": {
     "core/development/post_behavior_adapters.py": "5ed37068caaeca902f67239047d23e9bf16878210ff2ba65db5202392c2b3158",
     "core/development/post_behavior_assessment.py": "13af05bb8ea3e9feee6b9d99d4c45dd187088a431d74b276b8df7681d263cc11",
