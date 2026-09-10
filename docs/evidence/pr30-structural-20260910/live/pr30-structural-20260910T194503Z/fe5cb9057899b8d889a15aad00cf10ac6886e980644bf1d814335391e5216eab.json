@@ -1,0 +1,11 @@
+{
+  "kind": "proof_result",
+  "payload": {
+    "accepted_refactor_revisions": [],
+    "accepted_rename_revisions": [],
+    "behavioral_baseline": "be5de1aa020125dc0e80a9b8970f6a52bd38e716",
+    "final_revision": "be5de1aa020125dc0e80a9b8970f6a52bd38e716",
+    "reason": "ValueError: naming assessment must return NO or exactly one mapping",
+    "status": "blocked"
+  }
+}

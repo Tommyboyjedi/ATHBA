@@ -1,0 +1,23 @@
+{
+  "kind": "behavioral_delivery_result",
+  "payload": {
+    "canonical_ref": null,
+    "canonical_sha": null,
+    "final_reconciliation": [],
+    "last_lifecycle_event_id": "controller-cd5036c0098077be5dff7a304ab1a2e371603216bf04000f8a66e5fb04542e23",
+    "last_transition_path": {
+      "feature_kind": "feature_completed",
+      "microcycle_kind": null,
+      "scenario_kind": null
+    },
+    "markdown_report_path": "/srv/ATHBA/docs/evidence/pr30-structural-20260910/live/pr30-structural-20260910T194503Z/proof-report.md",
+    "project_id": "pr30-structural-20260910T194503Z",
+    "reached_checkpoint": null,
+    "reason": null,
+    "run_id": "pr30-structural-20260910T194503Z",
+    "status": "completed",
+    "structured_report_path": "/srv/ATHBA/docs/evidence/pr30-structural-20260910/live/pr30-structural-20260910T194503Z/proof-report.json",
+    "working_ref": null,
+    "working_sha": null
+  }
+}

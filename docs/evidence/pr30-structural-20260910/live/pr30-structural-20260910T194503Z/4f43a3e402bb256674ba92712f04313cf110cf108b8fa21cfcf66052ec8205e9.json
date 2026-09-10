@@ -1,0 +1,49 @@
+{
+  "kind": "post_behavior_state",
+  "payload": {
+    "active_pass": {
+      "assessment": null,
+      "base_revision": "be5de1aa020125dc0e80a9b8970f6a52bd38e716",
+      "candidate": null,
+      "gatekeeper": null,
+      "number": 1,
+      "outcome": "pending",
+      "phase": "naming",
+      "promotion_evidence": [],
+      "reconciliation_progress": [],
+      "stop_reason": null,
+      "submission_id": null,
+      "tests": null
+    },
+    "attempt_state": null,
+    "current_post_behavior_revision": "be5de1aa020125dc0e80a9b8970f6a52bd38e716",
+    "diagnostic": "ValueError: naming assessment must return NO or exactly one mapping",
+    "entry": {
+      "behavioral_authority_digest": "368c2e14a0cc9b2a333472340a5ed68eb26703ce75acbeea14b9bb8fdf40c9ec",
+      "behaviorally_accepted_revision": "be5de1aa020125dc0e80a9b8970f6a52bd38e716",
+      "delivery_id": "pr30-structural-20260910T194503Z",
+      "gatekeeper_evidence": {
+        "diagnostic": "",
+        "evidence_refs": [
+          "behavioral-authority:368c2e14a0cc9b2a333472340a5ed68eb26703ce75acbeea14b9bb8fdf40c9ec"
+        ],
+        "passed": true,
+        "revision": "be5de1aa020125dc0e80a9b8970f6a52bd38e716"
+      },
+      "production_paths": [
+        "running_total.py"
+      ],
+      "trusted_entry_revision": "19c07c0e502dd667fd466369b0b214371cf8f2b0"
+    },
+    "generation": 4,
+    "passes": [],
+    "pending_call": "naming_assessor",
+    "policy": {
+      "max_promoted_refactor_passes": 4
+    },
+    "refactor_promoted_passes": 0,
+    "schema": "post-behavior/v1",
+    "status": "BLOCKED",
+    "terminal_reason": "human_intervention_required"
+  }
+}

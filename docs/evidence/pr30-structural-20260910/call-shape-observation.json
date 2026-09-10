@@ -1,0 +1,37 @@
+{
+  "revision": "be5de1aa020125dc0e80a9b8970f6a52bd38e716",
+  "production_source": "\"\"\"ATHBA initial production module.\"\"\"\n\n\nclass RunningTotal:\n    \"\"\"A class for tracking running totals.\"\"\"\n    def __init__(self):\n        self._total = 0.0\n    \n    def add(self, value):\n        self._total += value\n    \n    def get_total(self):\n        return self._total\n    \n    @property\n    def total(self):\n        return self._total\n    \n    def reset(self):\n        self._total = 0.0",
+  "accepted_test_source": "from running_total import RunningTotal\n\ndef test_REQ_001():\n    instance = RunningTotal()\n    assert instance.total == 0\n\ndef test_REQ_002():\n    instance = RunningTotal()\n    instance.add(10)\n    assert instance.total == 10.0\n    instance.add(-5)\n    assert instance.total == 5.0\n\ndef test_REQ_003():\n    instance = RunningTotal()\n    instance.add(10)\n    initial_total = instance.total\n    assert instance.total == initial_total\n    assert instance.total == 10.0\n\ndef test_REQ_004():\n    instance = RunningTotal()\n    instance.add(3)\n    instance.add(-1)\n    assert instance.total == 2.0\n",
+  "total_call_expressions": [],
+  "gatekeeper_answers": [
+    {
+      "ref": "pr30-001",
+      "answer": "YES"
+    },
+    {
+      "ref": "pr30-002",
+      "answer": "YES"
+    },
+    {
+      "ref": "pr30-003",
+      "answer": "YES"
+    },
+    {
+      "ref": "pr30-004",
+      "answer": "YES"
+    },
+    {
+      "ref": "pr30-005",
+      "answer": "YES"
+    },
+    {
+      "ref": "pr30-006",
+      "answer": "YES"
+    },
+    {
+      "ref": "pr30-007",
+      "answer": "YES"
+    }
+  ],
+  "observation": "Accepted tests read total as a property and never call total(); final Gatekeeper nevertheless reported YES. No structural conflict was executed."
+}
