@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol
 
 from core.development.microcycle_domain import LanguageAdapterDescriptor
 from core.development.specification_domain import SourceRequirementClause, SpecificationChecklistItem
 from core.development.specification_obligations import EvidencePolicy, ObligationModality, explicit_modality
+
+from core.development.specification_provenance import PROVENANCE_ERROR, resolve_source_quote
 
 ChecklistItem = SpecificationChecklistItem | SourceRequirementClause
 ENGINEERING_PROFILE_QUALITIES = frozenset({"small", "direct", "readable"})
@@ -81,6 +83,24 @@ class SpecificationEvidenceAdapters:
 
 class EvidencePolicyRouter:
     """One centralized wording boundary; verifiers never interpret specification prose."""
+
+    def route_source(self, item: ChecklistItem, source: str) -> EvidenceDecision:
+        """Route verified original wording, never an omission's rendered wording."""
+        if isinstance(item, SpecificationChecklistItem) and item.source_quote:
+            context = item.source_context(source)
+            return self.route(replace(item, source_quote=context))
+        # Quote-less legacy behavioral items may be paraphrases. Static legacy
+        # facts still require source provenance; their modality was inferred.
+        decision = self.route(item)
+        if item.text not in source:
+            if decision.policy != EvidencePolicy.BEHAVIORAL:
+                raise ValueError(PROVENANCE_ERROR)
+            return decision
+        context = resolve_source_quote(source, item.text).context
+        legacy = SpecificationChecklistItem(item.ref, item.text, item.kind,
+            (explicit_modality(context) or decision.modality).value, context,
+            getattr(item, "subject", "") or item.text)
+        return self.route(legacy)
 
     def route(self, item: ChecklistItem) -> EvidenceDecision:
         quote = getattr(item, "source_quote", "") or item.text

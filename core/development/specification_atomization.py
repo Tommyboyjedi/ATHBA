@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import re
 
-from core.development.specification_obligations import grounded_modality
-from core.development.specification_provenance import PROVENANCE_ERROR, resolve_source_quote
 from core.development.checklist_split_progress import ChecklistSplitAncestry, rejected_split
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -278,10 +276,7 @@ def _grounded_item(payload: dict[str, object], source: str) -> SpecificationChec
         if not isinstance(payload.get(name), str) or not str(payload[name]).strip():
             raise ValueError(f"specification checklist requires explicit {name}")
     item = SpecificationChecklistItem.from_dict(payload)
-    provenance = resolve_source_quote(source, item.source_quote)
-    if not provenance.grounds_subject(item.subject):
-        raise ValueError(PROVENANCE_ERROR)
-    grounded_modality(item.modality, provenance.context)
+    item.source_context(source)
     return item
 
 
