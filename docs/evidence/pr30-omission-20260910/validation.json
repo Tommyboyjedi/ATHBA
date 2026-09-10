@@ -1,0 +1,94 @@
+{
+  "starting_revision": "1ed201ca38723e10df553adb16c522efabd0ddf8",
+  "sources": {
+    "core/development/specification_atomization.py": "cda3bf1146e511762bd17ee64cde81dd94d96c5bdb5db29ba9f437eb7acbfa75",
+    "core/development/specification_provenance.py": "9391752bd53dbb7ae7c73a74a305ba84bea78473ca449e7831c07af7c2ad9076",
+    "pyproject.toml": "6b34c1568b76d70060cdb37562e5c7336a89fff371c44c884c6f3ad71d9cead1",
+    "tests/development/test_specification_provenance.py": "3366ffd759e7ff1a7c47341de1a5ad054bbcd75f9300aa963692a84b3816a2fd",
+    "tests/development/fixtures/pr30_atomization_omission.json": "d4b11b795688c943e51f769d39927dbd20d2c24570dc54cfed1024de6ed53711",
+    "scripts/run_pr30_post_behavior_proof.py": "ef469f44dbf7c2eb3054598a9ef2c77291d0fb6325b5cd138a9c9b3ac73117f8",
+    "docs/evidence/pr30-20260910/live-requirement.txt": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78"
+  },
+  "checks": [
+    {
+      "name": "gatekeeper-focused",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "tests/development/test_specification_provenance.py",
+        "tests/development/test_specification_gatekeeper.py",
+        "tests/development/test_specification_evidence_routing.py",
+        "tests/development/test_specification_routing_completion.py",
+        "tests/development/test_gatekeeper_progress_resume.py",
+        "tests/development/test_gatekeeper_process_restart.py"
+      ],
+      "exit_code": 0,
+      "seconds": 130.132
+    },
+    {
+      "name": "pr30-focused",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "tests/development/test_post_behavior_authority.py",
+        "tests/development/test_post_behavior_boundaries.py",
+        "tests/development/test_post_behavior_integration.py",
+        "tests/development/test_post_behavior_lifecycle.py",
+        "tests/development/test_post_behavior_material.py",
+        "tests/development/test_post_behavior_proof_runner.py"
+      ],
+      "exit_code": 0,
+      "seconds": 10.787
+    },
+    {
+      "name": "coding-principles",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "scripts/check_coding_principles.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.816
+    },
+    {
+      "name": "mypy",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "mypy"
+      ],
+      "exit_code": 0,
+      "seconds": 0.214
+    },
+    {
+      "name": "compileall",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "core",
+        "athba",
+        "llm_service",
+        "scripts"
+      ],
+      "exit_code": 0,
+      "seconds": 0.064
+    },
+    {
+      "name": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.008
+    }
+  ]
+}

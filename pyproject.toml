@@ -68,6 +68,7 @@ files = [
   "core/development/behavior_contract_coordinator.py",
   "core/development/specification_assessment.py",
   "core/development/specification_atomization.py",
+  "core/development/specification_provenance.py",
   "core/development/specification_domain.py",
   "core/development/specification_evidence.py",
   "core/development/specification_gatekeeper.py",

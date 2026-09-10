@@ -1,0 +1,18 @@
+{
+  "baseline_revision": "1ed201ca38723e10df553adb16c522efabd0ddf8",
+  "recorded_run": "pr30-live-running-total-20260910-100901",
+  "before": {
+    "calls": 2,
+    "errors": [
+      "specification checklist provenance is not grounded in original source",
+      "specification checklist provenance is not grounded in original source"
+    ]
+  },
+  "after": {
+    "calls": 1,
+    "items": 7,
+    "source_quote": "Keep the implementation ... in memory."
+  },
+  "live_model_calls": 0,
+  "original_requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78"
+}

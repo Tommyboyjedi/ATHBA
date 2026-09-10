@@ -95,3 +95,12 @@ mypy (54 source files), compileall and whitespace checks passed. The local Respo
 readiness probe succeeded. The user then stopped the live proof during behavioral
 planning and will perform it manually. No behavioral baseline or post-behavior live
 completion is claimed; the interrupted state and exact invocation are preserved.
+
+## Bounded omission provenance correction
+
+A subsequent user-run proof exposed brittle exact-substring atomizer provenance.
+A narrow deterministic helper now also proves ordered verbatim omission segments
+within one source clause, while retaining the exact path, original modality
+validation and existing repair bound. The original requirement is unchanged.
+See [the correction evidence](evidence/pr30-omission-20260910/README.md) for the
+precise rule, regression, complete validation and fresh proof outcome.
