@@ -1,18 +1,5 @@
 # PR30 implementation and validation
 
-## Separate recovery during behavioural development
-
-[Inter-behaviour Structural Refactoring](inter_behavior_structural_refactoring.md)
-resolves an existing production shape that blocks a later TDD frontier. It runs
-inside behavioural development with read-only tests, accepted-test regression,
-a bounded candidate scope and durable promotion. Structural implementation work
-and normal behavioural Developer work remain separate small model tasks.
-
-The post-behaviour process described here retains its fixed order:
-all behaviours complete -> final Specification Gatekeeper YES -> Naming
-reconciliation -> post-behaviour Refactoring -> POST_BEHAVIOR_COMPLETE.
-
-
 The runtime follows `post_behavior_naming_refactoring_lifecycle.md`: a completed
 behavioral feature and its final independent Specification Gatekeeper acceptance
 are the only entry authority. The behavioral coordinator retains its existing

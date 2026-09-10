@@ -1,0 +1,11 @@
+{
+  "baseline": "cb5e0bdabcb7387f73e6a6bf0580ca38d6622fbe",
+  "active_files_searched": 486,
+  "search_pattern": "structural_refactor|Structural Refactorer|python_structural|inter.behavio[u]?r.{0,30}refactor",
+  "hits": [],
+  "source_tests_configuration_and_pr30_docs_equal_baseline": true,
+  "historical_evidence_excluded": "docs/evidence/",
+  "naming_behavior_changed": false,
+  "live_proof_run": false,
+  "entire_baseline_tree_preserved_except_added_historical_record": true
+}

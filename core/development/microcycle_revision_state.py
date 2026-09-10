@@ -17,7 +17,6 @@ class RevisionTransitionKind(str, Enum):
     FRONTIER_ACCEPTED = "frontier_accepted"
     DEVELOPER_CANDIDATE_ACCEPTED = "developer_candidate_accepted"
     REGRESSION_REPAIR_ACCEPTED = "regression_repair_accepted"
-    STRUCTURAL_REFACTOR_PROMOTED = "structural_refactor_promoted"
     REGRESSION_CLEAR = "regression_clear"
     BEHAVIOR_COMPLETED = "behavior_completed"
 
@@ -94,7 +93,6 @@ class RevisionTransitionRequest:
             RevisionTransitionKind.FRONTIER_ACCEPTED.value,
             RevisionTransitionKind.DEVELOPER_CANDIDATE_ACCEPTED.value,
             RevisionTransitionKind.REGRESSION_REPAIR_ACCEPTED.value,
-            RevisionTransitionKind.STRUCTURAL_REFACTOR_PROMOTED.value,
             RevisionTransitionKind.REGRESSION_CLEAR.value,
         }:
             raise ValueError("unsupported revision transition request")

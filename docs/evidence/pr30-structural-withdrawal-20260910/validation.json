@@ -1,0 +1,152 @@
+[
+  {
+    "name": "affected-focused",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/development/test_python_pytest_adapter.py",
+      "tests/development/test_python_pytest_isolation.py",
+      "tests/development/test_microcycle_domain.py",
+      "tests/development/test_strict_microcycle.py",
+      "tests/development/test_session7_persistence_conformance.py",
+      "tests/development/test_microcycle_revision_lifecycle.py",
+      "tests/development/test_strict_tdd_feature_composition.py",
+      "tests/execution/test_athba_workspace_execution.py",
+      "tests/execution/test_rack_ai_workspace_v2_connector.py"
+    ],
+    "exit_code": 0,
+    "seconds": 34.801,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/affected-focused.log",
+    "log_sha256": "29d9cfe75efee0f222f6899c7e114704d82c55d29e02cfb1d4ec87e2ea5f8780",
+    "result_summary": "147 passed, 7918 warnings in 33.73s"
+  },
+  {
+    "name": "specification-gatekeeper",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/development/test_python_storage_assurance.py",
+      "tests/development/test_specification_provenance.py",
+      "tests/development/test_specification_provenance_routing.py",
+      "tests/development/test_specification_gatekeeper.py",
+      "tests/development/test_specification_evidence_routing.py",
+      "tests/development/test_specification_routing_completion.py",
+      "tests/development/test_gatekeeper_progress_resume.py",
+      "tests/development/test_gatekeeper_process_restart.py"
+    ],
+    "exit_code": 0,
+    "seconds": 132.879,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/specification-gatekeeper.log",
+    "log_sha256": "78612e2fd740c4428487a33736584975317acb22b7c92836276c30616e7d0c36",
+    "result_summary": "258 passed, 10059 warnings in 131.60s (0:02:11)"
+  },
+  {
+    "name": "pr30-focused",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/development/test_post_behavior_authority.py",
+      "tests/development/test_post_behavior_boundaries.py",
+      "tests/development/test_post_behavior_integration.py",
+      "tests/development/test_post_behavior_lifecycle.py",
+      "tests/development/test_post_behavior_material.py",
+      "tests/development/test_post_behavior_proof_runner.py",
+      "tests/development/test_post_behavior_provenance.py"
+    ],
+    "exit_code": 0,
+    "seconds": 13.444,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/pr30-focused.log",
+    "log_sha256": "3ad07ee274bc38ee4a409f76781e5e5acedd63084a765a33b319416a42c085d4",
+    "result_summary": "169 passed, 8944 warnings in 12.06s"
+  },
+  {
+    "name": "full-pytest",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "pytest",
+      "-q"
+    ],
+    "exit_code": 0,
+    "seconds": 635.321,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/full-pytest.log",
+    "log_sha256": "808c14fd1f4875c167bdb7a69dcb93eff62c010f94afeea2a1aa0a4c0209f51b",
+    "result_summary": "1194 passed, 102113 warnings in 632.61s (0:10:32)"
+  },
+  {
+    "name": "coding-principles",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "scripts/check_coding_principles.py"
+    ],
+    "exit_code": 0,
+    "seconds": 0.768,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/coding-principles.log",
+    "log_sha256": "676846ef0b703090bfc76e42aa1529e8104b0023bd0d843b89e467cc81cc13ea",
+    "result_summary": "coding principles gate passed"
+  },
+  {
+    "name": "mypy",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "mypy"
+    ],
+    "exit_code": 0,
+    "seconds": 1.066,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/mypy.log",
+    "log_sha256": "caf4cb276b1b834b69b4a51aa776668a80ee64e1a2fd04bb890970c67d4fd7e7",
+    "result_summary": "Success: no issues found in 57 source files"
+  },
+  {
+    "name": "compileall",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "compileall",
+      "-q",
+      "core",
+      "athba",
+      "llm_service",
+      "scripts"
+    ],
+    "exit_code": 0,
+    "seconds": 0.114,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/compileall.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "result_summary": "Completed successfully without output"
+  },
+  {
+    "name": "diff-check",
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "seconds": 0.008,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/diff-check.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "result_summary": "Completed successfully without output"
+  },
+  {
+    "name": "staged-diff-check",
+    "command": [
+      "git",
+      "diff",
+      "--cached",
+      "--check"
+    ],
+    "exit_code": 0,
+    "seconds": 0.032,
+    "log_path": "evidence/pr30-withdrawal-validation-20260910/staged-diff-check.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "result_summary": "Completed successfully without output"
+  }
+]

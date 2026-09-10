@@ -40,14 +40,6 @@ mypy = "^2.3.1"
 [tool.mypy]
 python_version = "3.14"
 files = [
-  "core/development/python_structural_authority.py",
-  "core/development/python_structural_collision.py",
-  "core/development/structural_refactor_context.py",
-  "core/development/structural_refactor_domain.py",
-  "core/development/structural_refactor_lifecycle.py",
-  "core/development/structural_refactor_validation.py",
-  "core/development/structural_refactor_work.py",
-
   "scripts/run_pr30_post_behavior_proof.py",
   "core/development/post_behavior_test_context.py",
   "core/development/post_behavior_adapters.py",

@@ -27,8 +27,6 @@ from core.development.microcycle_domain import (
     SyntaxValidationRequest,
 )
 
-from core.development.structural_refactor_domain import StructuralProblem, StructuralCandidateCheck, StructuralProductionSource
-
 PYTHON_LANGUAGE_ID = "python"
 PYTEST_ADAPTER_VERSION = "1.0.0"
 PYTHON_PYTEST_ADAPTER_ID = "python-pytest"
@@ -762,16 +760,6 @@ class PythonBoundaryClassifier:
             return BoundaryAssessment(outcome.value, request.active_fragment.fragment_id, request.diagnostic)
         exception = facts.get("exception_type", "")
         active_kind = request.active_fragment.kind
-        if exception == "TypeError" and facts.get("structural_problem") and all(
-            facts.get(name) == expected for name, expected in (
-                ("collection_succeeded", "True"), ("requested_node_found", "True"),
-                ("requested_node_executed", "True"), ("setup_outcome", "passed"),
-                ("call_outcome", "failed"), ("teardown_outcome", "passed"),
-            )
-        ):
-            problem = StructuralProblem.from_dict(json.loads(facts["structural_problem"]))
-            return BoundaryAssessment(BoundaryOutcome.STRUCTURAL_REFACTOR_REQUIRED.value,
-                                      request.active_fragment.fragment_id, request.diagnostic, problem)
         if exception == "AttributeError":
             proven = facts.get("missing_production_member") == "True" and all(
                 facts.get(name) == expected for name, expected in (
@@ -804,14 +792,6 @@ class PythonBoundaryClassifier:
 
 class PythonPytestAdapter:
     descriptor = LanguageAdapterDescriptor("python-pytest", PYTEST_ADAPTER_VERSION, PYTHON_LANGUAGE_ID)
-
-    def focus_structural_production(self, request: StructuralProductionSource) -> str:
-        from core.development.python_structural_authority import focused_structural_source
-        return focused_structural_source(request)
-
-    def validate_structural_candidate(self, request: StructuralCandidateCheck) -> bool:
-        from core.development.python_structural_authority import valid_structural_candidate
-        return valid_structural_candidate(request)
 
     def parse_scenario(self, request: ScenarioParseRequest) -> ScenarioModel:
         if request.draft.language_id != PYTHON_LANGUAGE_ID:
