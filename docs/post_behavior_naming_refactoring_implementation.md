@@ -116,3 +116,24 @@ Naming/refactoring was not entered. The final canonical target SHA
 8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1 is not a final Gatekeeper-approved baseline.
 The exact terminal state and packets are preserved in the correction evidence;
 no downstream fix or fixture adaptation was performed after the blocker.
+
+## Downstream provenance consistency
+
+The follow-up on reviewed head 648fcb63 reuses the existing resolver in final
+reconciliation, required-subject collection, checklist reload and persisted split
+reuse. Routing receives verified original context so omissions cannot hide
+qualifiers. Actual behavioral and static evidence checks remain authoritative.
+See [the follow-up evidence](evidence/pr30-provenance-routing-20260910/README.md)
+for the compatibility audit, validation and fresh live outcome.
+
+Validated implementation 77e473e0d79792ded35ecfaac08a56765c0db29a passed 229
+focused provenance/Gatekeeper tests, 169 PR30 tests and 1,165 full-suite tests.
+Coding-principles, configured mypy (55 files), compileall and whitespace checks
+passed. The fresh run pr30-provenance-routing-20260910T133659Z accepted the same
+omission quote, included its subject and reached the real storage adapter.
+After four behaviors and 143 transitions, six checklist items returned YES;
+REQ-007 returned no_storage / unsupported_evidence_policy with line 15: opaque
+decorator effects for the generated property accessor. The unchanged adapter
+failed closed. Final canonical target 0039443078c3b591be8108d386c2606f4fe8affe is
+not a final Gatekeeper-approved baseline. Naming/refactoring did not start.
+The new blocker and all evidence are retained without fixture or harness changes.
