@@ -1,0 +1,34 @@
+{
+  "command": [
+    "/srv/ATHBA/.venv/bin/python",
+    "-B",
+    "-m",
+    "scripts.run_pr30_post_behavior_proof",
+    "--run-id",
+    "pr30-storage-assurance-20260910T151020Z",
+    "--project-id",
+    "pr30-storage-assurance-20260910T151020Z",
+    "--requirement-file",
+    "docs/evidence/pr30-20260910/live-requirement.txt",
+    "--state-root",
+    "/srv/ATHBA/state",
+    "--evidence-root",
+    "/srv/ATHBA/docs/evidence/pr30-storage-assurance-20260910/live",
+    "--reasoning-model",
+    "local-primary",
+    "--production-path",
+    "running_total.py",
+    "--test-path",
+    "tests/test_running_total.py"
+  ],
+  "cwd": "/srv/ATHBA",
+  "started_at": "2026-09-10T15:19:16.784268+00:00",
+  "athba_revision": "fd4fcbb3e449b92ff0129dacc29cd593d95cf4f0",
+  "environment_keys_set": [
+    "OPENAI_API_BASE",
+    "OPENAI_API_KEY",
+    "DJANGO_SECRET_KEY",
+    "PYTHONPATH"
+  ],
+  "endpoint": "http://127.0.0.1:8017/v1"
+}

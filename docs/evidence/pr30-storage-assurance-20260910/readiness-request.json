@@ -1,0 +1,15 @@
+{
+  "athba_revision": "fd4fcbb3e449b92ff0129dacc29cd593d95cf4f0",
+  "rack_ai_revision": "469dc13c4d669266de21c629cc449f889364b7e2",
+  "endpoint": "http://127.0.0.1:8017/v1/responses",
+  "started_at": "2026-09-10T15:19:07.609964+00:00",
+  "request": {
+    "prompt": "Reply with READY only.",
+    "model": "local-primary",
+    "temperature": 0.0,
+    "max_tokens": 64,
+    "response_schema": null
+  },
+  "timeout_seconds": 45,
+  "automatic_retries": 0
+}

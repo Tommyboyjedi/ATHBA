@@ -1,0 +1,23 @@
+{
+  "kind": "behavioral_delivery_result",
+  "payload": {
+    "canonical_ref": null,
+    "canonical_sha": null,
+    "final_reconciliation": [],
+    "last_lifecycle_event_id": "controller-222097e14582157531fbb810544623d11a51eaf8e7fefe4a9a5f745136137a01",
+    "last_transition_path": {
+      "feature_kind": "blocked",
+      "microcycle_kind": "blocked",
+      "scenario_kind": "microcycle_advanced"
+    },
+    "markdown_report_path": "/srv/ATHBA/docs/evidence/pr30-storage-assurance-20260910/live/pr30-storage-assurance-20260910T151020Z/proof-report.md",
+    "project_id": "pr30-storage-assurance-20260910T151020Z",
+    "reached_checkpoint": null,
+    "reason": "unsupported_language_boundary",
+    "run_id": "pr30-storage-assurance-20260910T151020Z",
+    "status": "blocked",
+    "structured_report_path": "/srv/ATHBA/docs/evidence/pr30-storage-assurance-20260910/live/pr30-storage-assurance-20260910T151020Z/proof-report.json",
+    "working_ref": null,
+    "working_sha": null
+  }
+}

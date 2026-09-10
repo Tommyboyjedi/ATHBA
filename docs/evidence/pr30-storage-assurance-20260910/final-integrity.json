@@ -1,0 +1,18 @@
+{
+  "implementation_revision": "fd4fcbb3e449b92ff0129dacc29cd593d95cf4f0",
+  "unchanged_source_hashes": {
+    "core/development/python_specification_storage.py": true,
+    "core/development/python_specification_evidence.py": true,
+    "pyproject.toml": true,
+    "tests/development/test_python_storage_assurance.py": true,
+    "tests/development/fixtures/pr30_decorated_accessor.json": true,
+    "scripts/run_pr30_post_behavior_proof.py": true,
+    "docs/evidence/pr30-20260910/live-requirement.txt": true
+  },
+  "preserved_old_target_sha": "0039443078c3b591be8108d386c2606f4fe8affe",
+  "preserved_old_target_clean": true,
+  "fresh_runtime_matches_archive": true,
+  "working_diff_check": "PASS",
+  "staged_diff_check": "PASS",
+  "post_validation_changes": "documentation and retained evidence only"
+}

@@ -137,3 +137,31 @@ decorator effects for the generated property accessor. The unchanged adapter
 failed closed. Final canonical target 0039443078c3b591be8108d386c2606f4fe8affe is
 not a final Gatekeeper-approved baseline. Naming/refactoring did not start.
 The new blocker and all evidence are retained without fixture or harness changes.
+
+## Python storage decorator assurance
+
+Function/method decorator opacity is now an explicitly accepted assurance limit:
+when storage inspection finds no violation or other blocking unknown, it may PASS
+with retained path/line/decorator warnings. Arbitrary decorator semantics are not
+claimed as verified. Storage detections and all other unknown conditions retain
+their previous status. No decorator whitelist or recursive analysis was added.
+See [the assurance evidence](evidence/pr30-storage-assurance-20260910/README.md)
+for tests, exact results and the fresh proof outcome, and
+[language adapter debt](specification_evidence_language_adapter_debt.md) for the
+future language-specific evidence capabilities. Python rules remain in the Python
+adapter and do not become generic ATHBA semantics.
+
+Implementation fd4fcbb3e449b92ff0129dacc29cd593d95cf4f0 passed 258 focused
+storage/Gatekeeper tests, 169 PR30 tests and 1,194 full-suite tests, plus all static
+gates (configured mypy: 57 files). Read-only replay of the prior exact property
+blocker returns storage YES with the explicit unverified-decorator assurance
+statement and running_total.py:14 @property finding.
+
+The fresh original-requirement run pr30-storage-assurance-20260910T151020Z
+completed two behaviors, then stopped after 88 transitions on a distinct Python
+frontier blocker: REQ_03-S001 calls rt.total(), but production exposes total as an
+integer; TypeError: 'int' object is not callable was classified as
+unsupported_language_boundary. Final Gatekeeper, naming and refactoring were not
+reached. Canonical target eafb172da6d834725b70e409ff7f756a194bc0e8 and its
+generated staged frontier-test change are preserved. No fixture/harness changes
+were made to bypass that new blocker.

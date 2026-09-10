@@ -1,0 +1,99 @@
+{
+  "run_id": "pr30-storage-assurance-20260910T151020Z",
+  "athba_revision": "fd4fcbb3e449b92ff0129dacc29cd593d95cf4f0",
+  "requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "status": "blocked",
+  "reason": "unsupported_language_boundary",
+  "transitions": 88,
+  "completed_behaviors": 2,
+  "final_canonical_revision": "eafb172da6d834725b70e409ff7f756a194bc0e8",
+  "target_head": "eafb172da6d834725b70e409ff7f756a194bc0e8",
+  "target_status": "M  tests/test_running_total.py\n",
+  "behavioral_baseline": null,
+  "final_gatekeeper_passed": false,
+  "final_gatekeeper_reached": false,
+  "naming_ran": false,
+  "refactoring_ran": false,
+  "POST_BEHAVIOR_COMPLETE": false,
+  "fresh_final_assurance_findings": [],
+  "blocker": {
+    "scenario": "pr30-storage-assurance-20260910T151020Z--REQ_03-S001",
+    "fragment": "python-4-assertion",
+    "source": "assert rt.total() == 5",
+    "exception": "TypeError: 'int' object is not callable",
+    "explanation": "Existing production exposes total as an integer attribute; Python frontier classification stops at unsupported_language_boundary.",
+    "boundary_evidence": {
+      "active_fragment_id": "python-4-assertion",
+      "diagnostic": {
+        "evidence_refs": [
+          "tests/test_running_total.py::test_REQ_03_S001"
+        ],
+        "facts": [
+          {
+            "name": "collection_succeeded",
+            "value": "True"
+          },
+          {
+            "name": "requested_node_found",
+            "value": "True"
+          },
+          {
+            "name": "requested_node_executed",
+            "value": "True"
+          },
+          {
+            "name": "outcome",
+            "value": "failed"
+          },
+          {
+            "name": "setup_outcome",
+            "value": "passed"
+          },
+          {
+            "name": "call_outcome",
+            "value": "failed"
+          },
+          {
+            "name": "teardown_outcome",
+            "value": "passed"
+          },
+          {
+            "name": "exception_type",
+            "value": "TypeError"
+          },
+          {
+            "name": "failure_message",
+            "value": "TypeError: 'int' object is not callable"
+          },
+          {
+            "name": "source_line",
+            "value": "6"
+          },
+          {
+            "name": "traceback_location",
+            "value": "/tmp/athba-frontier-76v9byuu/tests/test_running_total.py:6"
+          },
+          {
+            "name": "evidence_refs",
+            "value": "['tests/test_running_total.py::test_REQ_03_S001']"
+          }
+        ],
+        "kind": "pytest_failure",
+        "message": "TypeError: 'int' object is not callable"
+      },
+      "outcome": "unsupported_language_boundary"
+    }
+  },
+  "recorded_old_storage_replay": {
+    "classification": "read-only deterministic replay",
+    "answer": "YES",
+    "assurance_warning": "running_total.py:14: @property on total; decorator effects were not statically verified"
+  },
+  "runtime_files_preserved": 30,
+  "preserved_previous_run_unchanged": true,
+  "shell_result": {
+    "exit_code": 2,
+    "seconds": 1035.833,
+    "finished_at": "2026-09-10T15:36:32.617208+00:00"
+  }
+}
