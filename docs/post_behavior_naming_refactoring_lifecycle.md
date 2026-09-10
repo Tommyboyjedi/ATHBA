@@ -1,6 +1,7 @@
 # Post-Behavior Naming Reconciliation and Refactoring Lifecycle
 
-Status: design and implementation contract
+Status: authoritative implementation contract; runtime and validation notes in
+[the implementation record](post_behavior_naming_refactoring_implementation.md).
 
 This document supersedes the broader future refactoring design in PR21. It deliberately defines a smaller post-behavior process built around narrow model prompts, unchanged behavioral evidence, trusted revision progression, and two separate concerns: **renaming first, refactoring second**.
 
