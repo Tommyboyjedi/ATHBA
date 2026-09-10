@@ -38,7 +38,11 @@ Only if exact lookup fails may three ASCII dots act as an omission marker:
 4. Units are conservatively delimited by period, exclamation mark, question mark,
    semicolon, colon, comma, CR/LF, Unicode line/paragraph separators, en/em dashes,
    and the explicit clause separators but, whereas, although, while, however,
-   unless and otherwise. Final punctuation may be quoted but never crossed.
+   unless and otherwise. Coordinating and/or/nor also delimit a unit when they
+   introduce an explicit new subject determiner/pronoun or a finite/modal
+   predicate after an already stated predicate/operator or imperative prefix.
+   Coordinated subjects before a shared predicate stay together. Shared adjectival or prepositional conjunctions remain possible.
+   Final punctuation may be quoted but never crossed.
    Ambiguous punctuation therefore causes rejection on the omission path;
    a full exact quote remains available.
 5. The subject must occur entirely inside one retained segment. It cannot bridge
@@ -60,7 +64,7 @@ TDD, final reconciliation, PR30 naming/refactoring, and Rack AI are unchanged.
 ## Validation and fresh live proof
 
 Exact commands, source identities and results are retained in validation.json and
-the corresponding logs. The 69 new tests cover exact and omitted quotes, recorded
+the corresponding logs. The 75 new tests cover exact and omitted quotes, recorded
 live outputs, order, overlap, missing/paraphrased text, malformed markers, clause
 boundaries, subject grounding, modality, existing repair bounds and split behavior.
 

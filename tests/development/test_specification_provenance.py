@@ -216,3 +216,22 @@ async def test_existing_split_path_uses_the_same_bounded_provenance_rule(memory_
         assert [child.subject for child in result.children] == ["dependency-free", "in memory"]
     else:
         assert result.rejection_reason == "invalid_split_response"
+
+
+@pytest.mark.parametrize("second_clause", [
+    "and the cache must remain in memory.",
+    "and it must remain in memory.",
+    "and caches must remain in memory.",
+    "or client records are in memory.",
+    "nor another service remains in memory.",
+])
+def test_coordinated_independent_clauses_cannot_be_stitched(second_clause):
+    source = "Keep the implementation dependency-free " + second_clause
+    with pytest.raises(ValueError, match="provenance"):
+        resolve_source_quote(source, "Keep the implementation ... in memory.")
+
+
+def test_shared_adjectives_remain_in_one_source_clause():
+    source = "Keep the implementation simple and deterministic and testable."
+    provenance = resolve_source_quote(source, "Keep ... deterministic ... testable.")
+    assert provenance.context == source

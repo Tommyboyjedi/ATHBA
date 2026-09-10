@@ -9,7 +9,17 @@ PROVENANCE_ERROR = "specification checklist provenance is not grounded in origin
 # Conservative boundaries: ambiguous punctuation is never crossed by an omission.
 CLAUSE_BOUNDARY = re.compile(
     r"[.!?;:,\r\n\u2028\u2029\u2013\u2014]|"
-    r"\b(?:but|whereas|although|while|however|unless|otherwise)\b",
+    r"\b(?:but|whereas|although|while|however|unless|otherwise)\b|"
+    r"\b(?:and|or|nor)\s+(?=(?:the|a|an|this|that|it|they|we|you|each|every|another|no)\b|"
+    r"[\w-]+(?:\s+[\w-]+)*\s+(?:must|shall|should|will|would|can|could|may|might|is|are|was|were|has|have|does|do)\b)",
+    re.IGNORECASE,
+)
+
+
+COORDINATING_WORDS = frozenset({"and", "or", "nor"})
+PREDICATE_PREFIX = re.compile(
+    r"\b(?:must|shall|should|will|would|can|could|may|might|is|are|was|were|has|have|does|do)\b|"
+    r"^\s*\w+\s+(?:the|a|an|this|that|your|our|their|each|every)\b",
     re.IGNORECASE,
 )
 
@@ -51,6 +61,11 @@ def _source_clauses(source: str) -> tuple[str, ...]:
     clauses = []
     start = 0
     for boundary in CLAUSE_BOUNDARY.finditer(source):
+        coordinating = boundary.group().strip().lower() in COORDINATING_WORDS
+        if coordinating and not PREDICATE_PREFIX.search(source[start:boundary.start()]):
+            # A shared subject such as 'Caching and persistence are optional'
+            # has no independent predicate before the conjunction.
+            continue
         # A final punctuation character may itself be quoted, never crossed.
         end = boundary.end() if len(boundary.group()) == 1 else boundary.start()
         clauses.append(source[start:end])
