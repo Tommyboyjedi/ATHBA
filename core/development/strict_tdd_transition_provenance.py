@@ -234,6 +234,9 @@ _SCENARIO_EVENTS = {
 }
 
 _MICROCYCLE_EVENTS = {
+    MicrocycleTransitionKind.STRUCTURAL_REFACTOR_REQUIRED: StrictTddLifecycleEventKind.STRUCTURAL_REFACTOR_REQUIRED,
+    MicrocycleTransitionKind.STRUCTURAL_REFACTOR_ADVANCED: StrictTddLifecycleEventKind.STRUCTURAL_REFACTOR_ADVANCED,
+    MicrocycleTransitionKind.STRUCTURAL_REFACTOR_PROMOTED: StrictTddLifecycleEventKind.STRUCTURAL_REFACTOR_PROMOTED,
     MicrocycleTransitionKind.STATE_INITIALISED: StrictTddLifecycleEventKind.WORKING_REF_CREATED,
     MicrocycleTransitionKind.PASSING_FRONTIER_OBSERVED: StrictTddLifecycleEventKind.FRONTIER_MATERIALISED,
     MicrocycleTransitionKind.FRONTIER_RED_ACCEPTED: StrictTddLifecycleEventKind.FRONTIER_RED_ACCEPTED,

@@ -71,6 +71,10 @@ async def advance(
             request,
             blocker=state.behavior_review.rationale,
         )
+    if action == MicrocyclePendingAction.STRUCTURAL_REFACTOR:
+        from core.development.structural_refactor_context import StructuralContext
+        from core.development.structural_refactor_lifecycle import StructuralRefactorLifecycle
+        return await StructuralRefactorLifecycle().advance(StructuralContext(service, request, state, adapter))
     if action == MicrocyclePendingAction.OBSERVE_FRONTIER:
         return _observe_frontier(service, request, state, adapter, prior_status)
     if action == MicrocyclePendingAction.SUBMIT_DEVELOPER:
@@ -134,6 +138,10 @@ def _observe_frontier(
             )
         )
         updated = _record_execution(state, base, assessment)
+        if assessment.outcome == BoundaryOutcome.STRUCTURAL_REFACTOR_REQUIRED.value:
+            updated = replace(updated, pending_action=MicrocyclePendingAction.STRUCTURAL_REFACTOR.value)
+            service.state_store.save(updated)
+            return _result(MicrocycleTransitionKind.STRUCTURAL_REFACTOR_REQUIRED, prior_status, updated, request)
         if assessment.outcome in _VALID_RED_OUTCOMES:
             _advance_working_revision(
                 request,
@@ -570,6 +578,8 @@ def _normalise_pending_action(state: MicrocycleState) -> MicrocycleState:
 
 
 def _status(state: MicrocycleState) -> str:
+    if state.pending_action == MicrocyclePendingAction.STRUCTURAL_REFACTOR.value and state.structural_attempts:
+        return f"{state.pending_action}:{state.structural_attempts[-1].phase.value}"
     if state.completion.status != "pending":
         return state.completion.status
     return state.pending_action
@@ -607,10 +617,12 @@ def _result(
             state.retry_counts.regression,
             state.retry_counts.frontier_execution,
             len(state.developer_attempts),
+            len(state.structural_attempts),
         ),
         state.pending_action,
     )
     evidence = tuple(state.regression.evidence_refs) + tuple(state.behavior_review.evidence_refs)
+    evidence += tuple(ref for attempt in state.structural_attempts for ref in attempt.evidence_refs)
     terminal = {
         MicrocycleTransitionKind.BLOCKED,
         MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED,

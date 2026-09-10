@@ -7,6 +7,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from core.development.python_structural_collision import structural_collision
 from core.development.python_pytest_isolation import TargetPytestEnvironment
 from core.development.python_missing_member import MissingMemberContext, missing_production_member
 
@@ -23,6 +24,7 @@ class _Facts:
     was_xfail: bool = False
     was_xpass: bool = False
     missing_production_member: bool = False
+    structural_problem: str | None = None
     exception_type: str | None = None
     failure_message: str | None = None
     source_line: int | None = None
@@ -40,6 +42,8 @@ class _Plugin:
 
     def pytest_runtest_makereport(self, item, call) -> None:
         if item.nodeid == self.node and call.when == "call" and call.excinfo is not None:
+            problem = structural_collision(call.excinfo.value, self.member_context)
+            self.facts.structural_problem = json.dumps(asdict(problem)) if problem else None
             self.facts.missing_production_member = missing_production_member(call.excinfo.value, self.member_context)
 
     def pytest_collection_finish(self, session) -> None:

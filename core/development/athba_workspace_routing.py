@@ -9,6 +9,7 @@ class AthbaModelWorkKind(str, Enum):
     COMPLETE_SCENARIO_AUTHORING = "complete_scenario_authoring"
     SCENARIO_REPAIR = "scenario_repair"
     SCENARIO_INTENT_REVIEW = "scenario_intent_review"
+    STRUCTURAL_REFACTOR = "structural_refactor"
     FRONTIER_IMPLEMENTATION = "frontier_implementation"
     MECHANICAL_FRONTIER_REPAIR = "mechanical_frontier_repair"
     STRONGER_FRONTIER_FALLBACK = "stronger_frontier_fallback"
@@ -77,7 +78,7 @@ class AthbaExecutionProfileResolver:
     def _profile_for(request: AthbaProfileResolutionRequest) -> AthbaExecutionProfile:
         if request.work_kind in _SCENARIO_KINDS:
             return _profile(_REASONING_AND_CODING, WorkspaceComplexity.MEDIUM, False, AthbaOutboundPriority.MEDIUM, request.timeout_seconds)
-        if request.work_kind == AthbaModelWorkKind.FRONTIER_IMPLEMENTATION:
+        if request.work_kind in {AthbaModelWorkKind.FRONTIER_IMPLEMENTATION, AthbaModelWorkKind.STRUCTURAL_REFACTOR}:
             return _profile(_CODING_ONLY, WorkspaceComplexity.SMALL, False, AthbaOutboundPriority.LOW, request.timeout_seconds)
         if request.work_kind == AthbaModelWorkKind.MECHANICAL_FRONTIER_REPAIR:
             return _profile(_CODING_ONLY, WorkspaceComplexity.SMALL, False, AthbaOutboundPriority.MEDIUM, request.timeout_seconds)

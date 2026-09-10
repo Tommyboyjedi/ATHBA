@@ -38,6 +38,9 @@ class StrictTddLifecycleEventKind(str, Enum):
     SCENARIO_INTENT_COMPLETED = 'scenario_intent_completed'
     WORKING_REF_CREATED = 'working_ref_created'
     FRONTIER_MATERIALISED = 'frontier_materialised'
+    STRUCTURAL_REFACTOR_REQUIRED = "structural_refactor_required"
+    STRUCTURAL_REFACTOR_ADVANCED = "structural_refactor_advanced"
+    STRUCTURAL_REFACTOR_PROMOTED = "structural_refactor_promoted"
     FRONTIER_RED_ACCEPTED = 'frontier_red_accepted'
     DEVELOPER_STARTED = 'developer_started'
     DEVELOPER_COMPLETED = 'developer_completed'

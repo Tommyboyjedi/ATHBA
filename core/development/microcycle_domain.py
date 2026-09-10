@@ -5,6 +5,10 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Protocol
 
+from core.development.structural_refactor_domain import (
+    StructuralProblem, StructuralAttempt, StructuralCandidateCheck, StructuralProductionSource,
+)
+
 MICROCYCLE_SCHEMA_VERSION = 2
 MAX_MICROCYCLE_ATTEMPTS = 4
 
@@ -24,6 +28,7 @@ class BoundaryOutcome(str, Enum):
     INVALID_TEST_SYNTAX = "invalid_test_syntax"
     FAILURE_BEFORE_FRONTIER = "failure_before_frontier"
     INFRASTRUCTURE_FAILURE = "infrastructure_failure"
+    STRUCTURAL_REFACTOR_REQUIRED = "structural_refactor_required"
     UNSUPPORTED_LANGUAGE_BOUNDARY = "unsupported_language_boundary"
 
 
@@ -38,6 +43,7 @@ class BehaviorReviewVerdict(str, Enum):
 
 class MicrocyclePendingAction(str, Enum):
     OBSERVE_FRONTIER = "observe_frontier"
+    STRUCTURAL_REFACTOR = "structural_refactor"
     SUBMIT_DEVELOPER = "submit_developer"
     VERIFY_DEVELOPER_GREEN = "verify_developer_green"
     RUN_REGRESSION = "run_regression"
@@ -365,17 +371,20 @@ class BoundaryAssessment:
     outcome: str
     active_fragment_id: str
     diagnostic: BoundaryDiagnostic
+    structural_problem: StructuralProblem | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "outcome", _outcome(self.outcome))
         _text(self.active_fragment_id, "active fragment id")
+        if (self.outcome == BoundaryOutcome.STRUCTURAL_REFACTOR_REQUIRED.value) != (self.structural_problem is not None):
+            raise ValueError("structural classification requires normalized problem")
 
     def to_dict(self) -> dict[str, object]:
-        return {"outcome": self.outcome, "active_fragment_id": self.active_fragment_id, "diagnostic": self.diagnostic.to_dict()}
+        return {"outcome": self.outcome, "active_fragment_id": self.active_fragment_id, "diagnostic": self.diagnostic.to_dict(), "structural_problem": asdict(self.structural_problem) if self.structural_problem else None}
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "BoundaryAssessment":
-        return cls(str(value["outcome"]), str(value["active_fragment_id"]), BoundaryDiagnostic.from_dict(dict(value["diagnostic"])))
+        return cls(str(value["outcome"]), str(value["active_fragment_id"]), BoundaryDiagnostic.from_dict(dict(value["diagnostic"])), StructuralProblem.from_dict(dict(value["structural_problem"])) if value.get("structural_problem") else None)
 
 
 @dataclass(frozen=True)
@@ -707,6 +716,9 @@ class MicrocycleState:
     frontier_attempt_counts: tuple[FrontierAttemptCounts, ...] = ()
     behavior_review: BehaviorReviewState = BehaviorReviewState()
     pending_action: str = MicrocyclePendingAction.OBSERVE_FRONTIER.value
+    structural_attempts: tuple[StructuralAttempt, ...] = ()
+    structural_regression: RegressionState | None = None
+    structural_rerun: BoundaryAssessment | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != MICROCYCLE_SCHEMA_VERSION:
@@ -735,6 +747,9 @@ class MicrocycleState:
             "frontier_attempt_counts": [item.to_dict() for item in self.frontier_attempt_counts],
             "behavior_review": self.behavior_review.to_dict(),
             "pending_action": self.pending_action,
+            "structural_attempts": [item.to_dict() for item in self.structural_attempts],
+            "structural_regression": self.structural_regression.to_dict() if self.structural_regression else None,
+            "structural_rerun": self.structural_rerun.to_dict() if self.structural_rerun else None,
         }
 
     @classmethod
@@ -759,6 +774,9 @@ class MicrocycleState:
             tuple(FrontierAttemptCounts.from_dict(dict(item)) for item in value.get("frontier_attempt_counts", ())),
             BehaviorReviewState.from_dict(dict(value.get("behavior_review", {}))),
             str(value.get("pending_action", _legacy_pending_action(value))),
+            tuple(StructuralAttempt.from_dict(dict(item)) for item in value.get("structural_attempts", ())),
+            RegressionState.from_dict(dict(value["structural_regression"])) if value.get("structural_regression") else None,
+            BoundaryAssessment.from_dict(dict(value["structural_rerun"])) if value.get("structural_rerun") else None,
         )
 
 
@@ -887,6 +905,8 @@ class LanguageTestAdapter(Protocol):
     def materialise_frontier(self, request: FrontierMaterialisationRequest) -> MaterialisedTestArtifact: ...
     def execute_frontier(self, request: FrontierExecutionRequest) -> BoundaryDiagnostic: ...
     def classify_boundary(self, request: BoundaryClassificationRequest) -> BoundaryAssessment: ...
+    def focus_structural_production(self, request: StructuralProductionSource) -> str: ...
+    def validate_structural_candidate(self, request: StructuralCandidateCheck) -> bool: ...
     def materialise_final_test(self, request: FinalTestMaterialisationRequest) -> MaterialisedTestArtifact: ...
     def regression_contract(self, request: RegressionContractRequest) -> RegressionContract: ...
 
