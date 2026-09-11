@@ -428,3 +428,46 @@ def test_repeated_mutable_field_assignments_resolve_one_exact_identifier_change(
     assert payload["identifier_substitution"] == {"current_name": "count", "required_name": "total"}
     assert "self.count = 0" in payload["production"][0]["source"]
     assert "assert counter.count == 0" in payload["affected_tests"][0]["source"]
+
+
+@pytest.mark.asyncio
+async def test_naming_prompt_limits_mismatch_to_missing_required_identifier(local_provider, monkeypatch):
+    gateway, calls = reasoner(local_provider, monkeypatch, "NO")
+    request = replace(naming_input(), production=replace(
+        production(), files=(RevisionFile("subject.py", SOURCE +
+            "\ndef exact_name(value):\n    return old_name(value)\n"),),
+    ))
+    assert await NamingAssessor(gateway).reason(request) == NamingDecision()
+    assert len(calls) == 1
+    instruction = calls[0].prompt.split("\n", 1)[0]
+    assert "A naming mismatch exists only when an explicitly required identifier is absent" in instruction
+    assert "and the same public/product concept is implemented under a different identifier" in instruction
+    assert "If the required identifier already exists in production, answer NO." in instruction
+    assert "Do not suggest removal of aliases or duplicate helpers" in instruction
+    assert "syntax changes, API-shape changes, style improvements, general cleanup or refactoring" in instruction
+
+
+@pytest.mark.asyncio
+async def test_naming_prompt_output_identifiers_have_no_trailing_punctuation(local_provider, monkeypatch):
+    gateway, calls = reasoner(local_provider, monkeypatch, "NO")
+    await NamingAssessor(gateway).reason(naming_input())
+    instruction = calls[0].prompt.split("\n", 1)[0]
+    output = instruction.split("Return exactly either: ", 1)[1].split(" Do not add", 1)[0]
+    assert output == (
+        "NO or: YES\\ncurrent_name: <exact existing identifier>"
+        "\\nrequired_name: <exact required identifier>"
+    )
+    assert "Do not add punctuation, explanation, markdown, or any other text." in instruction
+
+
+@pytest.mark.parametrize("suffix", [".", ",", ";", "!"])
+def test_naming_parser_rejects_punctuation_after_required_total(suffix):
+    request = NamingAssessmentInput(
+        NamingMaterial("The callable must be named total.", ("total",)),
+        replace(production(), files=(RevisionFile("subject.py",
+            "def get_total():\n    return 0\n"),)),
+    )
+    valid = "YES\ncurrent_name: get_total\nrequired_name: total"
+    assert parse_naming_decision(valid, request).rename == IdentifierRename("get_total", "total")
+    with pytest.raises(ValueError, match="NO or exactly one mapping"):
+        parse_naming_decision(valid + suffix, request)

@@ -14,10 +14,15 @@ MAX_OBJECTIVE_CHARACTERS = 400
 MAX_REASON_CHARACTERS = 240
 IDENTIFIER_PATTERN = r"[A-Za-z_][A-Za-z_0-9]*"
 NAMING_INSTRUCTION = (
-    "Compare only the explicit identifier requirements with the production code below. "
-    "Identify at most one public/product identifier implemented under a different name. "
-    "Do not invent names or suggest style improvements. Answer NO unless there is an exact mismatch. "
-    "Otherwise return exactly: YES\\ncurrent_name: <identifier>\\nrequired_name: <identifier>."
+    "Compare the explicitly required identifier names with the production code. "
+    "A naming mismatch exists only when an explicitly required identifier is absent "
+    "and the same public/product concept is implemented under a different identifier. "
+    "If the required identifier already exists in production, answer NO. "
+    "Do not suggest removal of aliases or duplicate helpers, syntax changes, API-shape changes, "
+    "style improvements, general cleanup or refactoring. "
+    "Return exactly either: NO or: YES\\ncurrent_name: <exact existing identifier>"
+    "\\nrequired_name: <exact required identifier> "
+    "Do not add punctuation, explanation, markdown, or any other text."
 )
 REFACTOR_INSTRUCTION = (
     "Review only the production code below. Answer NO unless one specific, material, high-confidence "
