@@ -1,0 +1,23 @@
+{
+  "run_id": "pr30-naming-prompt-20260911T082810Z",
+  "implementation_sha": "f4b491fb2bb92f6a1865c29fd763d2c42b49e823",
+  "status": "blocked",
+  "reason": "specification_gatekeeper_failed",
+  "checklist_blocker": "REQ-004",
+  "rejection_reason": "invalid_split_response",
+  "split_rationale": "specification checklist provenance is not grounded in original source",
+  "completed_behaviors": 4,
+  "transitions": 139,
+  "canonical_target_sha": "b9e6643daa95c3a6eb9327cc295bbc05010e09b6",
+  "final_gatekeeper_passed": false,
+  "naming_ran": false,
+  "raw_naming_response": null,
+  "naming_completed": false,
+  "refactor_assessor_ran": false,
+  "refactorer_ran": false,
+  "POST_BEHAVIOR_COMPLETE": false,
+  "historical_evidence_unchanged": true,
+  "requirement_unchanged": true,
+  "archive_files": 29,
+  "archive_content_hashes_verified": true
+}
