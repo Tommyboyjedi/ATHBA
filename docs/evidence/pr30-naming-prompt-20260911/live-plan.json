@@ -1,0 +1,13 @@
+{
+  "run_id": "pr30-naming-prompt-20260911T082810Z",
+  "project_id": "pr30-naming-prompt-20260911T082810Z",
+  "athba_revision": "f4b491fb2bb92f6a1865c29fd763d2c42b49e823",
+  "requirement_file": "docs/evidence/pr30-20260910/live-requirement.txt",
+  "requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "stop_at_genuine_blocker": true,
+  "manual_target_edits_permitted": false,
+  "naming_NO_may_proceed_normally_to_refactoring": true,
+  "no_fixture_or_model_retuning": true,
+  "assessor_NO_is_legitimate": true,
+  "preserved_run_do_not_resume": "pr30-structural-20260910T194503Z"
+}

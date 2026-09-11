@@ -1,0 +1,35 @@
+{
+  "current_invocation_count": 0,
+  "immutable_identity_hash": "9046458bc4880c98f0b27bc9e7ba52051ff3cfb00d4c04ee7460992df24f0471",
+  "last_delivered_fingerprint": {
+    "behavior_ref": null,
+    "canonical_sha": "92aa8b6a8e39a1ea0f8f0d0090c5f880cecc5f91",
+    "frontier_index": null,
+    "pending_action": "gatekeeper_checklist",
+    "retry_counts": [
+      0
+    ],
+    "scenario_id": null,
+    "status": "planning",
+    "working_sha": null
+  },
+  "last_delivered_path": {
+    "feature_kind": "contract_persisted",
+    "microcycle_kind": null,
+    "scenario_kind": null
+  },
+  "last_lifecycle_event_id": "transition-eabac7beb107a79121ca051bc63e04f6ad3f3b7baece0dfd2208e40533ee3d0b",
+  "markdown_report_path": null,
+  "pending_transition_receipt": null,
+  "project_id": "pr30-live-running-total-20260910",
+  "reached_checkpoints": [],
+  "reason": null,
+  "run_id": "pr30-live-running-total-20260910",
+  "schema_version": 1,
+  "status": "running",
+  "structured_report_path": null,
+  "total_application_transition_count": 2,
+  "transition_in_flight": {
+    "occurrence": 3
+  }
+}

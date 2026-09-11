@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 
-from core.development.specification_obligations import grounded_modality
 from core.development.checklist_split_progress import ChecklistSplitAncestry, rejected_split
 from dataclasses import dataclass, field
 from typing import Sequence
@@ -211,6 +210,8 @@ def _atomization_rules() -> list[str]:
         "for modality=forbidden, source_quote must retain must not, shall not, do not implement, forbidden, or prohibited wording",
         "when one compound source sentence establishes modality for several atomic items, those items may reuse the same full source_quote while subject narrows each obligation",
         "source_quote need not be unique across checklist items",
+        "source_quote may use ... between non-empty verbatim segments in source order within one sentence/clause; never cross sentence or clause boundaries or splice words",
+        "an omission subject must occur entirely within one retained verbatim segment, never across or inside omitted text",
         "retain verbatim source_quote and subject; never strengthen wording",
         "split enumerated capabilities and compound quality requirements into separate items",
         "preserve happy paths",
@@ -233,7 +234,7 @@ def _checklist_output_schema() -> dict[str, object]:
             "text": "string",
             "kind": "behavior|validation|invariant|constraint|quality",
             "modality": "required|forbidden|non_goal",
-            "source_quote": "verbatim contiguous excerpt from requirement_text",
+            "source_quote": "verbatim contiguous excerpt from requirement_text, or ordered verbatim segments separated by ... within one source clause",
             "subject": "verbatim capability or quality phrase within source_quote",
         }]
     }
@@ -275,15 +276,7 @@ def _grounded_item(payload: dict[str, object], source: str) -> SpecificationChec
         if not isinstance(payload.get(name), str) or not str(payload[name]).strip():
             raise ValueError(f"specification checklist requires explicit {name}")
     item = SpecificationChecklistItem.from_dict(payload)
-    if item.source_quote not in source or item.subject.lower() not in item.source_quote.lower():
-        raise ValueError("specification checklist provenance is not grounded in original source")
-    start = source.index(item.source_quote)
-    left = max(source.rfind(mark, 0, start) for mark in (".", "!", "?", "\n")) + 1
-    end = start + len(item.source_quote)
-    boundaries = [position for mark in (".", "!", "?", "\n") if (position := source.find(mark, end)) >= 0]
-    right = min(boundaries) if boundaries else len(source)
-    context = source[left:right] if not re.search(r"[.!?]$", item.source_quote) else source[left:end]
-    grounded_modality(item.modality, context)
+    item.source_context(source)
     return item
 
 

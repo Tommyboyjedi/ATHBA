@@ -62,6 +62,7 @@ async def advance(
             StrictTddFeatureStatus.PLANNING.value,
             canonical_ref=f"refs/heads/{project.default_ref}",
             canonical_development_base=project.trusted_base_sha,
+            behavioral_entry_revision=project.trusted_base_sha,
         )
         service.states.save(state)
         disposition = ProjectTransitionDisposition.CREATED if project_load.created else ProjectTransitionDisposition.LOADED
@@ -122,6 +123,7 @@ async def _persist_contract(
         contract.to_dict(),
         canonical_ref=f"refs/heads/{project.default_ref}",
         canonical_development_base=project.trusted_base_sha,
+            behavioral_entry_revision=project.trusted_base_sha,
     )
     service.states.save(state)
     return _result_for(FeatureTransitionKind.CONTRACT_PERSISTED, state, project, reasoning=True)

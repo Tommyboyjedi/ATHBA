@@ -1,4 +1,4 @@
-"""Bounded storage-reference policy; opaque runtime effects remain unsupported."""
+"""Bounded storage policy with explicit, nonblocking function-decorator assurance limits."""
 from __future__ import annotations
 
 import ast
@@ -7,6 +7,8 @@ from core.development.python_specification_dependencies import dynamic_reference
 
 STORAGE_MODULES = frozenset({"sqlite3", "dbm", "shelve", "pickle", "pathlib", "tempfile", "io", "os", "shutil"})
 STORAGE_CALLS = frozenset({"open"})
+DECORATOR_ASSURANCE = "Storage requirement passed by bounded static inspection; decorator effects were not statically verified."
+
 PURE_CONSTRUCTORS = frozenset({"dict", "list", "tuple", "set", "frozenset", "str", "int", "float", "bool", "len", "range"})
 
 
@@ -36,8 +38,6 @@ def storage_findings(trees: tuple[ast.Module, ...]) -> tuple[tuple[str, ...], tu
                     unknown.append(f"line {getattr(node, "lineno", 0)}: opaque call effects {name}")
             if isinstance(node, ast.ClassDef) and (node.bases or node.decorator_list or node.keywords):
                 unknown.append(f"line {getattr(node, "lineno", 0)}: opaque class effects")
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.decorator_list:
-                unknown.append(f"line {getattr(node, "lineno", 0)}: opaque decorator effects")
     return tuple(violations), tuple(unknown)
 
 
@@ -59,3 +59,24 @@ def bound_names(tree: ast.Module) -> set[str]:
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
     return names
+
+
+def decorator_warnings(trees: tuple[ast.Module, ...], paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Report every function decorator without claiming its semantics are verified.
+
+    The normal storage walk still visits decorator expressions and function bodies:
+    positive storage references and other blocking unknowns are never suppressed.
+    Class decorators remain under the existing opaque-class policy.
+    """
+    occurrences = sorted(
+        (path, decorator.lineno, decorator.col_offset, node.name, ast.unparse(decorator))
+        for tree, path in zip(trees, paths)
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for decorator in node.decorator_list
+    )
+    return tuple(
+        f"assurance_warning: {path}:{line}: @{identity} on {name}; "
+        "decorator effects were not statically verified"
+        for path, line, _column, name, identity in occurrences
+    )

@@ -1,0 +1,98 @@
+{
+  "run_id": "pr30-provenance-routing-20260910T133659Z",
+  "athba_revision": "77e473e0d79792ded35ecfaac08a56765c0db29a",
+  "requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "status": "blocked",
+  "reason": "specification_gatekeeper_failed",
+  "transitions": 143,
+  "completed_behaviors": 4,
+  "final_canonical_revision": "0039443078c3b591be8108d386c2606f4fe8affe",
+  "target_head": "0039443078c3b591be8108d386c2606f4fe8affe",
+  "target_clean": true,
+  "behavioral_baseline": null,
+  "post_behavior_started": false,
+  "POST_BEHAVIOR_COMPLETE": false,
+  "provenance_creation_reload_collection": "PASS",
+  "provenance_final_evidence_routing": "PASS",
+  "actual_storage_adapter_reached": true,
+  "final_reconciliation": [
+    {
+      "checklist_ref": "REQ-001",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test instantiates the RunningTotal class and verifies its initial state, confirming the existence and basic functionality of the class as required.",
+      "adapter": null,
+      "revision": null
+    },
+    {
+      "checklist_ref": "REQ-002",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test 'test_REQ_001' explicitly instantiates a RunningTotal object and asserts that its total is 0, which directly verifies the requirement that a newly created RunningTotal starts with a total of zero.",
+      "adapter": null,
+      "revision": null
+    },
+    {
+      "checklist_ref": "REQ-003",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test 'test_REQ_002' explicitly calls the add(amount) method with both positive (5) and negative (-3) integers and asserts that the running total is updated correctly, directly proving the requirement.",
+      "adapter": null,
+      "revision": null
+    },
+    {
+      "checklist_ref": "REQ-004",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test verifies that calling the 'total' property twice consecutively returns the same value (10), confirming that accessing the total does not modify the internal state.",
+      "adapter": null,
+      "revision": null
+    },
+    {
+      "checklist_ref": "REQ-005",
+      "answer": "YES",
+      "evidence_policy": null,
+      "evidence_status": null,
+      "rationale": "The test 'test_REQ_004' explicitly performs the operations of adding 3 and then -1, and asserts that the resulting total is 2, which directly matches the checklist item.",
+      "adapter": null,
+      "revision": null
+    },
+    {
+      "checklist_ref": "REQ-006",
+      "answer": "YES",
+      "evidence_policy": "dependency_free",
+      "evidence_status": "pass",
+      "rationale": "canonical source and declarations satisfy the bounded static policy",
+      "adapter": {
+        "id": "python-specification",
+        "language": "python",
+        "version": "1"
+      },
+      "revision": "0039443078c3b591be8108d386c2606f4fe8affe"
+    },
+    {
+      "checklist_ref": "REQ-007",
+      "answer": "NO",
+      "evidence_policy": "no_storage",
+      "evidence_status": "unsupported_evidence_policy",
+      "rationale": "unsupported_evidence_policy; line 15: opaque decorator effects",
+      "adapter": {
+        "id": "python-specification",
+        "language": "python",
+        "version": "1"
+      },
+      "revision": "0039443078c3b591be8108d386c2606f4fe8affe"
+    }
+  ],
+  "runtime_files_preserved": 27,
+  "preserved_previous_run_unchanged": true,
+  "shell_result": {
+    "exit_code": 2,
+    "seconds": 920.347,
+    "finished_at": "2026-09-10T13:59:19.688183+00:00"
+  }
+}

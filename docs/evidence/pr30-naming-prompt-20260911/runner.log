@@ -1,0 +1,14 @@
+START naming-focused-configured
+END naming-focused-configured 0
+START pr30-focused
+END pr30-focused 0
+START full-pytest
+END full-pytest 0
+START coding-principles
+END coding-principles 0
+START mypy
+END mypy 0
+START compileall
+END compileall 0
+START diff-check
+END diff-check 0

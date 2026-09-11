@@ -1,0 +1,26 @@
+The bundle contains these 22 refs:
+0039443078c3b591be8108d386c2606f4fe8affe refs/heads/main
+eec0af666b9a7b7c1c83f1b6c4029f18e3986a1e refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-001--frontier-0--pr30-provenance-routing-20260910T133659Z--REQ-001--frontier-0--developer-1--submission-16941413416515238829
+f97a63ba7578d13adead60159a4fb3d62c4fb9c2 refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-001--frontier-2--pr30-provenance-routing-20260910T133659Z--REQ-001--frontier-2--developer-1--submission-9721951198207222303
+baac70c4d1e2c9fd3e906d6154b66b02a97f02e9 refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-001--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-001--scenario-draft-1--submission-1517525795589318307
+66729b9668594a18e94a281047c1259b76f4028e refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-001--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-001--scenario-draft-2--submission-1517526895100946518
+f97a63ba7578d13adead60159a4fb3d62c4fb9c2 refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-002--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-002--scenario-draft-1--submission-7030478384591726114
+9f28b2c5823f45351b5770c32a8393e6d541f4f4 refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-002--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-002--scenario-draft-2--submission-7030477285080097903
+7692f5aa1698e66c990b3da673060fd8e8774c52 refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-003--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-003--scenario-draft-1--submission-4370368417842090621
+f77114cc04a6dddcd4e98f90ba064f13524c8dad refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-003--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-003--scenario-draft-2--submission-4370365119307205988
+3dfda8188b27a18eba3a9e7da610bf3ffda9cff0 refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-004--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-004--scenario-draft-1--submission-10909065665986109444
+4a404532fd4a41cbc37c6f1c7957964d6688bfa3 refs/heads/rack/change-pr30-provenance-routing-20260910T133659Z--REQ-004--scenario-draft--pr30-provenance-routing-20260910T133659Z--REQ-004--scenario-draft-2--submission-10909068964520994077
+0039443078c3b591be8108d386c2606f4fe8affe HEAD
+baac70c4d1e2c9fd3e906d6154b66b02a97f02e9 worktrees/repo/HEAD
+f97a63ba7578d13adead60159a4fb3d62c4fb9c2 worktrees/repo3/HEAD
+f97a63ba7578d13adead60159a4fb3d62c4fb9c2 worktrees/repo4/HEAD
+9f28b2c5823f45351b5770c32a8393e6d541f4f4 worktrees/repo5/HEAD
+7692f5aa1698e66c990b3da673060fd8e8774c52 worktrees/repo6/HEAD
+f77114cc04a6dddcd4e98f90ba064f13524c8dad worktrees/repo7/HEAD
+66729b9668594a18e94a281047c1259b76f4028e worktrees/repo1/HEAD
+4a404532fd4a41cbc37c6f1c7957964d6688bfa3 worktrees/repo9/HEAD
+eec0af666b9a7b7c1c83f1b6c4029f18e3986a1e worktrees/repo2/HEAD
+3dfda8188b27a18eba3a9e7da610bf3ffda9cff0 worktrees/repo8/HEAD
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1
+/srv/ATHBA/docs/evidence/pr30-provenance-routing-20260910/target-repository.bundle is okay

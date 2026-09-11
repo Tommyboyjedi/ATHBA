@@ -1,0 +1,18 @@
+{
+  "run_id": "pr30-provenance-routing-20260910T133659Z",
+  "project_id": "pr30-provenance-routing-20260910T133659Z",
+  "athba_revision": "77e473e0d79792ded35ecfaac08a56765c0db29a",
+  "requirement_file": "docs/evidence/pr30-20260910/live-requirement.txt",
+  "requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "state_root": "/srv/ATHBA/state",
+  "evidence_root": "/srv/ATHBA/docs/evidence/pr30-provenance-routing-20260910/live",
+  "reasoning_model": "local-primary",
+  "production_path": "running_total.py",
+  "test_path": "tests/test_running_total.py",
+  "readiness_timeout_seconds": 45,
+  "readiness_retries": 0,
+  "manual_target_or_checklist_edits": false,
+  "assessor_NO_is_legitimate": true,
+  "stop_at_genuine_blocker": true,
+  "preserved_run_do_not_resume": "pr30-omission-running-total-20260910T114333Z"
+}

@@ -1,0 +1,311 @@
+{
+  "schema": "pr23-lifecycle-evidence-v1",
+  "sections": {
+    "attempt_counts": {
+      "available": false,
+      "scenario_drafting_attempts": []
+    },
+    "feature_application": {
+      "available": true,
+      "value": {
+        "atomization_failure": [
+          {
+            "response": "{\n  \"items\": [\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-001\",\n      \"source_quote\": \"Provide a RunningTotal class in running_total.py.\",\n      \"subject\": \"RunningTotal class\",\n      \"text\": \"Provide a RunningTotal class in running_total.py.\"\n    },\n    {\n      \"kind\": \"invariant\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-002\",\n      \"source_quote\": \"A newly created RunningTotal starts with a total of zero.\",\n      \"subject\": \"starts with a total of zero\",\n      \"text\": \"A newly created RunningTotal starts with a total of zero.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-003\",\n      \"source_quote\": \"Calling add(amount) adds the signed integer amount to its running total.\",\n      \"subject\": \"add(amount)\",\n      \"text\": \"Calling add(amount) adds the signed integer amount to its running total.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-004\",\n      \"source_quote\": \"Calling total() returns the current total without changing it.\",\n      \"subject\": \"total()\",\n      \"text\": \"Calling total() returns the current total without changing it.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-005\",\n      \"source_quote\": \"Adding 3 and then -1 must expose a total of 2.\",\n      \"subject\": \"Adding 3 and then -1 must expose a total of 2\",\n      \"text\": \"Adding 3 and then -1 must expose a total of 2.\"\n    },\n    {\n      \"kind\": \"constraint\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-006\",\n      \"source_quote\": \"Keep the implementation dependency-free\",\n      \"subject\": \"dependency-free\",\n      \"text\": \"Keep the implementation dependency-free\"\n    },\n    {\n      \"kind\": \"constraint\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-007\",\n      \"source_quote\": \"Keep the implementation ... in memory.\",\n      \"subject\": \"in memory\",\n      \"text\": \"Keep the implementation in memory.\"\n    }\n  ]\n}",
+            "validation_error": "specification checklist provenance is not grounded in original source"
+          },
+          {
+            "response": "{\n  \"items\": [\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-001\",\n      \"source_quote\": \"Provide a RunningTotal class in running_total.py.\",\n      \"subject\": \"RunningTotal class\",\n      \"text\": \"Provide a RunningTotal class in running_total.py.\"\n    },\n    {\n      \"kind\": \"invariant\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-002\",\n      \"source_quote\": \"A newly created RunningTotal starts with a total of zero.\",\n      \"subject\": \"starts with a total of zero\",\n      \"text\": \"A newly created RunningTotal starts with a total of zero.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-003\",\n      \"source_quote\": \"Calling add(amount) adds the signed integer amount to its running total.\",\n      \"subject\": \"add(amount)\",\n      \"text\": \"Calling add(amount) adds the signed integer amount to its running total.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-004\",\n      \"source_quote\": \"Calling total() returns the current total without changing it.\",\n      \"subject\": \"total()\",\n      \"text\": \"Calling total() returns the current total without changing it.\"\n    },\n    {\n      \"kind\": \"validation\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-005\",\n      \"source_quote\": \"Adding 3 and then -1 must expose a total of 2.\",\n      \"subject\": \"Adding 3 and then -1 must expose a total of 2\",\n      \"text\": \"Adding 3 and then -1 must expose a total of 2.\"\n    },\n    {\n      \"kind\": \"constraint\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-006\",\n      \"source_quote\": \"Keep the implementation dependency-free\",\n      \"subject\": \"dependency-free\",\n      \"text\": \"Keep the implementation dependency-free\"\n    },\n    {\n      \"kind\": \"constraint\",\n      \"modality\": \"required\",\n      \"ref\": \"REQ-007\",\n      \"source_quote\": \"Keep the implementation ... in memory.\",\n      \"subject\": \"in memory\",\n      \"text\": \"Keep the implementation in memory.\"\n    }\n  ]\n}",
+            "validation_error": "specification checklist provenance is not grounded in original source"
+          }
+        ],
+        "behavior_repairs": [],
+        "behavior_replans": [],
+        "behavioral_entry_revision": "5738d48a8b5e1e85caa0459d200c1c34b0d40029",
+        "blocked_reason": "specification_checklist_atomization_failed",
+        "canonical_development_base": "5738d48a8b5e1e85caa0459d200c1c34b0d40029",
+        "canonical_ref": "refs/heads/main",
+        "completed_behaviors": [],
+        "contract_payload": {
+          "capability": "Maintain and retrieve a running sum of signed integers in memory.",
+          "completion_criteria": [
+            "The RunningTotal class is defined in running_total.py.",
+            "The class initializes with a total of zero.",
+            "The add(amount) method correctly updates the total for both positive and negative integers.",
+            "The total() method returns the current value without side effects.",
+            "The implementation uses no external dependencies and stores data in memory."
+          ],
+          "component_name": "RunningTotal",
+          "error_semantics": [
+            "TypeError if add() is called with a non-integer",
+            "AttributeError if methods are called on a non-instance"
+          ],
+          "id": "pr30-live-running-total-20260910-100901",
+          "invariants": [
+            "The running total must always be an integer.",
+            "The total() method must not modify the internal state of the RunningTotal instance."
+          ],
+          "non_goals": [
+            "Persistence to disk",
+            "Thread-safe concurrency controls",
+            "Handling of floating-point numbers"
+          ],
+          "observable_requirements": [
+            {
+              "depends_on": [],
+              "error_expectation": null,
+              "observable_outcome": "A new instance of RunningTotal has a total of 0.",
+              "preserves_state_on_failure": true,
+              "ref": "REQ-001",
+              "source_refs": [
+                "RT-001"
+              ],
+              "summary": "Initial state is zero.",
+              "test_hint": "Assert total() returns 0 immediately after instantiation."
+            },
+            {
+              "depends_on": [
+                "REQ-001"
+              ],
+              "error_expectation": null,
+              "observable_outcome": "Calling add(amount) updates the total by the specified signed integer.",
+              "preserves_state_on_failure": true,
+              "ref": "REQ-002",
+              "source_refs": [
+                "RT-002"
+              ],
+              "summary": "Add method updates state.",
+              "test_hint": "Call add(5) and assert total() is 5."
+            },
+            {
+              "depends_on": [
+                "REQ-001"
+              ],
+              "error_expectation": null,
+              "observable_outcome": "Calling total() returns the current value without changing it.",
+              "preserves_state_on_failure": true,
+              "ref": "REQ-003",
+              "source_refs": [
+                "RT-003"
+              ],
+              "summary": "Total method is read-only.",
+              "test_hint": "Call total() multiple times and ensure the value remains constant."
+            },
+            {
+              "depends_on": [
+                "REQ-002"
+              ],
+              "error_expectation": null,
+              "observable_outcome": "Adding 3 and then -1 results in a total of 2.",
+              "preserves_state_on_failure": true,
+              "ref": "REQ-004",
+              "source_refs": [
+                "RT-004"
+              ],
+              "summary": "Verify signed integer arithmetic.",
+              "test_hint": "Sequence: add(3), add(-1), assert total() == 2."
+            }
+          ],
+          "production_paths": [
+            "running_total.py"
+          ],
+          "project_id": "pr30-live-running-total-20260910-100901",
+          "public_api": [
+            "RunningTotal",
+            "RunningTotal.add",
+            "RunningTotal.total"
+          ],
+          "requirement_source": "Provide a RunningTotal class in running_total.py. A newly created RunningTotal starts with a total of zero. Calling add(amount) adds the signed integer amount to its running total. Calling total() returns the current total without changing it. Adding 3 and then -1 must expose a total of 2. Keep the implementation dependency-free and in memory.\n",
+          "source_clauses": [
+            {
+              "evidence_kind": "test",
+              "kind": "behavior",
+              "ref": "RT-001",
+              "text": "A newly created RunningTotal instance must start with a total of zero."
+            },
+            {
+              "evidence_kind": "test",
+              "kind": "behavior",
+              "ref": "RT-002",
+              "text": "The add(amount) method must add the signed integer amount to the running total."
+            },
+            {
+              "evidence_kind": "test",
+              "kind": "behavior",
+              "ref": "RT-003",
+              "text": "The total() method must return the current total without modifying the running total."
+            },
+            {
+              "evidence_kind": "test",
+              "kind": "behavior",
+              "ref": "RT-004",
+              "text": "Adding 3 and then -1 must result in a total of 2."
+            },
+            {
+              "evidence_kind": "mechanical",
+              "kind": "constraint",
+              "ref": "RT-005",
+              "text": "The implementation must be dependency-free."
+            },
+            {
+              "evidence_kind": "mechanical",
+              "kind": "constraint",
+              "ref": "RT-006",
+              "text": "The implementation must be in-memory."
+            }
+          ],
+          "status": "tdd_ready",
+          "test_paths": [
+            "tests/test_running_total.py"
+          ]
+        },
+        "current_scenario_id": null,
+        "evidence_refs": [],
+        "final_reconciliation": [],
+        "gatekeeper_payload": null,
+        "pending_completed_behavior": null,
+        "project_id": "pr30-live-running-total-20260910-100901",
+        "reconciliation_failure": null,
+        "reconciliation_progress": [],
+        "source_requirement_hash": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+        "status": "blocked",
+        "working_ref": null,
+        "working_revision": null
+      }
+    },
+    "final_reconciliation": {
+      "available": false,
+      "value": "unavailable/incomplete"
+    },
+    "lifecycle_events": {
+      "available": true,
+      "value": [
+        {
+          "behavior_ref": null,
+          "candidate_revision": null,
+          "canonical_ref": null,
+          "canonical_revision": null,
+          "event_id": "controller-1052c6ef924f2bf1f3888b34140266660bd59279716ecbc4d79323bc770effc4",
+          "event_kind": "run_started",
+          "evidence_refs": [
+            "controller:ready"
+          ],
+          "frontier_index": null,
+          "message": null,
+          "occurred_at_utc": "2026-09-10T10:09:02.352510+00:00",
+          "project_id": "pr30-live-running-total-20260910-100901",
+          "run_id": "pr30-live-running-total-20260910-100901",
+          "scenario_id": null,
+          "sequence_number": 0,
+          "status": "started",
+          "working_ref": null,
+          "working_revision": null
+        },
+        {
+          "behavior_ref": null,
+          "candidate_revision": null,
+          "canonical_ref": "refs/heads/main",
+          "canonical_revision": "5738d48a8b5e1e85caa0459d200c1c34b0d40029",
+          "event_id": "transition-d4fc8862296ec3db090e19be08c71615a05241122e51b038db191853698647d8",
+          "event_kind": "project_created",
+          "evidence_refs": [
+            "transition:project_loaded:667e576bd29c73f4e4c0a5ccec34d2f917bfb92689014115eb207ab811469d02"
+          ],
+          "frontier_index": null,
+          "message": "typed transition: project_loaded",
+          "occurred_at_utc": "2026-09-10T10:09:02.537476+00:00",
+          "project_id": "pr30-live-running-total-20260910-100901",
+          "run_id": "pr30-live-running-total-20260910-100901",
+          "scenario_id": null,
+          "sequence_number": 1,
+          "status": "completed",
+          "working_ref": null,
+          "working_revision": null
+        },
+        {
+          "behavior_ref": null,
+          "candidate_revision": null,
+          "canonical_ref": "refs/heads/main",
+          "canonical_revision": "5738d48a8b5e1e85caa0459d200c1c34b0d40029",
+          "event_id": "transition-a8731bb16d1205d1e621cabd4acff7c765aa1e673919d15c4fae538d41409cc4",
+          "event_kind": "behavior_contract_completed",
+          "evidence_refs": [
+            "transition:contract_persisted:667e576bd29c73f4e4c0a5ccec34d2f917bfb92689014115eb207ab811469d02"
+          ],
+          "frontier_index": null,
+          "message": "typed transition: contract_persisted",
+          "occurred_at_utc": "2026-09-10T10:09:44.112181+00:00",
+          "project_id": "pr30-live-running-total-20260910-100901",
+          "run_id": "pr30-live-running-total-20260910-100901",
+          "scenario_id": null,
+          "sequence_number": 2,
+          "status": "completed",
+          "working_ref": null,
+          "working_revision": null
+        },
+        {
+          "behavior_ref": null,
+          "candidate_revision": null,
+          "canonical_ref": "refs/heads/main",
+          "canonical_revision": "5738d48a8b5e1e85caa0459d200c1c34b0d40029",
+          "event_id": "transition-55fb4fc85d6839a8ba01131cac91d1748268f8bb67b7bccaf11d863439cc9760",
+          "event_kind": "feature_blocked",
+          "evidence_refs": [
+            "transition:blocked:c074f60dd8f98a0c7fb79a8bf1540aa0035a91e86b657ddc303bc83a4d5096a4"
+          ],
+          "frontier_index": null,
+          "message": "typed transition: blocked",
+          "occurred_at_utc": "2026-09-10T10:10:24.468879+00:00",
+          "project_id": "pr30-live-running-total-20260910-100901",
+          "run_id": "pr30-live-running-total-20260910-100901",
+          "scenario_id": null,
+          "sequence_number": 3,
+          "status": "blocked",
+          "working_ref": null,
+          "working_revision": null
+        },
+        {
+          "behavior_ref": null,
+          "candidate_revision": null,
+          "canonical_ref": null,
+          "canonical_revision": null,
+          "event_id": "controller-cff4ed0dcba0acb0d2af36acf753bbc769247598584cdc200c8a2bbd9e81c77d",
+          "event_kind": "run_blocked",
+          "evidence_refs": [
+            "controller:blocked"
+          ],
+          "frontier_index": null,
+          "message": "specification_checklist_atomization_failed",
+          "occurred_at_utc": "2026-09-10T10:10:24.474541+00:00",
+          "project_id": "pr30-live-running-total-20260910-100901",
+          "run_id": "pr30-live-running-total-20260910-100901",
+          "scenario_id": null,
+          "sequence_number": 4,
+          "status": "blocked",
+          "working_ref": null,
+          "working_revision": null
+        }
+      ]
+    },
+    "microcycle_state": {
+      "available": false,
+      "value": "unavailable/incomplete"
+    },
+    "revision_lifecycle": {
+      "available": false,
+      "value": "unavailable/incomplete"
+    },
+    "run": {
+      "athba_version": "1ed201ca38723e10df553adb16c522efabd0ddf8",
+      "available": true,
+      "final_status": "blocked",
+      "original_requirement": "Provide a RunningTotal class in running_total.py. A newly created RunningTotal starts with a total of zero. Calling add(amount) adds the signed integer amount to its running total. Calling total() returns the current total without changing it. Adding 3 and then -1 must expose a total of 2. Keep the implementation dependency-free and in memory.\n",
+      "project_id": "pr30-live-running-total-20260910-100901",
+      "rack_ai_version": "469dc13c4d669266de21c629cc449f889364b7e2",
+      "run_id": "pr30-live-running-total-20260910-100901"
+    },
+    "scenario_draft_state": {
+      "available": false,
+      "value": "unavailable/incomplete"
+    }
+  }
+}

@@ -76,6 +76,12 @@ class ChecklistReconciliationTree:
         self.planner = SpecificationChecklistPlanner(gateway)
 
     async def reconcile(self, context: ChecklistTreeContext) -> list[dict[str, object]]:
+        try:
+            decision = EvidencePolicyRouter().route_source(context.item, context.source)
+        except ValueError:
+            # A cached YES cannot bypass revalidation of a persisted root/child.
+            return [await context.reconciler.reconcile(RoutedChecklistRequest(
+                context.project_id, context.item, context.source, context.accepted))]
         checkpoint = ChecklistNodeCheckpoint(self.journal, context)
         if checkpoint.state.result is None:
             record = await context.reconciler.reconcile(RoutedChecklistRequest(
@@ -84,7 +90,7 @@ class ChecklistReconciliationTree:
                 checkpoint.attempts, checkpoint.before_test))
             checkpoint.result(record)
         record = dict(checkpoint.state.result or {})
-        if (EvidencePolicyRouter().route(context.item).policy != EvidencePolicy.BEHAVIORAL
+        if (decision.policy != EvidencePolicy.BEHAVIORAL
                 or record.get("answer") != "NO"):
             return [record]
         if checkpoint.state.split is None:

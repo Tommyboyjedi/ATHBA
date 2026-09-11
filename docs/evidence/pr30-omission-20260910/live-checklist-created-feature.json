@@ -1,0 +1,225 @@
+{
+  "atomization_failure": [],
+  "behavior_repairs": [],
+  "behavior_replans": [],
+  "behavioral_entry_revision": "01a5103f1d6b2bfa531f69afe32defcd1311727f",
+  "blocked_reason": null,
+  "canonical_development_base": "01a5103f1d6b2bfa531f69afe32defcd1311727f",
+  "canonical_ref": "refs/heads/main",
+  "completed_behaviors": [],
+  "contract_payload": {
+    "capability": "Maintain and retrieve a running sum of signed integers in memory.",
+    "completion_criteria": [
+      "A RunningTotal instance is initialized to zero.",
+      "The add method correctly updates the internal state with positive and negative integers.",
+      "The total method returns the current sum without side effects.",
+      "The implementation uses no external dependencies and stores data in memory."
+    ],
+    "component_name": "RunningTotal",
+    "error_semantics": [
+      "TypeError if non-integer types are passed to add",
+      "AttributeError if methods are called on non-instances"
+    ],
+    "id": "pr30-omission-running-total-20260910T114333Z",
+    "invariants": [
+      "The running total must always be an integer.",
+      "The total() method must not modify the internal state."
+    ],
+    "non_goals": [
+      "Persistence to disk",
+      "Thread-safe concurrency controls",
+      "Handling of floating-point numbers"
+    ],
+    "observable_requirements": [
+      {
+        "depends_on": [],
+        "error_expectation": null,
+        "observable_outcome": "A new RunningTotal instance has a total of 0.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-001",
+        "source_refs": [
+          "RT-001"
+        ],
+        "summary": "Initial state is zero.",
+        "test_hint": "Assert total() returns 0 immediately after instantiation."
+      },
+      {
+        "depends_on": [
+          "REQ-001"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "The total increases or decreases by the exact signed amount provided to add().",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-002",
+        "source_refs": [
+          "RT-002"
+        ],
+        "summary": "Add method updates total.",
+        "test_hint": "Call add(5) and assert total is 5, then call add(-2) and assert total is 3."
+      },
+      {
+        "depends_on": [
+          "REQ-001"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "Calling total() returns the current value without changing it.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-003",
+        "source_refs": [
+          "RT-003"
+        ],
+        "summary": "Total method is read-only.",
+        "test_hint": "Call total() multiple times and verify the result remains constant."
+      },
+      {
+        "depends_on": [
+          "REQ-002"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "Sequential additions of 3 and -1 result in a total of 2.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-004",
+        "source_refs": [
+          "RT-004"
+        ],
+        "summary": "Verify specific arithmetic sequence.",
+        "test_hint": "Verify that add(3) followed by add(-1) results in 2."
+      }
+    ],
+    "production_paths": [
+      "running_total.py"
+    ],
+    "project_id": "pr30-omission-running-total-20260910T114333Z",
+    "public_api": [
+      "RunningTotal",
+      "RunningTotal.add",
+      "RunningTotal.total"
+    ],
+    "requirement_source": "Provide a RunningTotal class in running_total.py. A newly created RunningTotal starts with a total of zero. Calling add(amount) adds the signed integer amount to its running total. Calling total() returns the current total without changing it. Adding 3 and then -1 must expose a total of 2. Keep the implementation dependency-free and in memory.\n",
+    "source_clauses": [
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "RT-001",
+        "text": "A newly created RunningTotal instance must start with a total of zero."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "RT-002",
+        "text": "The add(amount) method must add the signed integer amount to the running total."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "RT-003",
+        "text": "The total() method must return the current total without modifying the running total."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "RT-004",
+        "text": "Adding 3 and then -1 must result in a total of 2."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "ref": "RT-005",
+        "text": "The implementation must be dependency-free."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "ref": "RT-006",
+        "text": "The implementation must be in-memory."
+      }
+    ],
+    "status": "tdd_ready",
+    "test_paths": [
+      "tests/test_running_total.py"
+    ]
+  },
+  "current_scenario_id": "pr30-omission-running-total-20260910T114333Z--REQ-001",
+  "evidence_refs": [],
+  "final_reconciliation": [],
+  "gatekeeper_payload": {
+    "assessment_history": [],
+    "atomization_attempts": [
+      {
+        "response": "{\n  \"items\": [\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"pr30-001\",\n      \"source_quote\": \"Provide a RunningTotal class in running_total.py\",\n      \"subject\": \"RunningTotal class\",\n      \"text\": \"Provide a RunningTotal class in running_total.py.\"\n    },\n    {\n      \"kind\": \"invariant\",\n      \"modality\": \"required\",\n      \"ref\": \"pr30-002\",\n      \"source_quote\": \"A newly created RunningTotal starts with a total of zero\",\n      \"subject\": \"starts with a total of zero\",\n      \"text\": \"A newly created RunningTotal starts with a total of zero.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"pr30-003\",\n      \"source_quote\": \"Calling add(amount) adds the signed integer amount to its running total\",\n      \"subject\": \"adds the signed integer amount\",\n      \"text\": \"Calling add(amount) adds the signed integer amount to its running total.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"pr30-004\",\n      \"source_quote\": \"Calling total() returns the current total without changing it\",\n      \"subject\": \"returns the current total\",\n      \"text\": \"Calling total() returns the current total without changing it.\"\n    },\n    {\n      \"kind\": \"behavior\",\n      \"modality\": \"required\",\n      \"ref\": \"pr30-005\",\n      \"source_quote\": \"Adding 3 and then -1 must expose a total of 2\",\n      \"subject\": \"expose a total of 2\",\n      \"text\": \"Adding 3 and then -1 must expose a total of 2.\"\n    },\n    {\n      \"kind\": \"constraint\",\n      \"modality\": \"required\",\n      \"ref\": \"pr30-006\",\n      \"source_quote\": \"Keep the implementation dependency-free\",\n      \"subject\": \"dependency-free\",\n      \"text\": \"Keep the implementation dependency-free.\"\n    },\n    {\n      \"kind\": \"constraint\",\n      \"modality\": \"required\",\n      \"ref\": \"pr30-007\",\n      \"source_quote\": \"Keep the implementation ... in memory\",\n      \"subject\": \"in memory\",\n      \"text\": \"Keep the implementation in memory.\"\n    }\n  ]\n}",
+        "validation_error": null
+      }
+    ],
+    "checklist": {
+      "items": [
+        {
+          "kind": "behavior",
+          "modality": "required",
+          "ref": "pr30-001",
+          "source_quote": "Provide a RunningTotal class in running_total.py",
+          "subject": "RunningTotal class",
+          "text": "Provide a RunningTotal class in running_total.py."
+        },
+        {
+          "kind": "invariant",
+          "modality": "required",
+          "ref": "pr30-002",
+          "source_quote": "A newly created RunningTotal starts with a total of zero",
+          "subject": "starts with a total of zero",
+          "text": "A newly created RunningTotal starts with a total of zero."
+        },
+        {
+          "kind": "behavior",
+          "modality": "required",
+          "ref": "pr30-003",
+          "source_quote": "Calling add(amount) adds the signed integer amount to its running total",
+          "subject": "adds the signed integer amount",
+          "text": "Calling add(amount) adds the signed integer amount to its running total."
+        },
+        {
+          "kind": "behavior",
+          "modality": "required",
+          "ref": "pr30-004",
+          "source_quote": "Calling total() returns the current total without changing it",
+          "subject": "returns the current total",
+          "text": "Calling total() returns the current total without changing it."
+        },
+        {
+          "kind": "behavior",
+          "modality": "required",
+          "ref": "pr30-005",
+          "source_quote": "Adding 3 and then -1 must expose a total of 2",
+          "subject": "expose a total of 2",
+          "text": "Adding 3 and then -1 must expose a total of 2."
+        },
+        {
+          "kind": "constraint",
+          "modality": "required",
+          "ref": "pr30-006",
+          "source_quote": "Keep the implementation dependency-free",
+          "subject": "dependency-free",
+          "text": "Keep the implementation dependency-free."
+        },
+        {
+          "kind": "constraint",
+          "modality": "required",
+          "ref": "pr30-007",
+          "source_quote": "Keep the implementation ... in memory",
+          "subject": "in memory",
+          "text": "Keep the implementation in memory."
+        }
+      ],
+      "project_id": "pr30-omission-running-total-20260910T114333Z",
+      "requirement_text": "Provide a RunningTotal class in running_total.py. A newly created RunningTotal starts with a total of zero. Calling add(amount) adds the signed integer amount to its running total. Calling total() returns the current total without changing it. Adding 3 and then -1 must expose a total of 2. Keep the implementation dependency-free and in memory.\n"
+    },
+    "latest_assessment": null
+  },
+  "pending_completed_behavior": null,
+  "project_id": "pr30-omission-running-total-20260910T114333Z",
+  "reconciliation_failure": null,
+  "reconciliation_progress": [],
+  "source_requirement_hash": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "status": "running",
+  "working_ref": null,
+  "working_revision": null
+}

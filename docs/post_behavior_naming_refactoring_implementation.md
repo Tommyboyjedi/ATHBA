@@ -1,0 +1,167 @@
+# PR30 implementation and validation
+
+The runtime follows `post_behavior_naming_refactoring_lifecycle.md`: a completed
+behavioral feature and its final independent Specification Gatekeeper acceptance
+are the only entry authority. The behavioral coordinator retains its existing
+meaning. The post-behavior continuation reports `POST_BEHAVIOR_COMPLETE` only
+after naming and refactoring have finished or refactoring has reached its
+documented deterministic stop.
+
+## Runtime components
+
+- `post_behavior_entry.py` loads the existing feature, contract, checklist and
+  completed microcycle evidence. New behavioral runs record their trusted entry
+  SHA. Older records without that SHA fail closed rather than guessing a slice.
+- `post_behavior_domain.py`, the state repository, journal and small transition
+  handlers persist the immutable behavioral baseline, separate accepted revision,
+  exact decisions, submission identities, candidate/test/Gatekeeper evidence,
+  promotion results and bounded terminal reason.
+- `post_behavior_slice.py` reconstructs only changed Python syntax units from
+  immutable Git revisions. It refreshes the slice after each accepted change and
+  excludes unrelated units in the same file.
+- The two assessor adapters send the source-controlled short questions and only
+  their permitted input. Naming authority comes from explicit accepted API/entity
+  declarations. Refactoring sees production code only.
+- `post_behavior_workspace.py` uses the existing generic workspace execution port.
+  Exact paths, acceptance commands, disabled network and authorized runtime
+  resources are machine-envelope fields. Model input contains only the bounded
+  change and focused source, plus statically affected production/test references for naming.
+  Reference updates in otherwise unchanged consumer modules are projected narrowly;
+  those modules do not enter either assessor or the refactoring context.
+- Python write-authority adapters verify exact symbol substitutions for naming.
+  Refactoring freezes all tests, public signatures/product identifiers and
+  unrelated code, while permitting private implementation changes. Public field
+  annotations and explicit exports/slots remain fixed.
+- `post_behavior_validation.py` runs the complete configured accepted suite in
+  a detached candidate worktree. Reports bind the exact candidate and submission.
+- `post_behavior_gatekeeper.py` reuses the existing routed checklist reconciler
+  and durable recursive reconciliation journal. Original accepted test identities,
+  requirement references and historical semantic SHAs remain in the evidence.
+  Tests are rebound to a candidate SHA only after the entire preceding exact
+  rename/refactor chain is mechanically verified.
+- `post_behavior_git.py` promotes only a descendant accepted by both tests and
+  Gatekeeper. It uses the existing trusted-project synchronizer, checks for
+  independent worktree/index edits and recovers an already applied identical CAS.
+- The local-only provider wrapper rejects nonlocal endpoints, fallback wrappers
+  and automatic retries before invocation. It records the exact request and raw
+  response/error locally. No new mutation model/worker/GPU choice is introduced.
+
+Rejected candidates remain recorded and leave trusted state unchanged. Unknown
+in-flight assessor or mutation calls require human reconciliation; they are never
+silently resubmitted. Persisted test results and individual Gatekeeper checkpoints
+resume without replaying accepted work. Four promoted refactors is the maximum;
+duplicate/substantially repeated objectives stop earlier. Naming cannot restart
+after its `NO` result.
+
+## Entry points
+
+Continue an existing, freshly recorded completed behavioral feature with:
+
+```sh
+PYTHONPATH=. .venv/bin/python scripts/run_post_behavior_lifecycle.py \
+  --state-root /srv/ATHBA/state --project-id PROJECT \
+  --reasoning-model OPERATOR_CONFIGURED_LOCAL_REASONING_ID
+```
+
+The existing provider environment supplies its configured local endpoint. The
+local-only wrapper validates that configuration before any post-behavior call.
+The command can be run again to resume; its persisted entry identity must match.
+The disposable proof runner composes the existing behavioral runner and this
+continuation without editing target production or test files itself.
+
+Durable runtime evidence is stored under `state/post-behavior`. Evidence includes
+the original accepted delivery, each local model request/result, generic workspace
+request/result and execution provenance, exact regression reports and reconciliation
+results. Content-addressed evidence is atomic and immutable.
+
+## Adapter limits
+
+The current production language adapter is Python, matching the existing strict-TDD
+path. Unsupported languages, dynamic/ambiguous symbol bindings, path or Git-mode
+changes and unprovable source scopes fail closed. Neither stage creates/deletes
+files. Ordinary module/class declarations, methods, read-only properties and
+statically bound public fields are covered. This lane does not add a quality gate,
+semantic reviewer, architecture replanner or cloud fallback.
+
+## Validation record
+
+Final commands, results, source identities and live-proof status are recorded in
+[the PR30 evidence directory](evidence/pr30-20260910/README.md) and the PR description. A deterministic fake-provider
+test is not classified as a live proof.
+
+Final validation on implementation 32dfe17d4969927a784305d2892f63b927e76f35:
+167 focused tests and 1,061 full-suite tests passed; coding-principles, configured
+mypy (54 source files), compileall and whitespace checks passed. The local Responses
+readiness probe succeeded. The user then stopped the live proof during behavioral
+planning and will perform it manually. No behavioral baseline or post-behavior live
+completion is claimed; the interrupted state and exact invocation are preserved.
+
+## Bounded omission provenance correction
+
+A subsequent user-run proof exposed brittle exact-substring atomizer provenance.
+A narrow deterministic helper now also proves ordered verbatim omission segments
+within one source clause, while retaining the exact path, original modality
+validation and existing repair bound. The original requirement is unchanged.
+See [the correction evidence](evidence/pr30-omission-20260910/README.md) for the
+precise rule, regression, complete validation and fresh proof outcome.
+
+The correction passed 202 focused Gatekeeper/specification tests, 167 PR30 tests,
+and 1,136 full-suite tests on 175ff8f69bc1857b449ae3a1051f77d5141fa988. All static
+gates passed. The fresh original-requirement live proof accepted the omission
+quote in one atomization attempt and completed four behaviors. It then blocked
+after 137 transitions: the unchanged final reconciliation provenance guard in
+specification_evidence_routing.py:45 rejected pr30-007 with source provenance
+mismatch / unsupported_evidence_policy. Six other checklist items returned YES.
+Naming/refactoring was not entered. The final canonical target SHA
+8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1 is not a final Gatekeeper-approved baseline.
+The exact terminal state and packets are preserved in the correction evidence;
+no downstream fix or fixture adaptation was performed after the blocker.
+
+## Downstream provenance consistency
+
+The follow-up on reviewed head 648fcb63 reuses the existing resolver in final
+reconciliation, required-subject collection, checklist reload and persisted split
+reuse. Routing receives verified original context so omissions cannot hide
+qualifiers. Actual behavioral and static evidence checks remain authoritative.
+See [the follow-up evidence](evidence/pr30-provenance-routing-20260910/README.md)
+for the compatibility audit, validation and fresh live outcome.
+
+Validated implementation 77e473e0d79792ded35ecfaac08a56765c0db29a passed 229
+focused provenance/Gatekeeper tests, 169 PR30 tests and 1,165 full-suite tests.
+Coding-principles, configured mypy (55 files), compileall and whitespace checks
+passed. The fresh run pr30-provenance-routing-20260910T133659Z accepted the same
+omission quote, included its subject and reached the real storage adapter.
+After four behaviors and 143 transitions, six checklist items returned YES;
+REQ-007 returned no_storage / unsupported_evidence_policy with line 15: opaque
+decorator effects for the generated property accessor. The unchanged adapter
+failed closed. Final canonical target 0039443078c3b591be8108d386c2606f4fe8affe is
+not a final Gatekeeper-approved baseline. Naming/refactoring did not start.
+The new blocker and all evidence are retained without fixture or harness changes.
+
+## Python storage decorator assurance
+
+Function/method decorator opacity is now an explicitly accepted assurance limit:
+when storage inspection finds no violation or other blocking unknown, it may PASS
+with retained path/line/decorator warnings. Arbitrary decorator semantics are not
+claimed as verified. Storage detections and all other unknown conditions retain
+their previous status. No decorator whitelist or recursive analysis was added.
+See [the assurance evidence](evidence/pr30-storage-assurance-20260910/README.md)
+for tests, exact results and the fresh proof outcome, and
+[language adapter debt](specification_evidence_language_adapter_debt.md) for the
+future language-specific evidence capabilities. Python rules remain in the Python
+adapter and do not become generic ATHBA semantics.
+
+Implementation fd4fcbb3e449b92ff0129dacc29cd593d95cf4f0 passed 258 focused
+storage/Gatekeeper tests, 169 PR30 tests and 1,194 full-suite tests, plus all static
+gates (configured mypy: 57 files). Read-only replay of the prior exact property
+blocker returns storage YES with the explicit unverified-decorator assurance
+statement and running_total.py:14 @property finding.
+
+The fresh original-requirement run pr30-storage-assurance-20260910T151020Z
+completed two behaviors, then stopped after 88 transitions on a distinct Python
+frontier blocker: REQ_03-S001 calls rt.total(), but production exposes total as an
+integer; TypeError: 'int' object is not callable was classified as
+unsupported_language_boundary. Final Gatekeeper, naming and refactoring were not
+reached. Canonical target eafb172da6d834725b70e409ff7f756a194bc0e8 and its
+generated staged frontier-test change are preserved. No fixture/harness changes
+were made to bypass that new blocker.
