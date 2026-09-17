@@ -81,6 +81,12 @@ class WorkspacePacketReader:
         if not isinstance(packet, dict):
             raise RackAiResourceWait("workspace evidence packet is not an object")
         selection = packet.get("selection_decision") or {}
-        if selection.get("submission_id") != result["work_id"]:
+        work_id, change_id = result.get("work_id"), result.get("change_id")
+        if (not isinstance(work_id, str) or not work_id.strip()
+                or not isinstance(change_id, str) or not change_id.strip()
+                or not isinstance(selection, dict)
+                or selection.get("work_id") != work_id
+                or selection.get("submission_id") != change_id
+                or packet.get("change_id") != change_id):
             raise RackAiResourceWait("workspace evidence identity mismatch")
         return {**packet, "packet_path": result["packet_path"]}

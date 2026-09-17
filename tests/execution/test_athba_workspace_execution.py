@@ -157,12 +157,12 @@ def test_tier_policy_does_not_consume_attempt_for_external_blocker_or_duplicate(
 def test_connector_fails_closed_on_selection_execution_mismatch():
     class Transport:
         def submit(self, payload):
-            routing = payload["work_unit"]["routing"]
+            submission_id = payload["work_id"]
             return {
-                "submission_id": routing["submission_id"],
+                "submission_id": submission_id,
                 "status": "checks_passed",
                 "acceptance_verdict": "approved",
-                "selection_decision": {"submission_id": routing["submission_id"], "selected_worker_id": "selected"},
+                "selection_decision": {"submission_id": submission_id, "selected_worker_id": "selected"},
                 "worker_provenance": {"worker_id": "other"},
             }
     result = RackAiWorkspaceConnector(Transport()).submit_workspace_change(request())

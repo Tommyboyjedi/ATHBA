@@ -54,6 +54,8 @@ class OpenAIProvider:
                 if resp.status_code in {429} or 500 <= resp.status_code < 600:
                     raise httpx.HTTPStatusError("retryable", request=resp.request, response=resp)
                 resp.raise_for_status()
+                if self.runtime_access is not None:
+                    self.runtime_access.completed()
                 data = resp.json()
                 output_text = data.get("output", [{}])[0].get("content", [{}])[0].get("text", "")
                 if request.response_schema:

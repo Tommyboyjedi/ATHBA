@@ -1,5 +1,6 @@
 """Focused campaign lifecycle tests; no live RackAI or model calls."""
 from copy import deepcopy
+import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -203,6 +204,7 @@ def test_model_payload_uses_returned_scoped_access_and_preserves_schema(tmp_path
     assert request['json'] == dict(model='local-primary',input='unchanged prompt',temperature=0.2,
         max_output_tokens=127,text={'format':dict(type='json_schema',name='pm_intent',schema=schema)})
     assert result.text == '{"ok": true}'
+    assert store.load_reservation('campaign').pending_inference is None
 
 
 def test_workspace_reconciles_before_submit_and_cancels_remotely(tmp_path, monkeypatch):
@@ -332,3 +334,111 @@ def test_terminal_lifecycle_preserves_persisted_campaign_priority(tmp_path):
     assert renewed.acquisition_id != previous.acquisition_id
     assert renewed.priority == "medium"
     assert operations(client, "reserve")[-1]["request"]["priority"] == "medium"
+
+
+def workspace_evidence(tmp_path, monkeypatch):
+    from tests.execution.test_rack_ai_workspace_connector import approved_packet
+    reservation, client, _ = session(tmp_path)
+    transport = RackAiWorkspaceRuntime(reservation)
+    public_id = transport.work_id("submission")
+    internal_id = "work-" + "a" * 64
+    packet = approved_packet(internal_id)
+    packet["change_id"] = internal_id
+    packet["selection_decision"]["work_id"] = public_id
+    path = tmp_path / "packet.json"
+    path.write_text(json.dumps(packet))
+    monkeypatch.setenv("ATHBA_RACK_AI_EVIDENCE_ROOT", str(tmp_path))
+    work = dict(state="completed", work_id=public_id, result=dict(
+        work_id=public_id, change_id=internal_id, packet_path=str(path)))
+    return transport, work, packet, path
+
+
+def test_workspace_packet_validates_distinct_public_and_internal_identities(tmp_path, monkeypatch):
+    transport, work, packet, _ = workspace_evidence(tmp_path, monkeypatch)
+    result = transport.result(work)
+    assert result["selection_decision"]["work_id"] == work["work_id"]
+    assert result["selection_decision"]["submission_id"] == work["result"]["change_id"]
+    assert work["work_id"] != work["result"]["change_id"]
+
+
+@pytest.mark.parametrize("field", ["outer_work", "result_work", "result_change", "packet_change",
+                                   "selection_work", "selection_submission", "missing_change"])
+def test_workspace_packet_rejects_mismatched_corresponding_identities(tmp_path, monkeypatch, field):
+    transport, work, packet, path = workspace_evidence(tmp_path, monkeypatch)
+    if field == "outer_work":
+        work["work_id"] = "wrong"
+    elif field == "result_work":
+        work["result"]["work_id"] = "wrong"
+    elif field == "result_change":
+        work["result"]["change_id"] = "wrong"
+    elif field == "packet_change":
+        packet["change_id"] = "wrong"
+    elif field == "selection_work":
+        packet["selection_decision"]["work_id"] = "wrong"
+    elif field == "selection_submission":
+        packet["selection_decision"]["submission_id"] = "wrong"
+    else:
+        del work["result"]["change_id"]
+    path.write_text(json.dumps(packet))
+    with pytest.raises(RackAiResourceWait, match="identity mismatch"):
+        transport.result(work)
+
+
+@pytest.mark.parametrize("terminal", ["expired", "released", "cancelled"])
+def test_required_terminal_member_releases_partial_reservation_and_starts_new_lifecycle(tmp_path, terminal):
+    reservation, client, store = session(tmp_path)
+    reservation.ready("local-coder")
+    previous = store.load_reservation("campaign")
+    client.reservations["R1"]["services"]["local-primary"]["state"] = terminal
+    # Ready peer remains usable until the campaign actually requires the terminal member.
+    assert reservation.ready("local-coder")["reservation_id"] == "R1"
+    assert not operations(client, "release_reservation")
+    assert reservation.ready("local-primary")["reservation_id"] == "R2"
+    current = store.load_reservation("campaign")
+    assert current.acquisition_id != previous.acquisition_id
+    assert current.priority == previous.priority == "low"
+    assert len(operations(client, "release_reservation")) == 1
+    assert len(operations(client, "reserve")) == 2
+    assert not operations(client, "refresh_reservation")
+    lifecycle_ops = [call["operation"] for call in client.calls if call["operation"] in {"reserve", "release_reservation"}]
+    assert lifecycle_ops == ["reserve", "release_reservation", "reserve"]
+
+
+@pytest.mark.parametrize("aggregate_terminal", [False, True])
+@pytest.mark.parametrize("pending", ["pending_workspace", "pending_inference"])
+def test_terminal_replacement_blocks_unresolved_work_on_resume(tmp_path, aggregate_terminal, pending):
+    reservation, client, store = session(tmp_path)
+    reservation.ready("local-primary")
+    state = store.load_reservation("campaign")
+    store.save_reservation("campaign", replace(state, **{pending: "unresolved-work"}))
+    client.reservations["R1"]["services"]["local-primary"]["state"] = "expired"
+    if aggregate_terminal:
+        client.reservations["R1"]["state"] = "expired"
+    resumed = RackAiReservation(client, reservation.services)
+    resumed.bind(ReservationBinding(store, "campaign"))
+    with pytest.raises(RackAiResourceWait, match="unresolved work"):
+        resumed.ready("local-primary")
+    assert len(operations(client, "reserve")) == 1
+    assert not operations(client, "release_reservation")
+    assert store.load_reservation("campaign").acquisition_id == state.acquisition_id
+
+
+def test_uncertain_scoped_inference_blocks_terminal_member_replacement(tmp_path, monkeypatch):
+    reservation, client, store = session(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "fixture")
+    provider = OpenAIProvider(max_retries=0)
+    provider.runtime_access = RackAiScopedAccess(reservation, "local-primary")
+    def timeout(url, **kwargs):
+        raise httpx.ReadTimeout("response lost", request=httpx.Request("POST", url))
+    monkeypatch.setattr("core.llm.providers.openai_provider.httpx.post", timeout)
+    with pytest.raises(RackAiResourceWait):
+        provider.invoke(ProviderRequest("prompt", "local-primary"))
+    pending = store.load_reservation("campaign").pending_inference
+    assert pending is not None
+    with pytest.raises(RackAiResourceWait, match="original identity"):
+        provider.invoke(ProviderRequest("different prompt", "local-primary"))
+    assert store.load_reservation("campaign").pending_inference == pending
+    client.reservations["R1"]["services"]["local-primary"]["state"] = "expired"
+    with pytest.raises(RackAiResourceWait, match="unresolved work"):
+        reservation.ready("local-primary")
+    assert not operations(client, "release_reservation")

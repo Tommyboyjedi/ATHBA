@@ -17,6 +17,7 @@ class RackAiReservationState:
     released: bool = False
     waiting_service: str | None = None
     pending_workspace: str | None = None
+    pending_inference: str | None = None
 
     def __post_init__(self) -> None:
         if self.priority not in {"low", "medium"}:

@@ -68,6 +68,8 @@ class RackAiReservation:
                     if state.release_requested:
                         raise RackAiResourceWait("reservation release is still pending")
                     return view
+                if state.pending_workspace or state.pending_inference:
+                    raise RackAiResourceWait("terminal reservation has unresolved work")
             if state is None or state.reservation_id is not None:
                 state = RackAiReservationState(runtime_identity(binding.identity), uuid4().hex,
                                               self.services, state.priority if state is not None else "low",
@@ -146,7 +148,9 @@ class ReservationAccessWait:
                     reservation.mark_wait(None)
                     return {**member, "reservation_id": view["id"]}
                 reservation.mark_wait(service)
-                if reason not in WAITING_SERVICES:
+                if reason in TERMINAL_RESERVATIONS:
+                    self._replace_terminal_member()
+                elif reason not in WAITING_SERVICES:
                     raise RackAiResourceWait(f"RackAI {service}: {reason}")
                 if reason == "unavailable" and time.monotonic() >= refresh_at:
                     reservation.client.operation({"operation": "refresh_reservation", "reservation_id": view["id"]})
@@ -159,3 +163,12 @@ class ReservationAccessWait:
             if remaining <= 0:
                 raise RackAiResourceWait(f"RackAI {service}: {reason}; resource wait bound reached")
             time.sleep(min(config.poll_seconds, remaining))
+
+    def _replace_terminal_member(self) -> None:
+        reservation = self.reservation
+        with reservation.lock:
+            state = reservation._binding().load()
+            if state is None or state.pending_workspace or state.pending_inference:
+                raise RackAiResourceWait("terminal member has unresolved work; reconcile before replacement")
+            reservation.finish()
+            reservation.closed = False

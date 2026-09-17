@@ -32,14 +32,18 @@ boundary, not a raw model access route.
 
 A campaign reserves only the logical services its configured ports need, normally
 `local-primary` and `local-coder`. The user-selected campaign priority is **Low**.
-Existing ATHBA work profiles retain their semantic capabilities and attempt policy;
-priority is sent only in `reserve`, never in `submit_work`.
+This deliberately supersedes the original PR31 proposal to send Low/Medium per
+operation: all newly created campaign reservations use Low, including scenario
+and stronger-reasoning work. The existing internal Low/Medium profile labels remain
+for compatibility and validation; they do not set outbound work priority. No Medium
+is sent by new campaign creation, and High/Paramount remain forbidden. Previously
+persisted reservation priority is retained on resume/renewal. Priority is sent only
+in `reserve`, never in `submit_work`.
 
 The existing run/delivery JSON record contains an optional `rack_ai` field with a
 campaign-derived work ID, lifecycle-specific acquisition ID, service requirements,
 reservation ID, and cleanup/reconciliation markers. New lifecycles retain the persisted
-campaign priority. Old records without the field
-remain readable. No separate scheduler, queue, or reservation database is added.
+campaign priority. Old records without the field remain readable. No separate scheduler, queue, or reservation database is added.
 
 Reserve retries reuse the persisted acquisition ID. Resume inspects the persisted
 reservation first. A still-live reservation is reused; a terminal reservation gets
@@ -53,22 +57,29 @@ same reservation, normally no more often than every 300 seconds during a wait.
 Polling defaults to two seconds, bounded by a 300-second resource wait. Expiry is
 RackAI authority; refresh does not extend TTL. A bound or recovery_required surfaces
 `RackAiResourceWait` / strict-TDD `resource_waiting`, preserving the lifecycle for
-resume rather than recording a semantic failure. No autonomous background queue is
-introduced.
+resume rather than recording a semantic failure.
+
+When a required member is expired/released/cancelled while peers remain Ready,
+release the old reservation before acquiring a replacement with a new acquisition
+ID. Pending workspace reconciliation or an unresolved scoped inference blocks
+replacement, including when the aggregate reservation is terminal. Unknown work
+is never moved to a new reservation. No autonomous background queue is introduced.
 
 Direct model calls use the Ready member's model and scoped `gateway_path`. Prompts,
 token/temperature settings and structured output schemas are retained (Responses
 JSON schema uses `text.format`). Workspace calls use `submit_work`, `inspect_work`
 and `cancel_work`. A stable campaign/submission-derived work ID is inspected first;
 exact replay reconciles the original reservation and detects changed payloads,
-including after a process restart. Unknown/pending work is never duplicated under
-a new ID. Cancellation is an explicit remote work operation.
+including after a process restart. Packet validation matches selection `work_id`
+to the public result `work_id`, and selection `submission_id` plus packet `change_id`
+to the result's RackAI-generated `change_id`. These IDs are deliberately different.
+Unknown/pending work is never duplicated under a new ID. Cancellation is an explicit remote work operation.
 
 Completion, controlled stops, terminal failures and explicit `stop()` release the
 reservation. Successful cleanup is persisted and not repeated; an uncertain release
 is reconciled on resume; an inspected terminal reservation completes cleanup without
-sending a duplicate release. A still-live reservation retries release. Resource waiting is resumable and retains the same
-reservation. Cancellation is not silently substituted for release.
+sending a duplicate release. A still-live reservation retries release. Resource
+waiting is resumable and retains the same reservation. Cancellation is not silently substituted for release.
 
 ## Semantic and validation boundary
 

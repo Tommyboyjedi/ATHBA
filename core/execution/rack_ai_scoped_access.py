@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from urllib.parse import urlsplit
 
 from core.execution.rack_ai_reservation import RackAiReservation
@@ -30,4 +31,18 @@ class RackAiScopedAccess:
         key = self.reservation.call_identity(json.dumps(body, sort_keys=True))
         headers = {"Authorization": "Bearer " + config.credential_file.read_text().strip(),
                    "Idempotency-Key": key}
+        self._pending(key)
         return config.origin.rstrip("/") + path.rstrip("/") + "/responses", headers, body
+
+    def completed(self) -> None:
+        self._pending(None)
+
+    def _pending(self, identity: str | None) -> None:
+        with self.reservation.lock:
+            binding = self.reservation._binding()
+            state = binding.load()
+            if state is None:
+                raise RackAiResourceWait("model dispatch has no durable reservation")
+            if identity is not None and state.pending_inference not in {None, identity}:
+                raise RackAiResourceWait("scoped inference is unresolved; reconcile its original identity")
+            binding.save(replace(state, pending_inference=identity))
