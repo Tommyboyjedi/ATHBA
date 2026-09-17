@@ -13,7 +13,6 @@ from core.development.athba_workspace_routing import (
 )
 from core.execution.rack_ai_request import RepositoryBinding
 from core.execution.rack_ai_workspace_connector import (
-    RACK_AI_WORK_UNIT_VERSION,
     RackAiWorkspaceConnector,
 )
 from core.execution.workspace_execution_port import (
@@ -31,9 +30,7 @@ class CapturingTransport:
         self.payload = payload
         if self.response is not None:
             return self.response
-        routing = payload["work_unit"]["routing"]
-        assert isinstance(routing, dict)
-        submission_id = routing["submission_id"]
+        submission_id = payload["work_id"]
         return approved_packet(str(submission_id))
 
 
@@ -82,31 +79,25 @@ def request_for(kind: AthbaModelWorkKind, *, submission_id: str = "submission") 
         (AthbaModelWorkKind.STRONGER_FRONTIER_FALLBACK, ["reasoning", "coding"], "medium", "medium"),
     ],
 )
-def test_connector_serializes_profile_at_exact_v2_locations(kind, capabilities, complexity, priority):
+def test_connector_serializes_canonical_workspace_payload(kind, capabilities, complexity, priority):
     transport = CapturingTransport()
     RackAiWorkspaceConnector(transport).submit_workspace_change(request_for(kind))
-    assert transport.payload is not None
     payload = transport.payload
-    routing = payload["work_unit"]["routing"]
-    requirements = payload["work_unit"]["requirements"]
-    assert payload["version"] == RACK_AI_WORK_UNIT_VERSION
-    assert routing["source_system"] == "athba"
-    assert routing["required_capabilities"] == capabilities
-    assert routing["priority"] == priority
-    assert requirements["complexity"] == complexity
-    assert requirements["requires_large_context"] is False
+    workspace = payload["payload"]["workspace"]
+    assert payload["service"] == ("local-primary" if "reasoning" in capabilities else "local-coder")
+    assert workspace["requirements"]["complexity"] == complexity
+    assert workspace["requirements"]["requires_large_context"] is False
+    assert "priority" not in repr(payload)
+    assert "version" not in payload
 
 
-def test_v2_wire_preserves_identity_and_excludes_athba_dependencies_and_resources():
+def test_work_wire_preserves_identity_and_excludes_athba_dependencies_and_resources():
     transport = CapturingTransport()
     RackAiWorkspaceConnector(transport).submit_workspace_change(request_for(AthbaModelWorkKind.FRONTIER_IMPLEMENTATION))
     assert transport.payload is not None
     payload = transport.payload
-    routing = payload["work_unit"]["routing"]
-    assert routing["work_id"] == "stable-work"
-    assert routing["submission_id"] == "submission"
-    assert routing["idempotency_key"] == "stable-key"
-    assert "depends_on" not in payload["work_unit"]
+    assert payload["work_id"] == "submission"
+    assert "depends_on" not in payload["payload"]["workspace"]
     wire = repr(payload).lower()
     assert "selected_worker_id" not in wire
     assert "gpu" not in wire
@@ -142,7 +133,7 @@ def test_connector_translates_generic_terminal_outcomes_without_athba_reinterpre
     assert result.generic_failure == "generic failure"
 
 
-def test_connector_retains_v2_evidence_and_validates_selection_provenance_match():
+def test_connector_retains_evidence_and_validates_selection_provenance_match():
     result = RackAiWorkspaceConnector(CapturingTransport()).submit_workspace_change(request_for(AthbaModelWorkKind.COMPLETE_SCENARIO_AUTHORING))
     assert result.accepted_revision == "b" * 40
     assert result.candidate_revision == "b" * 40
@@ -155,7 +146,7 @@ def test_connector_retains_v2_evidence_and_validates_selection_provenance_match(
     assert result.evidence_refs == ("/srv/rack-ai/state/changes/opaque/review-packet.json",)
 
 
-def test_connector_keeps_historical_top_level_evidence_compatible_when_v2_evidence_is_absent():
+def test_connector_keeps_historical_top_level_evidence_compatible_when_selection_evidence_is_absent():
     response = {
         "submission_id": "submission",
         "status": "accepted",

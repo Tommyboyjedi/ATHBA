@@ -704,3 +704,22 @@ def test_git_materialiser_preserves_completed_behavior_tests_across_scenarios(tm
     evidence = AcceptedTestEvidence("tests/test_widget.py::test_REQ_001", "tests/test_widget.py", "REQ-001", ["REQ-001"], first_revision, first_revision)
     assert GitAcceptedTestCatalog(root, third.candidate_revision).contains(evidence)
     materialiser.cleanup(third)
+
+
+@pytest.mark.asyncio
+async def test_resource_wait_does_not_consume_coder_attempt(tmp_path, monkeypatch):
+    from core.execution.rack_ai_runtime import RackAiResourceWait
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": ""})
+    gateway = Gateway([])
+    async def waiting(*_):
+        raise RackAiResourceWait("held")
+    monkeypatch.setattr(gateway, "execute", waiting)
+    service = StrictMicrocycleService(StrictMicrocycleDependencies(
+        store, candidates, gateway,
+        type("Catalog", (), {"for_language": lambda self, _: PythonPytestAdapter()})(), regression()))
+    for _ in range(2):
+        with pytest.raises(RackAiResourceWait):
+            await service.run(request(tmp_path, initial_state()))
+    state = store.load("generic-scenario")
+    assert all(item.developer_attempts == 0 for item in state.frontier_attempt_counts)

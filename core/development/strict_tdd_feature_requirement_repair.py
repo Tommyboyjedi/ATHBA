@@ -1,5 +1,7 @@
 """Durable replacement transitions before ordinary exhausted-behavior splitting."""
 from __future__ import annotations
+from core.execution.rack_ai_runtime import RackAiResourceWait
+from core.execution.provider_reasoning_gateway import wait_for_reasoning
 
 from dataclasses import replace
 
@@ -75,6 +77,7 @@ async def advance_repair(service, context: FeatureReplanContext):
                                        "Repair submission has no durable response; no resubmission.")
         _validate_identity(state, record)
         if record.phase == BehaviorRepairPhase.REQUIRED:
+            await wait_for_reasoning(service.contract_planner.gateway)
             record = replace(record, phase=BehaviorRepairPhase.STARTED)
             service.states.save(_with_record(state, record))
             invoked = True
@@ -91,6 +94,9 @@ async def advance_repair(service, context: FeatureReplanContext):
             updated = replace(_with_record(state, record), current_scenario_id=None,
                               contract_payload=replace(contract, observable_requirements=requirements).to_dict())
             kind = FeatureTransitionKind.BEHAVIOR_REPAIR_APPLIED
+    except RackAiResourceWait:
+        service.states.save(state)
+        raise
     except BehaviorRepairFailure as error:
         record = replace(record, phase=BehaviorRepairPhase.FAILED, blocker=error.kind, detail=error.detail)
         updated = replace(_with_record(state, record), status=StrictTddFeatureStatus.BLOCKED.value,

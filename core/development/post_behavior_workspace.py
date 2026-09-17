@@ -107,8 +107,8 @@ class PostBehaviorWorkspaceExecutor:
     def execute(self, request: WorkspaceExecutionRequest) -> WorkspaceExecutionResult:
         return self.port.submit_workspace_change(request)
 
-    def recover(self, submission_id: str) -> WorkspaceExecutionResult | None:
-        return self.port.get_result(submission_id)
+    def recover(self, identity: AthbaWorkspaceIdentity) -> WorkspaceExecutionResult | None:
+        return self.port.get_result(identity)
 
 
 @dataclass(frozen=True)

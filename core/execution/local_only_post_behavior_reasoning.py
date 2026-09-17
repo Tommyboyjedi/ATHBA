@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
+from core.execution.rack_ai_runtime import RackAiResourceWait
 from core.execution.reasoning_gateway import ReasoningRequest, ReasoningResult
 from core.llm.providers.openai_provider import OpenAIProvider
 
@@ -33,12 +34,17 @@ class LocalOnlyPostBehaviorReasoning:
         self.evidence = evidence
         self._require_local_provider()
 
+    async def wait_ready(self) -> None:
+        await self.gateway.wait_ready()
+
     async def reason(self, request: ReasoningRequest) -> ReasoningResult:
         self._require_local_provider()
         invocation_id = uuid4().hex
         self._record(LocalReasoningEvidence(invocation_id, request))
         try:
             result = await self.gateway.reason(request)
+        except RackAiResourceWait:
+            raise
         except Exception as error:
             self._record(LocalReasoningEvidence(invocation_id, request, error=str(error), completed=True))
             raise
@@ -55,7 +61,8 @@ class LocalOnlyPostBehaviorReasoning:
         provider = self.gateway.provider
         if type(provider) is not OpenAIProvider:
             raise ValueError("post-behavior reasoning requires the direct local provider")
-        endpoint = urlsplit(provider.settings.api_base)
+        access = provider.runtime_access
+        endpoint = urlsplit(provider.settings.api_base if access is None else access.reservation.client.configuration.origin)
         if endpoint.scheme not in {"http", "https"} or endpoint.username or endpoint.password:
             raise ValueError("post-behavior reasoning endpoint is not an approved local endpoint")
         if not _loopback_host(endpoint.hostname):

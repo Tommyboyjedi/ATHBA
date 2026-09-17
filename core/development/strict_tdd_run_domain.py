@@ -12,6 +12,8 @@ from core.development.strict_tdd_transition_provenance import StrictTddCheckpoin
 from core.development.strict_tdd_transitions import FeatureAdvanceResult, FeatureTransitionKind, MicrocycleTransitionKind, ProjectTransitionDisposition, ScenarioTransitionKind, StrictTddTransitionPath, TransitionFingerprint
 from core.filesystem_policy import validate_filesystem_identifier
 
+from core.execution.rack_ai_reservation_state import RackAiReservationState
+
 RUN_SCHEMA_VERSION = 1
 
 
@@ -21,6 +23,7 @@ class StrictTddRunMode(str, Enum):
 
 
 class StrictTddRunStatus(str, Enum):
+    RESOURCE_WAITING = "resource_waiting"
     READY = "ready"
     RUNNING = "running"
     CHECKPOINTED = "checkpointed"
@@ -147,6 +150,7 @@ class StrictTddRunState:
     structured_report_path: str | None = None
     markdown_report_path: str | None = None
     schema_version: int = RUN_SCHEMA_VERSION
+    rack_ai: RackAiReservationState | None = None
 
     def __post_init__(self) -> None:
         validate_filesystem_identifier(self.run_id, "run id")
@@ -164,13 +168,13 @@ class StrictTddRunState:
             raise ValueError("recovery state requires a reason")
 
     def to_dict(self) -> dict[str, object]:
-        return {"schema_version": self.schema_version, "run_id": self.run_id, "project_id": self.project_id, "immutable_identity_hash": self.immutable_identity_hash, "status": self.status.value, "total_application_transition_count": self.total_application_transition_count, "current_invocation_count": self.current_invocation_count, "reached_checkpoints": [item.value for item in self.reached_checkpoints], "last_delivered_fingerprint": None if self.last_delivered_fingerprint is None else _fingerprint_dict(self.last_delivered_fingerprint), "last_delivered_path": None if self.last_delivered_path is None else _path_dict(self.last_delivered_path), "last_lifecycle_event_id": self.last_lifecycle_event_id, "pending_transition_receipt": None if self.pending_transition_receipt is None else self.pending_transition_receipt.to_dict(), "transition_in_flight": None if self.transition_in_flight is None else {"occurrence": self.transition_in_flight.occurrence}, "reason": self.reason, "structured_report_path": self.structured_report_path, "markdown_report_path": self.markdown_report_path}
+        return {"rack_ai": None if self.rack_ai is None else self.rack_ai.to_dict(), "schema_version": self.schema_version, "run_id": self.run_id, "project_id": self.project_id, "immutable_identity_hash": self.immutable_identity_hash, "status": self.status.value, "total_application_transition_count": self.total_application_transition_count, "current_invocation_count": self.current_invocation_count, "reached_checkpoints": [item.value for item in self.reached_checkpoints], "last_delivered_fingerprint": None if self.last_delivered_fingerprint is None else _fingerprint_dict(self.last_delivered_fingerprint), "last_delivered_path": None if self.last_delivered_path is None else _path_dict(self.last_delivered_path), "last_lifecycle_event_id": self.last_lifecycle_event_id, "pending_transition_receipt": None if self.pending_transition_receipt is None else self.pending_transition_receipt.to_dict(), "transition_in_flight": None if self.transition_in_flight is None else {"occurrence": self.transition_in_flight.occurrence}, "reason": self.reason, "structured_report_path": self.structured_report_path, "markdown_report_path": self.markdown_report_path}
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "StrictTddRunState":
         try:
             fingerprint, path, receipt, marker = value.get("last_delivered_fingerprint"), value.get("last_delivered_path"), value.get("pending_transition_receipt"), value.get("transition_in_flight")
-            return cls(str(value["run_id"]), str(value["project_id"]), str(value["immutable_identity_hash"]), StrictTddRunStatus(str(value["status"])), int(value.get("total_application_transition_count", 0)), int(value.get("current_invocation_count", 0)), tuple(StrictTddCheckpoint(str(item)) for item in value.get("reached_checkpoints", ())), None if fingerprint is None else _fingerprint_from_dict(dict(fingerprint)), None if path is None else _path_from_dict(dict(path)), _optional(value.get("last_lifecycle_event_id")), None if receipt is None else StrictTddTransitionReceipt.from_dict(dict(receipt)), None if marker is None else StrictTddTransitionInFlight(int(dict(marker)["occurrence"])), _optional(value.get("reason")), _optional(value.get("structured_report_path")), _optional(value.get("markdown_report_path")), int(value["schema_version"]))
+            return cls(str(value["run_id"]), str(value["project_id"]), str(value["immutable_identity_hash"]), StrictTddRunStatus(str(value["status"])), int(value.get("total_application_transition_count", 0)), int(value.get("current_invocation_count", 0)), tuple(StrictTddCheckpoint(str(item)) for item in value.get("reached_checkpoints", ())), None if fingerprint is None else _fingerprint_from_dict(dict(fingerprint)), None if path is None else _path_from_dict(dict(path)), _optional(value.get("last_lifecycle_event_id")), None if receipt is None else StrictTddTransitionReceipt.from_dict(dict(receipt)), None if marker is None else StrictTddTransitionInFlight(int(dict(marker)["occurrence"])), _optional(value.get("reason")), _optional(value.get("structured_report_path")), _optional(value.get("markdown_report_path")), int(value["schema_version"]), None if value.get("rack_ai") is None else RackAiReservationState.from_dict(value["rack_ai"]))
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("malformed strict TDD run state") from error
 

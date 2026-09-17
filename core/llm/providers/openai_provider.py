@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.execution.rack_ai_scoped_access import RackAiScopedAccess
 
 import httpx
 from jsonschema import ValidationError as JSONSchemaError, validate  # type: ignore[import-untyped]
 
 from core.config.openai import OpenAISettings
+from core.execution.rack_ai_runtime import RackAiResourceWait
 from core.llm.contracts.exceptions import ValidationError
 from core.llm.contracts.provider import NormalizedResult, ProviderRequest, ProviderRetryPolicy
 
@@ -25,6 +29,7 @@ class OpenAIProvider:
     def __init__(self, policy: ProviderRetryPolicy | None = None, *, max_retries: int | None = None) -> None:
         self.settings = OpenAISettings.from_env()
         self.policy = _policy_with_max_retries(policy, max_retries)
+        self.runtime_access: RackAiScopedAccess | None = None
 
     def invoke(self, request: ProviderRequest) -> NormalizedResult:
         url = f"{self.settings.api_base}/responses"
@@ -39,9 +44,13 @@ class OpenAIProvider:
         }
         if request.response_schema:
             payload["response_format"] = {"type": "json_schema", "json_schema": {"name": "pm_intent", "schema": request.response_schema}}
+        if self.runtime_access is not None:
+            url, headers, payload = self.runtime_access.prepare(payload)
         for attempt in range(self.policy.max_retries + 1):
             try:
                 resp = httpx.post(url, headers=headers, json=payload, timeout=self.policy.timeout)
+                if self.runtime_access is not None and resp.status_code == 409:
+                    raise RackAiResourceWait(str(resp.json().get("error", "scoped_access_unavailable")))
                 if resp.status_code in {429} or 500 <= resp.status_code < 600:
                     raise httpx.HTTPStatusError("retryable", request=resp.request, response=resp)
                 resp.raise_for_status()
@@ -59,8 +68,10 @@ class OpenAIProvider:
                 usage = data.get("usage", {})
                 usage_dict = {"input_tokens": usage.get("input_tokens", 0), "output_tokens": usage.get("output_tokens", 0)}
                 return NormalizedResult(text=text_out, usage=usage_dict, raw=data)
-            except (httpx.RequestError, httpx.HTTPStatusError):
+            except (httpx.RequestError, httpx.HTTPStatusError) as error:
                 if attempt >= self.policy.max_retries:
+                    if self.runtime_access is not None:
+                        raise RackAiResourceWait(f"scoped model transport: {type(error).__name__}") from error
                     raise
                 time.sleep(self.policy.backoff_factor ** attempt)
         raise RuntimeError("OpenAI invocation failed unexpectedly")

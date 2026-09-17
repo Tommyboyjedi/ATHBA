@@ -1,47 +1,41 @@
-"""Rack AI v2 anti-corruption connector for generic workspace execution."""
+"""RackAI reservation/work connector for generic workspace execution."""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol
 
-from core.development.athba_workspace_routing import AthbaOutboundPriority
+from core.development.athba_workspace_routing import AthbaOutboundPriority, AthbaWorkspaceIdentity
 from core.execution.workspace_execution_port import (
     WorkspaceExecutionRequest,
     WorkspaceExecutionResult,
     WorkspaceExecutionStatus,
 )
 
-RACK_AI_WORK_UNIT_VERSION = "rack-ai/work-unit/v2"
 ONE_MODEL_INVOCATION = 1
 
 
-class RackAiWorkspaceTransport(Protocol):
-    def submit(self, payload: dict[str, object]) -> dict[str, object]: ...
-
-
 class RackAiWorkspaceConnector:
-    """Adapts the ATHBA port to Rack AI without exporting ATHBA semantics."""
+    """Adapt the existing workspace port to reservation-managed work."""
 
-    def __init__(self, transport: RackAiWorkspaceTransport):
+    def __init__(self, transport):
         self.transport = transport
-        self._results: dict[str, WorkspaceExecutionResult] = {}
-        self._serializer = RackAiV2WorkspaceSerializer()
-        self._translator = RackAiV2ResultTranslator()
+        self._serializer = RackAiWorkspaceSerializer()
+        self._translator = RackAiResultTranslator()
 
     def submit_workspace_change(self, request: WorkspaceExecutionRequest) -> WorkspaceExecutionResult:
         self._require_priority_ceiling(request)
-        prior = self._results.get(request.identity.submission_id)
-        if prior is not None:
-            return prior
-        result = self._translator.translate(request, self.transport.submit(self._serializer.serialize(request)))
-        self._results[request.identity.submission_id] = result
-        return result
+        result = self.transport.submit(self._serializer.serialize(request))
+        return self._translator.translate(request.identity, {**result, "submission_id": request.identity.submission_id})
 
-    def get_result(self, submission_id: str) -> WorkspaceExecutionResult | None:
-        return self._results.get(submission_id)
+    def get_result(self, identity: AthbaWorkspaceIdentity) -> WorkspaceExecutionResult | None:
+        submission_id = identity.submission_id
+        work = self.transport.inspect(submission_id)
+        if work is None or work["state"] in {"accepted", "waiting", "held", "started"}:
+            return None
+        result = self.transport.result(work)
+        return self._translator.translate(identity, {**result, "submission_id": submission_id})
 
     def cancel(self, submission_id: str) -> bool:
-        return self._results.pop(submission_id, None) is not None
+        return self.transport.cancel(submission_id)
 
     @staticmethod
     def _require_priority_ceiling(request: WorkspaceExecutionRequest) -> None:
@@ -49,8 +43,8 @@ class RackAiWorkspaceConnector:
             raise ValueError("ATHBA workspace priority must not exceed medium")
 
 
-class RackAiV2WorkspaceSerializer:
-    """Owns the exact Rack AI v2 document shape at the transport boundary."""
+class RackAiWorkspaceSerializer:
+    """Serialize only the canonical bounded-workspace payload."""
 
     def serialize(self, request: WorkspaceExecutionRequest) -> dict[str, object]:
         repository = {"id": request.repository.repository_id, "base_ref": request.repository.base_ref}
@@ -59,7 +53,6 @@ class RackAiV2WorkspaceSerializer:
         if request.repository.registered_root is not None:
             repository["root"] = request.repository.registered_root
         work_unit = {
-            "id": request.identity.submission_id,
             "objective": request.objective,
             "allowed_paths": list(request.allowed_writable_paths),
             "acceptance": {
@@ -75,44 +68,37 @@ class RackAiV2WorkspaceSerializer:
                 "timeout_seconds": request.profile.timeout_seconds,
                 "network": request.network_policy,
             },
-            "routing": {
-                "source_system": "athba",
-                "work_id": request.identity.work_id,
-                "submission_id": request.identity.submission_id,
-                "idempotency_key": request.identity.idempotency_key,
-                "required_capabilities": list(_ordered_capabilities(request)),
-                "priority": request.profile.priority.value,
-            },
         }
         if request.repository.environment_resources:
             work_unit["environment_resources"] = list(request.repository.environment_resources)
+        work_unit["repository"] = repository
+        service = "local-primary" if "reasoning" in _ordered_capabilities(request) else "local-coder"
         return {
-            "version": RACK_AI_WORK_UNIT_VERSION,
-            "workload": {"id": request.identity.work_id, "kind": "application-development"},
-            "repository": repository,
-            "work_unit": work_unit,
+            "work_id": request.identity.submission_id,
+            "service": service,
+            "payload": {"kind": "workspace", "workspace": work_unit},
         }
 
 
-class RackAiV2ResultTranslator:
+class RackAiResultTranslator:
     """Translates Rack AI terminal facts without deciding ATHBA progression."""
 
-    def translate(self, request: WorkspaceExecutionRequest, payload: dict[str, object]) -> WorkspaceExecutionResult:
+    def translate(self, identity: AthbaWorkspaceIdentity, payload: dict[str, object]) -> WorkspaceExecutionResult:
         try:
-            return self._translate(request, payload)
+            return self._translate(identity, payload)
         except (KeyError, TypeError, ValueError) as error:
-            return WorkspaceExecutionResult(request.identity, WorkspaceExecutionStatus.MALFORMED_RESULT, error=str(error))
+            return WorkspaceExecutionResult(identity, WorkspaceExecutionStatus.MALFORMED_RESULT, error=str(error))
 
-    def _translate(self, request: WorkspaceExecutionRequest, payload: Mapping[str, object]) -> WorkspaceExecutionResult:
+    def _translate(self, identity: AthbaWorkspaceIdentity, payload: Mapping[str, object]) -> WorkspaceExecutionResult:
         selection = _mapping_or_none(payload.get("selection_decision"), "selection decision")
         provenance = _mapping_or_none(payload.get("worker_provenance"), "execution provenance")
         submission_id = _optional_text(payload.get("submission_id")) or _optional_text(_field(selection, "submission_id"))
-        if submission_id != request.identity.submission_id:
+        if submission_id != identity.submission_id:
             raise ValueError("Rack AI submission identity mismatch")
         status = _status_for(payload)
         selected = _optional_text(_field(selection, "selected_worker_id")) or _optional_text(payload.get("selected_worker_id"))
         executed = _optional_text(_field(provenance, "worker_id")) or _optional_text(payload.get("executed_worker_id"))
-        if selection is not None and provenance is not None and selected is not None and executed is not None and selected != executed:
+        if selected is not None and executed is not None and selected != executed:
             status = WorkspaceExecutionStatus.SELECTION_EXECUTION_MISMATCH
         verdict = _optional_text(payload.get("acceptance_verdict"))
         candidate = _optional_text(payload.get("candidate_revision")) or _optional_text(payload.get("accepted_revision")) or _optional_text(payload.get("head_sha"))
@@ -122,7 +108,7 @@ class RackAiV2ResultTranslator:
             evidence_refs = (*evidence_refs, packet)
         failure = _optional_text(payload.get("generic_failure")) or _optional_text(payload.get("last_error")) or _optional_text(payload.get("error"))
         return WorkspaceExecutionResult(
-            identity=request.identity,
+            identity=identity,
             status=status,
             accepted_revision=candidate if status == WorkspaceExecutionStatus.ACCEPTED else None,
             candidate_revision=candidate,

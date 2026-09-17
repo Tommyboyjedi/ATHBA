@@ -31,7 +31,7 @@ class WorkspaceExecutionRequest:
     required_artifacts: tuple[str, ...]
     objective: str
     # TODO(cleanup): The profiled gateway does not populate request evidence_refs and
-    # the Rack AI v2 serializer does not transport them. Wire them through deliberately or remove the dead field.
+    # the RackAI workspace serializer does not transport them. Wire them through deliberately or remove the dead field.
     evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -72,5 +72,5 @@ class WorkspaceExecutionResult:
 class AiWorkspaceExecutionPort(Protocol):
     """Replaceable port for one generic bounded workspace-change operation."""
     def submit_workspace_change(self, request: WorkspaceExecutionRequest) -> WorkspaceExecutionResult: ...
-    def get_result(self, submission_id: str) -> WorkspaceExecutionResult | None: ...
+    def get_result(self, identity: AthbaWorkspaceIdentity) -> WorkspaceExecutionResult | None: ...
     def cancel(self, submission_id: str) -> bool: ...

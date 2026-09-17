@@ -29,6 +29,7 @@ class PostBehaviorAssessmentTransition:
             self.journal.persist(replace(self.journal.state, active_pass=PostBehaviorPass(
                 phase, len(self.journal.state.passes) + 1, self.journal.state.current_post_behavior_revision)))
         if self.journal.active().assessment is None:
+            await self.journal.wait_ready(PostBehaviorCall.NAMING_ASSESSOR if naming else PostBehaviorCall.REFACTOR_ASSESSOR)
             self.journal.mark(PostBehaviorCall.NAMING_ASSESSOR if naming else PostBehaviorCall.REFACTOR_ASSESSOR)
             assessment = await (self.assessors.assess_naming(self.journal.state) if naming
                                 else self.assessors.assess_refactor(self.journal.state))

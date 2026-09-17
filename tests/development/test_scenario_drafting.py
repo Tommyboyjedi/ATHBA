@@ -1278,3 +1278,18 @@ async def test_pre_intent_dependency_patch_is_not_a_product_mock_from_incidental
     outcome = await service.draft(request("catalog"), binding())
     assert outcome.approved
     assert len(reasoning.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_resource_wait_does_not_consume_tester_attempt(monkeypatch):
+    from core.execution.rack_ai_runtime import RackAiResourceWait
+    store = MemoryStateStore()
+    service, gateway, _, _ = components([], [], {}, store)
+    async def waiting(*_):
+        raise RackAiResourceWait("preparing")
+    monkeypatch.setattr(gateway, "execute", waiting)
+    for _ in range(2):
+        with pytest.raises(RackAiResourceWait):
+            await service.submit_candidate(request("catalog"), binding())
+    state = store.load("scenario-catalog")
+    assert state is None or state.attempts == ()

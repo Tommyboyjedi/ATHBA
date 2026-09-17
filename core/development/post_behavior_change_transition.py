@@ -27,6 +27,7 @@ class PostBehaviorChangeTransition:
             if active.submission_id is None:
                 self.journal.persist(replace(self.journal.state, active_pass=replace(
                     active, submission_id=uuid4().hex)))
+            await self.journal.wait_ready(PostBehaviorCall.MUTATION)
             self.journal.mark(PostBehaviorCall.MUTATION)
             execution_result = await self.mutation.execute_change(self.journal.state)
             self.journal.persist(replace(self.journal.state, active_pass=replace(

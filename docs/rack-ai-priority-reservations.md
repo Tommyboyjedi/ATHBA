@@ -1,95 +1,84 @@
-# Rack AI priority reservations — ATHBA companion
+# ATHBA reservation/work client
 
-Date: 2026-09-13. Status: **implementation contract; documentation only at creation**.
+The current client targets the authenticated deployed `GET /runtime/v1/contract`,
+contract version **1.1.0**, schema `rack-ai/runtime-contract/v1`. This replaces the
+previous PR35 planning contract. `discover` retains its service-discovery meaning.
+The contract was read on gpurack before implementation; the read-only snapshot is
+in `evidence/reservation-work-migration/deployed-contract.json` (local evidence,
+not a credential or deployment artifact).
 
-Core dependency: [Rack AI PR35](https://github.com/Tommyboyjedi/rack-ai/pull/35), contract `docs/priority-runtime-reservations.md` on `design/priority-runtime-reservations`.
+## Transport and configuration
 
-This PR is stacked on the active [ATHBA PR30](https://github.com/Tommyboyjedi/ATHBA/pull/30) branch `design/post-behavior-naming-refactoring`, reviewed head `3877371da8de79b1a97747179067a2f9fa8cd593`. That branch already contains the PR28 generic-execution implementation line. Do not base this integration on the older `master` tree, merge/close the existing stack, reset the live checkout, or restore withdrawn structural-refactoring/PR21 behavior. Retarget only after verified incorporation of the parent history.
+Set `ATHBA_RACK_AI_ORIGIN` to the authenticated runtime origin and
+`ATHBA_RACK_AI_CREDENTIAL_FILE` to ATHBA's existing credential file. The inspected
+gpurack origin is `http://127.0.0.1:8095`; its ATHBA credential file is
+`/srv/rack-ai/deployments/idle-runtime/secrets/athba`. No credential value is stored
+in ATHBA state. No production environment file or service was changed.
 
-## 1. Scope and preserved boundary
+The durable strict-TDD composition supplies one shared RackAI session to workspace
+execution and direct reasoning. Post-behavior continuation binds a session to its
+existing delivery record. Explicitly injected fixture ports remain available.
+Unbound production workspace composition fails closed.
 
-ATHBA remains the complete owner of software-development semantics: readiness, dependencies, attempts, stage mapping, repair/escalation, TDD, naming/refactoring, acceptance interpretation and trusted revision progression. Rack AI owns physical model/runtime/resource selection, priority admission, access gating, lifecycle, generic execution and evidence.
+The old `rack-ai/work-unit/v2` document, CLI subprocess transport, and in-memory
+result/cancel cache are removed from the active workspace route. The existing
+profile resolver, repository binding, path/network controls, acceptance commands,
+revision handling, provenance checks, and confined evidence-packet reader remain.
+The latter still requires access to the returned review packet under
+`ATHBA_RACK_AI_EVIDENCE_ROOT` (default `/srv/rack-ai`); this is an existing evidence
+boundary, not a raw model access route.
 
-This change updates the replaceable workspace/reasoning connectors and necessary durable infrastructure-wait handling so the application cooperates with priority reservations. It does not redesign the development engine, change model prompts, loosen tool profiles, repair a historical live feature failure, rerun a product build, or grant Rack AI software-development knowledge.
+## Campaign lifecycle
 
-Read `AGENTS.md`, `agent.MD`, `coding_principles.MD`, `docs/athba_rack_ai_workspace_boundary_rationale.md`, current PR30 rules and the core contract before implementation.
+A campaign reserves only the logical services its configured ports need, normally
+`local-primary` and `local-coder`. The user-selected campaign priority is **Low**.
+Existing ATHBA work profiles retain their semantic capabilities and attempt policy;
+priority is sent only in `reserve`, never in `submit_work`.
 
-## 2. Reviewed gaps
+The existing run/delivery JSON record contains an optional `rack_ai` field with a
+campaign-derived work ID, lifecycle-specific acquisition ID, service requirements,
+reservation ID, and cleanup/reconciliation markers. New lifecycles retain the persisted
+campaign priority. Old records without the field
+remain readable. No separate scheduler, queue, or reservation database is added.
 
-`core/execution/rack_ai_workspace_connector.py` already rejects outbound priorities above Medium and serializes a `rack-ai/work-unit/v2` routing header. Preserve those protections. Its current result lookup is an in-memory dictionary and `cancel()` removes a local cache item; that is not durable remote reservation/status/cancellation support.
+Reserve retries reuse the persisted acquisition ID. Resume inspects the persisted
+reservation first. A still-live reservation is reused; a terminal reservation gets
+a new acquisition ID only when work actually needs resources again. Reserve replay
+is never treated as status inspection or refresh.
 
-`core/execution/provider_reasoning_gateway.py` delegates directly to a configured provider. Local reasoning therefore needs an explicit managed Rack AI adapter, not the assumption that the workspace connector already governs every model call. Trace actual provider composition, Responses/Chat usage, local-only guards and live startup configuration before claiming full coverage or changing deployment.
+Each service is checked independently. Ready peers can run while another member is
+Preparing, Held, unavailable, or recovery_required. Preparing/Held are inspected;
+Held is never refreshed or replaced. Unavailable triggers explicit refresh of the
+same reservation, normally no more often than every 300 seconds during a wait.
+Polling defaults to two seconds, bounded by a 300-second resource wait. Expiry is
+RackAI authority; refresh does not extend TTL. A bound or recovery_required surfaces
+`RackAiResourceWait` / strict-TDD `resource_waiting`, preserving the lifecycle for
+resume rather than recording a semantic failure. No autonomous background queue is
+introduced.
 
-Relevant starting points include `core/execution/{workspace_execution_port,rack_ai_workspace_connector,rack_ai_workspace_cli_transport,profiled_workspace_gateway,reasoning_gateway,provider_reasoning_gateway,local_only_post_behavior_reasoning}.py`, `core/development/athba_workspace_routing.py`, and their caller/persistence/tests. Preserve existing invocation/evidence and local-only restrictions.
+Direct model calls use the Ready member's model and scoped `gateway_path`. Prompts,
+token/temperature settings and structured output schemas are retained (Responses
+JSON schema uses `text.format`). Workspace calls use `submit_work`, `inspect_work`
+and `cancel_work`. A stable campaign/submission-derived work ID is inspected first;
+exact replay reconciles the original reservation and detects changed payloads,
+including after a process restart. Unknown/pending work is never duplicated under
+a new ID. Cancellation is an explicit remote work operation.
 
-## 3. Priority and logical requests
+Completion, controlled stops, terminal failures and explicit `stop()` release the
+reservation. Successful cleanup is persisted and not repeated; an uncertain release
+is reconciled on resume; an inspected terminal reservation completes cleanup without
+sending a duplicate release. A still-live reservation retries release. Resource waiting is resumable and retains the same
+reservation. Cancellation is not silently substituted for release.
 
-ATHBA emits **only Low or Medium**. Retain current operation-to-priority mappings rather than globally downgrading existing Medium tasks or upgrading Low tasks. Make mappings typed, validated configuration at ATHBA's internal profile-resolver boundary. Reject High/Paramount locally and independently at Rack AI admission.
+## Semantic and validation boundary
 
-An authorized request for the logical service alias `big-brain` uses Medium. Model size, being blocked, elapsed time or exhausting an internal model tier never grants High/Paramount. Stronger local reasoning is not a priority escalation. Requests to other applications' Paramount sessions cannot be borrowed or impersonated.
+RackAI resource waiting propagates separately from model output failures. It does
+not append Tester/Coder attempts, consume Planner repair/replan budgets, or create
+Gatekeeper provider-failure attempts. Durable started-call markers are written after
+resource readiness; waiting unwinds a racing marker without inventing model output.
+Existing malformed-output, evidence, provenance, and accepted-revision checks remain.
 
-PR35 explicitly permits Rack-AI-published logical aliases while retaining internal concrete selection. Update the relevant ATHBA agent/boundary documents for this narrow amendment: a logical service alias is allowed; concrete model IDs, host backend names, GPU IDs, endpoint overrides, artifact paths and JCode profiles remain forbidden client routing fields. Existing broad-capability requests remain supported. Capabilities, complexity, context and limits must still be checked even when a tag is supplied.
-
-Keep the choice to request stronger reasoning inside ATHBA's existing authorized stage/escalation configuration, not inside Rack AI. Do not silently redirect all reasoning to the largest model or alter four-attempt/TDD policies merely to exercise the feature.
-
-## 4. Separate independent demand from workflow dependencies
-
-The normal primary and coder represent independent access/reservation needs, not a single indivisible two-GPU reservation. ATHBA sends logical demand; only Rack AI knows their physical placements.
-
-When the primary is preempted, persist only its affected request/reservation as held. Unrelated already-ready coder work remains dispatchable. This does not authorize parallel conflicting mutations of the same repository, dispatch of a semantic dependency that is not ready, or a new client scheduling engine. Existing readiness/trusted-revision rules remain authoritative.
-
-When Rack AI restores the primary, resume valid not-yet-started work using its existing accepted identities and the unchanged required revision. If the project's canonical revision changed during the hold, do not execute/promote a stale mutation: follow existing ATHBA invalidation/replanning rules and create any necessary new semantic submission explicitly.
-
-## 5. Durable states, denial and attempt accounting
-
-Use typed connector/domain outcomes and persist remote request/reservation identity, generation/version, priority, hold/denial reason, deadlines and invocation evidence. Consume PR35's exact frozen schema/fixtures rather than inventing application-specific states in Rack AI.
-
-Distinguish at least:
-
-- `reservation_denied`: a new request lost to an equal/higher incumbent; no reservation or model invocation was admitted;
-- preparing/starting: a granted transition is in progress;
-- held/preempted: previously accepted demand is suspended, not semantically failed;
-- running/completed: supported by actual invocation/result evidence;
-- interrupted/uncertain: work may have started and cannot be blindly replayed;
-- cancelled/expired/recovery-required/capability-unavailable: explicit separate meanings.
-
-A priority denial or time spent held with proof of no invocation does not consume a Tester/Developer/reasoning attempt. Do not classify it as a bad model result or trigger stronger/paid fallback. Once invocation actually began, retain that fact; ATHBA alone applies the existing attempt policy. Unknown execution is not proof of zero calls.
-
-A replay of a definitive denial retrieves the same denial. A later acquisition retry has a new reservation-request identity linked to the same logical work; admission retries do not manufacture semantic attempts. A retry after a possibly accepted request instead reconciles the same identity. Previously accepted, not-started held work is resumed, not submitted again under a fresh model-invocation ID.
-
-Replace cache-only lookup/cancel behavior on the production path with durable remote status/result/cancel handling. Cancellation must be persisted and acknowledged/reconciled remotely; deleting a Python dictionary entry is not cancellation. Restart the application/adapter while held or starting without losing ownership, duplicating dispatch or resurrecting cancelled work. Bound polling/backoff and resource-wait deadlines separately from model-execution timeouts; do not spend the execution timeout entirely on a hold or hold an HTTP/shell call indefinitely.
-
-Do not silently change the existing v1/v2 wire meanings. Implement new reservation-enabled operations through PR35's versioned contract and explicit capability/version negotiation. Keep historical stored requests/results readable and distinguish unavailable protocol support from model failure.
-
-## 6. Managed reasoning and no bypass
-
-Add a Rack AI implementation behind the existing provider-neutral ReasoningGateway boundary for local reasoning, including configured big-brain use. Preserve the actual protocols required by callers, structured-output parsing, bounded tokens/context/time, cancellation and evidence. Adding only a workspace priority field leaves direct local reasoning outside the scheduler and is insufficient.
-
-Normal production access must use Rack AI's gated managed route or its qualified compatibility facade. ATHBA must not reach raw vLLM/llama.cpp services after cutover, restart those services, alter CUDA visibility, select a GPU, manipulate reservation files or install hosting software. Read-only connection checks do not activate a model.
-
-Preserve explicitly controlled pre-execution cloud design options where applicable and all current post-seal/local-only guards. This PR adds no cloud fallback or new paid provider calls. A busy/unqualified big-brain leaves a truthful held/denied/capability result, not an external bill. Keep deterministic fake providers for development/tests.
-
-## 7. Tests and implementation order
-
-Freeze the core Rack AI schemas first; implement this companion on its own branch/worktree. For a coordinated authorized task, cross-repository edits are limited to each named PR's adapter responsibilities; this is not permission to fix ATHBA semantics from Rack AI or vice versa.
-
-Required tests:
-
-1. Existing Low/Medium mappings preserved; outbound High/Paramount rejected; big-brain remains Medium; server also rejects forged priority/source.
-2. Primary held while genuinely independent coder work continues, without bypassing semantic readiness or repository write serialization.
-3. Denial/hold with no invocation consumes no semantic attempts; a started/interrupted invocation has truthful evidence and no hidden rerun.
-4. Application/adapter restart during hold/start/uncertain submission; stable identity, remote reconciliation and cancel; no late revision promotion.
-5. Primary restoration resumes eligible pending work; expired/cancelled or revision-stale work does not restart incorrectly.
-6. A new denied big-brain acquisition does not stop coder work; a deliberate later retry differs from replay of unknown outcome.
-7. Real workspace and reasoning transports traverse the candidate Rack AI authority using fake models/GPUs; both respect the gate. Fake-only domain tests are not end-to-end proof.
-8. Existing selection/provenance, accepted-revision, TDD, Gatekeeper, naming/refactoring, local-only and bounded-attempt regressions continue passing.
-
-Use disposable worktrees, project identities, database/state and no-cost fake model services. Run coding-principles, applicable configured typing/compile checks, focused tests, full applicable tests and whitespace review. Preserve historical evidence unchanged. No live product run or prompt/model retuning merely to demonstrate the connector.
-
-## 8. Deployment and handoff
-
-The inspected branch is source evidence, not proof of the currently running configuration. Prepare a read-only inventory of actual local reasoning/workspace routes and the exact deployed SHA. Coordinate compatibility/cutover with Rack AI PR35 before global preemption is enabled.
-
-No changes to live `/srv/ATHBA`, canonical project repositories, environments, durable run history or production services until a migration/rollback plan has been reported and the operator separately authorizes the window. No production database migration, lost-state reset, published-history rewrite or automatic merge.
-
-Report `CODE_COMPLETE`, `CONTRACT_FIXTURES_COMPATIBLE`, `WORKSPACE_ROUTE_GATED`, `LOCAL_REASONING_ROUTE_GATED`, `HOLD_RESUME_FIXTURE_PASSED`, `LIVE_QUALIFIED` and `PRODUCTION_DEPLOYED` separately. Include exact tests, PR/SHAs, evidence, preserved attempt/revision invariants, remaining client cutover steps and precise blockers. A planning PR or mocked connector is not a working production priority integration.
+Focused fixture tests cover lifecycle identity, partial readiness, Held/restoration,
+refresh, scoped request payloads, work reconciliation/cancel, resume, semantic budgets
+and release. These tests do not qualify live models or demonstrate deployment.
+No RackAI source/configuration, other application, live campaign, or service is changed.
