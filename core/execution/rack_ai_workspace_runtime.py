@@ -6,9 +6,13 @@ import os
 from pathlib import Path
 import time
 
-from core.execution.rack_ai_reservation import RackAiReservation, runtime_identity
+from core.execution.rack_ai_reservation import RackAiReservation
 from core.execution.rack_ai_runtime import RackAiResourceWait, RackAiRuntimeError
 from core.filesystem_policy import resolve_confined_absolute_path
+
+
+ACTIVE_WORK_STATES = frozenset({"queued", "running", "waiting", "preempting", "preempted"})
+PREEMPTED_BEFORE_START = "reservation_superseded_by_higher_priority"
 
 
 class RackAiWorkspaceRuntime:
@@ -17,7 +21,7 @@ class RackAiWorkspaceRuntime:
         self.client = reservation.client
 
     def work_id(self, submission_id: str) -> str:
-        return runtime_identity(self.reservation._binding().identity + ":" + submission_id)
+        return self.reservation.workspace_execution_identity(submission_id)
 
     def inspect(self, submission_id: str) -> dict | None:
         try:
@@ -30,6 +34,9 @@ class RackAiWorkspaceRuntime:
     def submit(self, payload: dict) -> dict:
         identity = payload["work_id"]
         work = self.inspect(identity)
+        if work is not None and _preempted_before_start(work):
+            self.reservation.advance_workspace_generation(identity)
+            raise RackAiResourceWait("workspace was cancelled by reservation preemption; retry after reacquisition")
         if work is None:
             member = self.reservation.ready(payload["service"])
             reservation_id = member["reservation_id"]
@@ -41,20 +48,27 @@ class RackAiWorkspaceRuntime:
             # Exact replay also asks RackAI to reject changed payloads under an old ID.
             work = self.client.operation({"operation": "submit_work", "request": request})
         except RackAiRuntimeError as error:
+            if error.status != 0:
+                self.reservation.mark_workspace(None)
             raise RackAiResourceWait(error.code) from error
-        return self._wait(work, payload)
+        result = self._wait(work, payload)
+        self.reservation.mark_workspace(None)
+        return result
 
     def _wait(self, work: dict, payload: dict) -> dict:
         config = self.client.configuration
         deadline = time.monotonic() + payload["payload"]["workspace"]["limits"]["timeout_seconds"] + config.resource_wait_seconds
-        while work["state"] in {"accepted", "waiting", "held", "started"}:
+        while work["state"] in ACTIVE_WORK_STATES:
             if time.monotonic() >= deadline:
                 raise RackAiResourceWait("workspace is still pending; reconcile the existing work ID")
             time.sleep(config.poll_seconds)
             inspected = self.inspect(payload["work_id"])
             if inspected is None:
-                raise RackAiResourceWait("accepted workspace record is missing")
+                raise RackAiResourceWait("queued workspace record is missing")
             work = inspected
+            if _preempted_before_start(work):
+                self.reservation.advance_workspace_generation(payload["work_id"])
+                raise RackAiResourceWait("workspace was cancelled by reservation preemption; retry after reacquisition")
         return self.result(work)
 
     def result(self, work: dict) -> dict:
@@ -63,7 +77,9 @@ class RackAiWorkspaceRuntime:
             if result.get("work_id") != work["work_id"]:
                 raise RackAiResourceWait("workspace result identity mismatch")
             return WorkspacePacketReader().read(result)
-        if work["state"] in {"accepted", "waiting", "held", "started", "uncertain"} or work.get("started") is None:
+        if _preempted_before_start(work):
+            raise RackAiResourceWait("workspace was cancelled by reservation preemption; retry after reacquisition")
+        if work["state"] in ACTIVE_WORK_STATES or work["state"] == "uncertain" or work.get("started") is None:
             raise RackAiResourceWait(f"workspace infrastructure state: {work['state']}: {work.get('error')}")
         raise RackAiResourceWait(f"workspace has no authoritative result: {work.get('error')}")
 
@@ -90,3 +106,8 @@ class WorkspacePacketReader:
                 or packet.get("change_id") != change_id):
             raise RackAiResourceWait("workspace evidence identity mismatch")
         return {**packet, "packet_path": result["packet_path"]}
+
+
+def _preempted_before_start(work: dict) -> bool:
+    return (work.get("state") == "cancelled" and work.get("started") is None
+            and work.get("error") == PREEMPTED_BEFORE_START)

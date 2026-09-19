@@ -1,7 +1,7 @@
 """Reservation identity embedded in existing durable ATHBA run records."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Protocol
 
 
@@ -18,19 +18,32 @@ class RackAiReservationState:
     waiting_service: str | None = None
     pending_workspace: str | None = None
     pending_inference: str | None = None
+    ready_observed: bool = False
+    workspace_generations: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.priority not in {"low", "medium"}:
             raise ValueError("ATHBA reservation priority must not exceed medium")
         if not self.services or len(set(self.services)) != len(self.services):
             raise ValueError("reservation requires distinct campaign services")
+        for key, value in self.workspace_generations.items():
+            if not isinstance(key, str) or not key.strip() or not isinstance(value, int) or value < 0:
+                raise ValueError("workspace execution generations must be non-negative by submission")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, value: dict) -> RackAiReservationState:
-        return cls(**{**value, "services": tuple(value["services"])})
+        generations = value.get("workspace_generations", {})
+        if not isinstance(generations, dict):
+            raise ValueError("workspace execution generations must be a mapping")
+        return cls(**{
+            **value,
+            "services": tuple(value["services"]),
+            "ready_observed": bool(value.get("ready_observed", False)),
+            "workspace_generations": {str(key): int(item) for key, item in generations.items()},
+        })
 
 
 class ReservationStateRepository(Protocol):

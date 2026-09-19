@@ -1,95 +1,120 @@
 # ATHBA reservation/work client
 
-The current client targets the authenticated deployed `GET /runtime/v1/contract`,
-contract version **1.1.0**, schema `rack-ai/runtime-contract/v1`. This replaces the
-previous PR35 planning contract. `discover` retains its service-discovery meaning.
-The contract was read on gpurack before implementation; the read-only snapshot is
-in `evidence/reservation-work-migration/deployed-contract.json` (local evidence,
-not a credential or deployment artifact).
+The current client targets RackAI runtime contract **1.2.0** through the
+authenticated `POST /runtime/v1` API, with read-only contract discovery available
+at `GET /runtime/v1/contract`. RackAI source/configuration remains RackAI-owned;
+ATHBA is only a durable client of the deployed reservation/work contract.
 
 ## Transport and configuration
 
 Set `ATHBA_RACK_AI_ORIGIN` to the authenticated runtime origin and
 `ATHBA_RACK_AI_CREDENTIAL_FILE` to ATHBA's existing credential file. The inspected
 gpurack origin is `http://127.0.0.1:8095`; its ATHBA credential file is
-`/srv/rack-ai/deployments/idle-runtime/secrets/athba`. No credential value is stored
-in ATHBA state. No production environment file or service was changed.
+`/srv/rack-ai/deployments/idle-runtime/secrets/athba`. No credential value is
+stored in ATHBA state.
 
-The durable strict-TDD composition supplies one shared RackAI session to workspace
-execution and direct reasoning. Post-behavior continuation binds a session to its
-existing delivery record. Explicitly injected fixture ports remain available.
-Unbound production workspace composition fails closed.
+The durable strict-TDD composition supplies one shared RackAI reservation session
+to workspace execution and direct reasoning. Post-behavior continuation binds a
+session to its existing delivery record. Explicitly injected fixture ports remain
+available. Unbound production workspace composition fails closed.
 
 The old `rack-ai/work-unit/v2` document, CLI subprocess transport, and in-memory
-result/cancel cache are removed from the active workspace route. The existing
-profile resolver, repository binding, path/network controls, acceptance commands,
-revision handling, provenance checks, and confined evidence-packet reader remain.
-The latter still requires access to the returned review packet under
-`ATHBA_RACK_AI_EVIDENCE_ROOT` (default `/srv/rack-ai`); this is an existing evidence
-boundary, not a raw model access route.
+result/cancel cache are not part of the active workspace route. Workspace calls use
+RackAI `submit_work`, `inspect_work`, and `cancel_work` with the existing profile
+resolver, repository binding, path/network controls, acceptance commands, revision
+handling, provenance checks, and confined evidence-packet reader.
 
 ## Campaign lifecycle
 
-A campaign reserves only the logical services its configured ports need, normally
-`local-primary` and `local-coder`. The user-selected campaign priority is **Low**.
-This deliberately supersedes the original PR31 proposal to send Low/Medium per
-operation: all newly created campaign reservations use Low, including scenario
-and stronger-reasoning work. The existing internal Low/Medium profile labels remain
-for compatibility and validation; they do not set outbound work priority. No Medium
-is sent by new campaign creation, and High/Paramount remain forbidden. Previously
-persisted reservation priority is retained on resume/renewal. Priority is sent only
-in `reserve`, never in `submit_work`.
+ATHBA campaign reservations use **Low** priority. Priority is sent only on
+`reserve`; it is never sent on `submit_work`, and ATHBA does not request High or
+Paramount. If an old persisted state contains another permitted development
+priority, the next acquisition is normalized back to Low.
 
 The existing run/delivery JSON record contains an optional `rack_ai` field with a
-campaign-derived work ID, lifecycle-specific acquisition ID, service requirements,
-reservation ID, and cleanup/reconciliation markers. New lifecycles retain the persisted
-campaign priority. Old records without the field remain readable. No separate scheduler, queue, or reservation database is added.
+campaign-derived work ID, lifecycle acquisition ID, service requirements,
+reservation ID, release/reconciliation markers, whether full readiness has ever
+been observed, and per-workspace-submission execution generations. Old records
+without the newer fields remain readable. No scheduler, queue, or separate
+reservation database is added.
 
-Reserve retries reuse the persisted acquisition ID. Resume inspects the persisted
-reservation first. A still-live reservation is reused; a terminal reservation gets
-a new acquisition ID only when work actually needs resources again. Reserve replay
-is never treated as status inspection or refresh.
+A multi-service `reserve` is treated as one atomic acquisition. If RackAI returns
+an initial aggregate `unavailable`, ATHBA keeps its logical campaign/acquisition
+intent but does **not** persist or inspect the synthetic `unavailable-*`
+reservation ID. The campaign remains in resource wait, no semantic attempt is
+consumed, and a later bounded retry makes another explicit `reserve` attempt.
+`refresh_reservation` is not part of active PR31 acquisition control flow.
 
-Each service is checked independently. Ready peers can run while another member is
-Preparing, Held, unavailable, or recovery_required. Preparing/Held are inspected;
-Held is never refreshed or replaced. Unavailable triggers explicit refresh of the
-same reservation, normally no more often than every 300 seconds during a wait.
-Polling defaults to two seconds, bounded by a 300-second resource wait. Expiry is
-RackAI authority; refresh does not extend TTL. A bound or recovery_required surfaces
-`RackAiResourceWait` / strict-TDD `resource_waiting`, preserving the lifecycle for
-resume rather than recording a semantic failure.
+For a persisted multi-service reservation, ATHBA does not expose any newly
+requested member as usable until the authoritative reservation view has reached
+aggregate `ready` and every requested service is `ready`. After that readiness has
+been observed, unaffected Ready peers may continue to run while another service in
+the same older reservation becomes `preempting` and then terminal `preempted`.
 
-When a required member is expired/released/cancelled while peers remain Ready,
-release the old reservation before acquiring a replacement with a new acquisition
-ID. Pending workspace reconciliation or an unresolved scoped inference blocks
-replacement, including when the aggregate reservation is terminal. Unknown work
-is never moved to a new reservation. No autonomous background queue is introduced.
+`preempting` is non-dispatchable for the affected service. `preempted`,
+`released`, `cancelled`, and `expired` are terminal ownership states. RackAI does
+not restore preempted ownership; if ATHBA still needs the resource and there is no
+unresolved workspace or scoped inference, ATHBA explicitly releases/replaces the
+old lifecycle and creates a new acquisition. Pending workspace reconciliation or
+an unresolved scoped inference blocks replacement.
 
 Direct model calls use the Ready member's model and scoped `gateway_path`. Prompts,
-token/temperature settings and structured output schemas are retained (Responses
-JSON schema uses `text.format`). Workspace calls use `submit_work`, `inspect_work`
-and `cancel_work`. A stable campaign/submission-derived work ID is inspected first;
-exact replay reconciles the original reservation and detects changed payloads,
-including after a process restart. Packet validation matches selection `work_id`
-to the public result `work_id`, and selection `submission_id` plus packet `change_id`
-to the result's RackAI-generated `change_id`. These IDs are deliberately different.
-Unknown/pending work is never duplicated under a new ID. Cancellation is an explicit remote work operation.
+token/temperature settings and structured output schemas are retained. A scoped
+transport uncertainty keeps the original idempotency key pending and prevents a
+new call through a different reservation until authoritative reconciliation clears
+that uncertainty.
 
-Completion, controlled stops, terminal failures and explicit `stop()` release the
-reservation. Successful cleanup is persisted and not repeated; an uncertain release
-is reconciled on resume; an inspected terminal reservation completes cleanup without
-sending a duplicate release. A still-live reservation retries release. Resource
-waiting is resumable and retains the same reservation. Cancellation is not silently substituted for release.
+## Workspace work identity
+
+ATHBA keeps the stable semantic submission identity separate from RackAI execution
+identity. Generation 0 preserves the historical campaign/submission-derived
+RackAI work ID. Only a definitively queued, not-started invocation cancelled with
+`reservation_superseded_by_higher_priority` advances the persisted RackAI
+execution generation for that same semantic submission. The next retry can then
+execute under a new reservation and new RackAI work ID without consuming another
+Tester/Developer/Gatekeeper semantic attempt.
+
+Transport uncertainty and RackAI `uncertain` never advance the generation and are
+never automatically replayed under a new work ID. Changed payload/reservation under
+an existing RackAI work ID still fails closed through RackAI identity conflict.
+Completed workspace packets still validate the public RackAI `work_id`, the
+RackAI-generated `change_id`, and the retained evidence packet identities.
+
+Workspace polling treats `queued`, `running`, `waiting`, `preempting`, and
+`preempted` as active/unresolved infrastructure states. Terminal `completed`,
+`cancelled`, `failed`, `expired`, and `uncertain` are reconciled according to their
+authoritative RackAI result/error; `accepted`, `started`, and `held` are not active
+control-flow states for the v1.2 client.
 
 ## Semantic and validation boundary
 
 RackAI resource waiting propagates separately from model output failures. It does
 not append Tester/Coder attempts, consume Planner repair/replan budgets, or create
-Gatekeeper provider-failure attempts. Durable started-call markers are written after
-resource readiness; waiting unwinds a racing marker without inventing model output.
-Existing malformed-output, evidence, provenance, and accepted-revision checks remain.
+Gatekeeper provider-failure attempts. Durable started-call markers are written
+after resource readiness; waiting unwinds a racing marker without inventing model
+output. Existing malformed-output, evidence, provenance, and accepted-revision
+checks remain.
 
-Focused fixture tests cover lifecycle identity, partial readiness, Held/restoration,
-refresh, scoped request payloads, work reconciliation/cancel, resume, semantic budgets
-and release. These tests do not qualify live models or demonstrate deployment.
-No RackAI source/configuration, other application, live campaign, or service is changed.
+Focused fixture tests cover atomic unavailable, atomic readiness, preempting and
+preempted ownership, scoped request dispatch blocking, work reconciliation/cancel,
+preempted queued work generation, transport uncertainty, changed-payload conflict,
+resume, semantic budgets and release. These tests do not qualify live models or
+demonstrate deployment. No RackAI source/configuration, other application, live
+campaign, or service is changed.
+
+## Scoped transport diagnostics
+
+Scoped HTTP failures emit `scoped_transport_failure` JSON through Python logging,
+so normal runner stderr/log capture retains the status, bounded sanitized body
+(2,048 characters), content type, allowlisted correlation headers, service,
+redacted gateway path, call/transition identity and existing retry disposition.
+Bearer credentials and the scoped URL capability are redacted. Request prompts
+and arbitrary request/response headers are not logged.
+
+This is evidence only: retry counts, same-ID replay, pending-inference handling,
+resource-wait classification and semantic attempt accounting remain unchanged.
+`remote_execution_uncertain` describes the client's conservative retained pending
+marker; it is not proof that a remote invocation exists. A status alone must not
+be used to clear that marker: gateway conflicts can also describe uncertain or
+previously accepted work. Authoritative rejection/reconciliation evidence is
+needed to distinguish those cases.

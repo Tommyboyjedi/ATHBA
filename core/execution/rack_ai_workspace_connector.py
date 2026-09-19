@@ -11,6 +11,7 @@ from core.execution.workspace_execution_port import (
 )
 
 ONE_MODEL_INVOCATION = 1
+ACTIVE_WORK_STATES = frozenset({"queued", "running", "waiting", "preempting", "preempted"})
 
 
 class RackAiWorkspaceConnector:
@@ -29,7 +30,7 @@ class RackAiWorkspaceConnector:
     def get_result(self, identity: AthbaWorkspaceIdentity) -> WorkspaceExecutionResult | None:
         submission_id = identity.submission_id
         work = self.transport.inspect(submission_id)
-        if work is None or work["state"] in {"accepted", "waiting", "held", "started"}:
+        if work is None or work["state"] in ACTIVE_WORK_STATES:
             return None
         result = self.transport.result(work)
         return self._translator.translate(identity, {**result, "submission_id": submission_id})
