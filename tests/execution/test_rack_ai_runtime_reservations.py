@@ -132,6 +132,36 @@ def operations(client, name):
     return [call for call in client.calls if call['operation'] == name]
 
 
+def configure_runtime_env(tmp_path, monkeypatch):
+    token = tmp_path / "credential"
+    token.write_text("fixture-token")
+    monkeypatch.setenv("ATHBA_RACK_AI_ORIGIN", "http://127.0.0.1:8095")
+    monkeypatch.setenv("ATHBA_RACK_AI_CREDENTIAL_FILE", str(token))
+    return token
+
+
+def test_runtime_configuration_defaults_resource_wait_for_cold_backend_start(tmp_path, monkeypatch):
+    configure_runtime_env(tmp_path, monkeypatch)
+    monkeypatch.delenv("ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS", raising=False)
+    configuration = RackAiRuntimeConfiguration.from_env()
+    assert configuration.resource_wait_seconds == 960.0
+    assert configuration.http_timeout_seconds == 30.0
+
+
+def test_runtime_configuration_uses_positive_resource_wait_override(tmp_path, monkeypatch):
+    configure_runtime_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS", "42.5")
+    assert RackAiRuntimeConfiguration.from_env().resource_wait_seconds == 42.5
+
+
+@pytest.mark.parametrize("value", ["", "not-a-number", "0", "-1", "nan", "inf"])
+def test_runtime_configuration_rejects_invalid_resource_wait_override(tmp_path, monkeypatch, value):
+    configure_runtime_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS", value)
+    with pytest.raises(ValueError, match="ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS.*positive numeric"):
+        RackAiRuntimeConfiguration.from_env()
+
+
 def test_one_campaign_reserves_required_services_once_and_persists_identity(tmp_path):
     reservation, client, store = session(tmp_path)
     reservation.ready('local-primary')
@@ -241,6 +271,7 @@ def test_model_payload_uses_returned_scoped_access_and_preserves_schema(tmp_path
     result = provider.invoke(ProviderRequest('unchanged prompt','local-primary',temperature=0.2,
                                              max_tokens=127,response_schema=schema))
     url, request = sent[0]
+    assert request['timeout'] == 30.0
     assert url == 'http://127.0.0.1:8095/scoped/R1/local-primary/v1/responses'
     assert request['headers']['Authorization'] == 'Bearer fixture-token'
     assert request['headers']['Idempotency-Key']
@@ -276,12 +307,14 @@ def test_scoped_reasoning_does_not_dispatch_through_preempting_or_preempted(tmp_
 def test_workspace_reconciles_before_submit_and_cancels_remotely(tmp_path, monkeypatch):
     reservation, client, store = session(tmp_path)
     monkeypatch.setattr('core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read',lambda _, value:value)
+    client.configuration = replace(client.configuration, resource_wait_seconds=960.0)
     transport = RackAiWorkspaceRuntime(reservation)
     payload = dict(work_id='stable-submission',service='local-coder',payload=dict(kind='workspace',workspace=dict(
         limits=dict(timeout_seconds=10))))
     transport.submit(payload)
     first = operations(client,'submit_work')[0]['request']
     assert first['reservation_id'] == 'R1' and 'priority' not in first
+    assert first['payload']['workspace']['limits']['timeout_seconds'] == 10
     fresh = RackAiWorkspaceRuntime(reservation)
     fresh.submit(payload)
     assert client.executions == 1

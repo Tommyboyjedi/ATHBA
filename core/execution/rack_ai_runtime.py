@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+
+DEFAULT_RACK_AI_RESOURCE_WAIT_SECONDS = 960.0
+RACK_AI_RESOURCE_WAIT_ENV = "ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS"
 
 
 class RackAiResourceWait(Exception):
@@ -27,7 +31,7 @@ class RackAiRuntimeConfiguration:
     ttl_seconds: int = 86400
     poll_seconds: float = 2.0
     refresh_seconds: float = 300.0
-    resource_wait_seconds: float = 300.0
+    resource_wait_seconds: float = DEFAULT_RACK_AI_RESOURCE_WAIT_SECONDS
     http_timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
@@ -36,16 +40,35 @@ class RackAiRuntimeConfiguration:
             raise ValueError("RackAI requires an authenticated runtime origin")
         if url.path not in {"", "/"} or url.query or url.fragment:
             raise ValueError("RackAI origin must not include a backend or gateway path")
-        if min(self.ttl_seconds, self.poll_seconds, self.refresh_seconds,
-               self.resource_wait_seconds, self.http_timeout_seconds) <= 0:
-            raise ValueError("RackAI time bounds must be positive")
+        bounds = (self.ttl_seconds, self.poll_seconds, self.refresh_seconds,
+                  self.resource_wait_seconds, self.http_timeout_seconds)
+        if not all(_positive_finite(value) for value in bounds):
+            raise ValueError("RackAI time bounds must be positive finite values")
 
     @classmethod
     def from_env(cls) -> RackAiRuntimeConfiguration:
         return cls(
             os.environ["ATHBA_RACK_AI_ORIGIN"],
             Path(os.environ["ATHBA_RACK_AI_CREDENTIAL_FILE"]),
+            resource_wait_seconds=_resource_wait_seconds_from_env(),
         )
+
+
+def _positive_finite(value: float | int) -> bool:
+    return math.isfinite(float(value)) and value > 0
+
+
+def _resource_wait_seconds_from_env() -> float:
+    value = os.getenv(RACK_AI_RESOURCE_WAIT_ENV)
+    if value is None:
+        return DEFAULT_RACK_AI_RESOURCE_WAIT_SECONDS
+    try:
+        seconds = float(value)
+    except ValueError as error:
+        raise ValueError(f"{RACK_AI_RESOURCE_WAIT_ENV} must be a positive numeric value") from error
+    if not _positive_finite(seconds):
+        raise ValueError(f"{RACK_AI_RESOURCE_WAIT_ENV} must be a positive numeric value")
+    return seconds
 
 
 class RackAiRuntimeClient:
