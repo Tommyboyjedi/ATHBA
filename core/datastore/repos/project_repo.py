@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from bson import ObjectId
 
@@ -38,8 +38,12 @@ class ProjectRepo:
         cursor = self.collection.find({})
         return [Project(**doc) async for doc in cursor]
 
+    async def list_active(self) -> list[Project]:
+        cursor = self.collection.find({"active": True})
+        return [Project(**doc) async for doc in cursor]
+
     async def create(self, name: str) -> Project:
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         new_doc = {
             "name": name,
             "active": True,
@@ -53,7 +57,7 @@ class ProjectRepo:
         return Project(**new_doc)
 
     async def update(self, project: Project) -> Project:
-        project.updated_at = datetime.utcnow()
+        project.updated_at = datetime.now(UTC)
         await self.collection.update_one({"_id": ObjectId(project.id)}, {"$set": project.to_dict()})
         return await self.get_by_id(project.id)
 

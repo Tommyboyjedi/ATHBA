@@ -5,14 +5,14 @@ This behavior generates failing tests following TDD RED phase.
 This is the core of the TDD workflow - test FIRST, then code.
 """
 
-from core.agents.interfaces import AgentBehavior
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from datetime import datetime
 from core.dataclasses.history_entry import HistoryEntry
 
 
-class GenerateTestBehavior(AgentBehavior):
+class GenerateTestBehavior:
     """
     Behavior for generating tests (TDD RED phase).
     
@@ -26,7 +26,7 @@ class GenerateTestBehavior(AgentBehavior):
     
     intent = ["generate_test", "write_test", "create_test", "tdd_red"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the generate test behavior.
         
@@ -38,6 +38,10 @@ class GenerateTestBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
@@ -100,16 +104,10 @@ Use appropriate file name: test_<feature>.py
 
 Generate the minimal test file:"""
         
-        from core.agents.helpers.llm_exchange import LlmExchange
+        from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
         
         try:
-            test_code = await LlmExchange(
-                agent=agent,
-                session=agent.session,
-                content=test_prompt,
-                tier=tier,
-                use_cloud=False
-            ).get_response()
+            test_code = await LlmExchange(LlmExchangeRequest(agent=agent, session=agent.session, content=test_prompt, tier=tier, use_cloud=False)).get_response()
             
             # Extract code if wrapped in markdown
             if "```python" in test_code:

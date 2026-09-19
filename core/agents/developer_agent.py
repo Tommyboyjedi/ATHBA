@@ -6,8 +6,8 @@ claiming tickets, creating branches, generating code, and committing changes.
 """
 
 from core.agents.behaviors.behavior_loader import BehaviorLoader
-from core.agents.helpers.llm_exchange import LlmExchange
-from core.agents.interfaces import IAgent
+from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.project import Project
 from core.dataclasses.projses import Projses
@@ -19,7 +19,7 @@ from core.services.llm_escalation_manager import LlmEscalationManager
 from llm_service.enums.eagent import EAgent
 
 
-class DeveloperAgent(IAgent):
+class DeveloperAgent:
     """
     Developer Agent for code generation and implementation.
     
@@ -63,7 +63,7 @@ class DeveloperAgent(IAgent):
         """
         self._project = await ProjectsService().get_project_by_id(self._session.project_id)
     
-    async def run(self, content: str) -> list[ChatMessage]:
+    async def run(self, content: str, request=None) -> list[ChatMessage]:
         """
         Process user input and execute appropriate behaviors.
         
@@ -83,18 +83,13 @@ class DeveloperAgent(IAgent):
             if ticket:
                 tier = self.escalation_manager.get_current_tier(ticket, "Developer")
         
-        response = await LlmExchange(
-            agent=self,
-            session=self._session,
-            content=content,
-            tier=tier,  # Use escalated tier if available
-            use_cloud=False  # Use local LLM for Developer
-        ).get_intent()
+        response = await LlmExchange(LlmExchangeRequest(agent=self, session=self._session, content=content, tier=tier, use_cloud=False)).get_intent()
         
         results = []
         
+        execution = BehaviorExecution(agent=self, message=content, intent=response)
         for behavior in self.behaviors:
-            messages = await behavior.run(self, content, response)
+            messages = await behavior.run(execution)
             if messages:
                 if isinstance(messages, list):
                     results.extend(messages)

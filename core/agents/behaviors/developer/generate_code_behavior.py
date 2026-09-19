@@ -4,14 +4,16 @@ Generate Code Behavior for Developer Agent.
 This behavior generates code to implement a ticket using the LLM.
 """
 
-from datetime import datetime
-from core.agents.interfaces import AgentBehavior
+from datetime import UTC, datetime
+from pathlib import Path
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.llm_intent import LlmIntent
 from core.dataclasses.history_entry import HistoryEntry
+from core.filesystem_policy import resolve_identifier_path, resolve_relative_path
 
 
-class GenerateCodeBehavior(AgentBehavior):
+class GenerateCodeBehavior:
     """
     Behavior for generating code to implement a ticket following Uncle Bob's Law #3.
     
@@ -27,7 +29,7 @@ class GenerateCodeBehavior(AgentBehavior):
     
     intent = ["generate_code"]
     
-    async def run(self, agent, user_input: str, llm_response: LlmIntent) -> list[ChatMessage] | None:
+    async def run(self, execution: BehaviorExecution) -> list[ChatMessage] | None:
         """
         Execute the generate code behavior.
         
@@ -39,6 +41,10 @@ class GenerateCodeBehavior(AgentBehavior):
         Returns:
             List of ChatMessage responses, or None if not applicable
         """
+        agent = execution.agent
+        user_input = execution.message
+        llm_response = execution.intent
+
         if llm_response.intent not in self.intent:
             return None
         
@@ -90,14 +96,10 @@ class GenerateCodeBehavior(AgentBehavior):
             try:
                 # Read the first test file to understand requirements
                 test_file_path = ticket.test_files[0]
-                repo_path = f"/tmp/athba_repos/{agent.project.id}"
-                
-                # Try to read test file
-                import os
-                full_test_path = os.path.join(repo_path, test_file_path)
-                if os.path.exists(full_test_path):
-                    with open(full_test_path, 'r') as f:
-                        test_code_context = f.read()
+                repo_root = resolve_identifier_path(Path("/tmp/athba_repos"), agent.project.id, "project id")
+                full_test_path = resolve_relative_path(repo_root, test_file_path, "test file path")
+                if full_test_path.exists():
+                    test_code_context = full_test_path.read_text(encoding="utf-8")
             except Exception:
                 # If we can't read test, proceed without context
                 pass
@@ -140,13 +142,8 @@ EXPLANATION: <brief explanation>
 Generate the minimal implementation:"""
         
         try:
-            from core.agents.helpers.llm_exchange import LlmExchange
-            llm_exchange = LlmExchange(
-                agent=agent,
-                session=agent.session,
-                content=code_prompt,
-                use_cloud=False  # Use local LLM for code generation
-            )
+            from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
+            llm_exchange = LlmExchange(LlmExchangeRequest(agent=agent, session=agent.session, content=code_prompt, use_cloud=False))
             
             generated_code = await llm_exchange.get_response()
         except Exception as e:
@@ -191,7 +188,7 @@ Generate the minimal implementation:"""
         # Update ticket history
         updates = {
             "history": ticket.history + [HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="code_generated",
                 actor=agent.name,
                 details=f"Generated code for {file_path}"

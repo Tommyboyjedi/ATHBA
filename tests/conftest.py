@@ -1,6 +1,6 @@
 # Test fixtures for agents and behaviors
 import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 from core.dataclasses.projses import Projses
 from core.dataclasses.project import Project
 from core.dataclasses.ticket_model import TicketModel
@@ -24,8 +24,8 @@ def sample_project():
         _id="test_project_456",
         name="Test Project",
         active=True,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow()
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC)
     )
 
 
@@ -55,10 +55,10 @@ def sample_spec_document(sample_spec_content):
         "version": 1,
         "content": sample_spec_content,
         "author": "human",
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(UTC),
         "approved": True,
         "approved_by": "human",
-        "approved_at": datetime.utcnow()
+        "approved_at": datetime.now(UTC)
     }
 
 
@@ -69,17 +69,17 @@ def sample_ticket():
         project_id="test_project_456",
         title="Implement user authentication",
         description="Create login and registration functionality with JWT tokens",
-        due=datetime.utcnow(),
+        due=datetime.now(UTC),
         eta="1 week",
         agents=[],
         label="Feature",
         severity="High",
         column="Backlog",
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
         history=[
             HistoryEntry(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(UTC),
                 event="created",
                 actor="Architect",
                 details="Ticket generated from specification analysis"

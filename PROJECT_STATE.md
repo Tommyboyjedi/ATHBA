@@ -1,89 +1,36 @@
-# Project State Documentation
+# Project State
 
-## Project Overview
-**Name**: ATHBA (Agentic AI Team for TDD DevOps Software Development)  
-**Type**: Django-based AI application with FastAPI components  
-**Description**: A complete TDD DevOps software development agentic AI team implementation.
+Date: 2026-08-30
+Branch: `pr17-specification-gatekeeper`
+Scope: `/srv/ATHBA`
 
-## Technical Stack
-- **Backend Framework**: Django <5.2 with Django Ninja for APIs
-- **Database**: SQLite (default), MongoDB (via Motor)
-- **AI/ML**: 
-  - Ollama integration
-  - llama-cpp-python
-  - AutoEvals for evaluation
-- **APIs**: Django Ninja and FastAPI
-- **Async Support**: ASGI with Uvicorn
-- **Frontend**: Django Templates with HTMX for interactivity and real-time updates (via SSE)
+## Current implementation state
 
-## Project Structure
-```
-ATHBA/
-├── athba/                  # Django project config
-├── core/                   # Main application
-│   ├── agents/             # AI agent implementations
-│   ├── controllers/        # Business logic controllers
-│   ├── dataclasses/        # Data models and schemas
-│   ├── datastore/          # Data access layer
-│   ├── endpoints/          # API endpoints
-│   ├── infra/              # Infrastructure code
-│   ├── services/           # Business services
-│   └── sse/                # Server-Sent Events
-├── http_requests/          # HTTP request templates/examples
-├── llm_service/            # LLM integration service
-├── static/                 # Static files
-└── templates/              # Django templates
-```
+- PR17 is the active development line. ATHBA owns the development semantics: Behavior Contract planning, TDD progression, Gatekeeper checklist state, failure progression, trusted revision continuity, and final test-evidence reconciliation.
+- Rack AI is the separate execution authority. ATHBA must not take ownership of worker selection, GPU control, or generic bounded execution policy.
+- The repository still contains legacy chat and local-LLM compatibility paths. They are documented and smoke-covered, but they are not the modern PR17 control plane.
 
-## Dependencies
-Key dependencies (from pyproject.toml):
-- Django <5.2
-- Django Ninja
-- PyMongo & Motor (MongoDB drivers)
-- Ollama
-- FastAPI & Uvicorn
-- llama-cpp-python
-- AutoEvals
-- psycopg2 (PostgreSQL adapter)
+## Runtime and toolchain
 
-## Configuration
-- Uses environment variables via django-environ
-- Development settings allow all hosts
-- SQLite database by default
-- MongoDB connection configured via `DJANGO_MONGO` env var
-- Debug mode controlled by `DEBUG` env var
+- Python requirement: `^3.14`
+- Dependency manager: Poetry with committed `poetry.lock`
+- Primary validation gates: coding-principles AST gate, scoped `mypy`, `compileall`, and full `pytest`
+- CI target: CPU-only, no Rack AI mutation, no GPU requirement
 
-## Running the Project
-1. Install dependencies:
-   ```bash
-   poetry install
-   ```
-2. Set up environment variables in `.env` file
-3. Run migrations:
-   ```bash
-   python manage.py migrate
-   ```
-4. Start the development server:
-   ```bash
-   python manage.py runserver
-   ```
+## Configuration contract
 
-## Notable Features
-- AI agent system with multiple agent types
-- Support for multiple LLM backends
-- API-first architecture
-- Real-time updates via SSE
-- Evaluation framework for AI outputs
+- Django secret: `DJANGO_SECRET_KEY`
+- Debug flag: `DEBUG`
+- Legacy compatibility repo root: `DEVOPS_DIR`
+- Mongo contract used by `core.infra.mongo`: `MONGO_HOST`, `MONGO_PORT`, `MONGO_DB_NAME`, `MONGO_USER`, `MONGO_PASS`
+- Optional provider settings: `OPENAI_*`, `ANTHROPIC_*`
+- Legacy local-LLM compatibility only: `LLM_SERVER_URL`
 
-## Development Notes
-- Project uses Poetry for dependency management
-- Follows a modular architecture with clear separation of concerns
-- Includes infrastructure for testing and evaluation
-- Supports both synchronous and asynchronous operations
+## Active documentation
 
-## Next Steps
-- Review and complete the specification document
-- Set up proper database configuration for production
-- Implement CI/CD pipelines
-- Add comprehensive documentation
-- Set up monitoring and logging
+- `docs/ATHBA_RACK_AI_ARCHITECTURE.md`
+- `docs/pre_pr17_architecture_quarantine.md`
+- `docs/pr17-specification-gatekeeper.md`
+- `docs/pre_pr17_correctness_remediation.md`
+- `docs/pre_pr17_trust_hardening.md`
+- `docs/pre_pr17_repository_governance.md`

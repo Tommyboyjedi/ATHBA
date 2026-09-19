@@ -6,6 +6,7 @@ from ninja.errors import HttpError
 
 from core.dataclasses.ticket_model import TicketModel
 from core.datastore.repos.agent_log_repo import AgentLogRepo
+from core.datastore.repos.mongo_requests import AgentLogEntry
 from core.datastore.repos.project_repo import ProjectRepo
 from core.datastore.repos.ticket_repo import TicketRepo
 
@@ -24,12 +25,28 @@ class TicketIn(Schema):
     column: Optional[str] = None
 
 
-class TicketPatch(TicketIn):
+class TicketPatch(Schema):
     id: Optional[str] = None
+    title: str
+    description: Optional[str] = None
+    due: Optional[datetime] = None
+    eta: Optional[str] = None
+    agents: Optional[str] = None
+    label: str
+    severity: str
+    column: Optional[str] = None
 
 
-class TicketOut(TicketIn):
+class TicketOut(Schema):
     id: str
+    title: str
+    description: Optional[str] = None
+    due: Optional[datetime] = None
+    eta: Optional[str] = None
+    agents: Optional[str] = None
+    label: str
+    severity: str
+    column: Optional[str] = None
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
@@ -86,7 +103,6 @@ async def batch_update(request, project_id: str, tickets: List[TicketPatch]):
     project = await ensure_not_locked(project_id)
     project.locked = True
     await project_repo.update(project)
-
     try:
         repo = TicketRepo()
         existing_ids = set(await repo.list_ids_by_project(project_id))
@@ -94,7 +110,6 @@ async def batch_update(request, project_id: str, tickets: List[TicketPatch]):
         to_delete = existing_ids - incoming_ids
         if to_delete:
             await repo.delete_many(project_id, list(to_delete))
-
         results = []
         for ticket in tickets:
             data = ticket.model_dump(exclude_unset=True)
@@ -106,14 +121,14 @@ async def batch_update(request, project_id: str, tickets: List[TicketPatch]):
                 if updated:
                     results.append(updated)
             else:
-                created = await repo.create(TicketModel(project_id=project_id, **data))
-                results.append(created)
-
-        await AgentLogRepo.log(
-            project_id,
-            agent="PMAgent",
-            action="batch_edit",
-            details={"count": len(tickets)},
+                results.append(await repo.create(TicketModel(project_id=project_id, **data)))
+        await AgentLogRepo().log(
+            AgentLogEntry(
+                project_id=project_id,
+                agent="PMAgent",
+                action="batch_edit",
+                details={"count": len(tickets)},
+            )
         )
         return results
     finally:

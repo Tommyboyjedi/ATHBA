@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from core.development.athba_workspace_routing import AthbaModelWorkKind, AthbaWorkspaceIdentity
+from core.development.strict_tdd_execution_budget import StrictTddWorkKind
+
 
 SUPPORTED_CAPABILITIES = {"implementation"}
 SUPPORTED_COMPLEXITIES = {"small", "medium", "large"}
@@ -53,7 +56,11 @@ class DevelopmentWorkUnit:
     requires_large_context: bool = False
     max_implementation_attempts: int = 2
     timeout_seconds: int = 900
+    work_kind: StrictTddWorkKind = StrictTddWorkKind.GENERIC
+    model_work_kind: AthbaModelWorkKind | None = None
+    workspace_identity: AthbaWorkspaceIdentity | None = None
     network: str = "disabled"
+    change_key: str | None = None
     status: WorkUnitStatus = WorkUnitStatus.PLANNED
 
     def __post_init__(self) -> None:
@@ -79,8 +86,14 @@ class DevelopmentWorkUnit:
             raise ValueError(f"unsupported work unit network policy: {self.network}")
         if self.max_implementation_attempts <= 0:
             raise ValueError("max implementation attempts must be positive")
-        if self.timeout_seconds <= 0:
+        if type(self.timeout_seconds) is not int or self.timeout_seconds <= 0:
             raise ValueError("timeout seconds must be positive")
+        if not isinstance(self.work_kind, StrictTddWorkKind):
+            raise ValueError("work kind must be a StrictTddWorkKind")
+        if (self.model_work_kind is None) != (self.workspace_identity is None):
+            raise ValueError("workspace work kind and identity must be supplied together")
+        if self.change_key is not None:
+            _require_text(self.change_key, "work unit change key")
 
     def dependencies_satisfied(self, accepted_dependencies: set[str]) -> bool:
         """Return true when every declared dependency has been accepted."""
@@ -96,6 +109,19 @@ class DevelopmentWorkUnit:
 
 
 @dataclass(frozen=True)
+class WorkerExecutionProvenance:
+    """Durable worker identity reported by one Rack AI packet."""
+    worker_id: str
+    worker_role: str
+    worker_kind: str
+    model_id: str
+    provider_profile: str
+    resource_id: str
+    backend: str
+    tool_profile: str | None = None
+
+
+@dataclass(frozen=True)
 class ExecutionAttempt:
     work_unit_id: str
     accepted: bool
@@ -108,6 +134,7 @@ class ExecutionAttempt:
     packet_path: str | None = None
     worktree_path: str | None = None
     error: str | None = None
+    worker_provenance: WorkerExecutionProvenance | None = None
 
 
 def _require_text(value: str, label: str) -> None:

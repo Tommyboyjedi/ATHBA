@@ -7,8 +7,8 @@ code quality before approval.
 """
 
 from core.agents.behaviors.behavior_loader import BehaviorLoader
-from core.agents.helpers.llm_exchange import LlmExchange
-from core.agents.interfaces import IAgent
+from core.agents.helpers.llm_exchange import LlmExchange, LlmExchangeRequest
+from core.agents.interfaces import BehaviorExecution
 from core.dataclasses.chat_message import ChatMessage
 from core.dataclasses.project import Project
 from core.dataclasses.projses import Projses
@@ -20,7 +20,7 @@ from core.services.llm_escalation_manager import LlmEscalationManager
 from llm_service.enums.eagent import EAgent
 
 
-class TesterAgent(IAgent):
+class TesterAgent:
     """
     Tester Agent for TDD enforcement and code quality verification.
     
@@ -64,7 +64,7 @@ class TesterAgent(IAgent):
         """
         self._project = await ProjectsService().get_project_by_id(self._session.project_id)
     
-    async def run(self, content: str) -> list[ChatMessage]:
+    async def run(self, content: str, request=None) -> list[ChatMessage]:
         """
         Process user input and execute appropriate behaviors.
         
@@ -84,17 +84,12 @@ class TesterAgent(IAgent):
             if ticket:
                 tier = self.escalation_manager.get_current_tier(ticket, "Tester")
         
-        response = await LlmExchange(
-            agent=self,
-            session=self._session,
-            content=content,
-            tier=tier,  # Use escalated tier if available
-            use_cloud=False  # Use local LLM for Tester
-        ).get_intent()
+        response = await LlmExchange(LlmExchangeRequest(agent=self, session=self._session, content=content, tier=tier, use_cloud=False)).get_intent()
         
         result_messages = []
+        execution = BehaviorExecution(agent=self, message=content, intent=response)
         for behavior in self.behaviors:
-            messages = await behavior.run(self, content, response)
+            messages = await behavior.run(execution)
             if messages:
                 if isinstance(messages, list):
                     result_messages.extend(messages)

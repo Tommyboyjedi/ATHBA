@@ -1,0 +1,163 @@
+"""Concrete feature scenario execution and final accepted-evidence reconciliation."""
+
+from __future__ import annotations
+
+import subprocess
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
+from core.development.microcycle_revision_service import MicrocycleRevisionLifecycle
+from core.development.microcycle_revision_state import (
+    RevisionBindingRequest,
+    RevisionInitialisationRequest,
+    RevisionRecoveryRequest,
+)
+from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
+from core.development.scenario_drafting import ScenarioDraftingService
+from core.development.scenario_drafting_domain import ScenarioDraftRequest, ScenarioRepositoryFacts
+from core.development.checklist_reconciliation_tree import (
+    ChecklistReconciliationTree, ChecklistTreeContext, validate_persisted_tree,
+)
+from core.development.reconciliation_progress import ReconciliationJournal, ReconciliationJournalRequest, evidence_digest
+from core.development.specification_domain import SpecificationChecklistItem
+from core.development.specification_reconciliation import (
+    ChecklistItemReconciler,
+    CompletedMicrocycleEvidenceCollector,
+    GitAcceptedTestCatalog,
+)
+from core.development.reconciliation_response import ReconciliationFailure
+from core.development.specification_evidence_routing import RoutedChecklistReconciler, required_source_subjects
+from core.development.microcycle_domain import MicrocycleState
+from core.development.strict_microcycle import StrictMicrocycleRequest, StrictMicrocycleService
+from core.development.strict_tdd_feature_application import (
+    FeatureReconciliationRequest,
+    FeatureScenarioRequest,
+    FeatureScenarioResult,
+)
+from core.development.tdd_progression import SpecificationGatekeeperRunState, TddStepProposal
+from core.execution.reasoning_gateway import ReasoningGateway
+
+
+@dataclass(frozen=True)
+class StrictFeatureScenarioDependencies:
+    drafting: ScenarioDraftingService
+    microcycles: StrictMicrocycleService
+    revisions: MicrocycleRevisionLifecycle
+    environment: ProjectEnvironmentService
+
+
+class StrictFeatureScenarioExecutor:
+    """Executes one selected behavior through draft, strict microcycles, and completion."""
+
+    def __init__(self, dependencies: StrictFeatureScenarioDependencies):
+        self.drafting = dependencies.drafting
+        self.microcycles = dependencies.microcycles
+        self.revisions = dependencies.revisions
+        self.synchronizer = TrustedProjectRevisionSynchronizer(dependencies.environment)
+
+    async def execute(self, request: FeatureScenarioRequest) -> FeatureScenarioResult:
+        from core.development.strict_tdd_feature_execution_advance import StrictFeatureScenarioRunLoop
+        return await StrictFeatureScenarioRunLoop(self).execute(request)
+
+    async def advance(self, request: FeatureScenarioRequest):
+        from core.development.strict_tdd_feature_execution_advance import advance
+        return await advance(self, request)
+
+
+@dataclass(frozen=True)
+class CompletedFeatureReconciler:
+    """Reconciles only completed strict-microcycle evidence against the final Git revision."""
+
+    repository_root: Path
+    state_store: MicrocycleStateRepo
+    reasoning_gateway: ReasoningGateway
+
+    async def reconcile(
+        self, request: FeatureReconciliationRequest
+    ) -> tuple[dict[str, object], ...]:
+        gatekeeper = SpecificationGatekeeperRunState.from_dict(request.gatekeeper_payload)
+        states = [self._state(item.scenario_id) for item in request.completed_behaviors]
+        accepted = CompletedMicrocycleEvidenceCollector().collect(states)
+        catalog = GitAcceptedTestCatalog(self.repository_root, request.canonical_revision)
+        item_reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(self.reasoning_gateway, catalog), catalog)
+        requested_subjects = required_source_subjects(gatekeeper.checklist)
+        languages = {state.model.language_id for state in states}
+        language = next(iter(languages)) if len(languages) == 1 else ""
+        identity = evidence_digest({
+            "checklist": gatekeeper.checklist.to_dict(), "language": language,
+            "repository": str(self.repository_root.resolve()),
+            "accepted": [{"evidence": evidence.to_dict(), "verified_source": catalog.verified_source(evidence)}
+                         for evidence in sorted(accepted, key=lambda entry: entry.test_name)],
+        })
+        journal = ReconciliationJournal(ReconciliationJournalRequest(
+            request.canonical_revision, identity, request.reconciliation_progress, request.checkpoint,
+            tuple(gatekeeper.checklist.item_refs())))
+        roots = [SpecificationChecklistItem.from_dict(item.to_dict()) for item in gatekeeper.checklist.items]
+        validate_persisted_tree(journal, roots)
+        tree = ChecklistReconciliationTree(journal, self.reasoning_gateway)
+        results: list[dict[str, object]] = []
+        for item in roots:
+            try:
+                context = ChecklistTreeContext(item_reconciler, gatekeeper.checklist.project_id,
+                    gatekeeper.checklist.requirement_text, accepted, language,
+                    requested_subjects, request.canonical_revision, item)
+                results.extend(await tree.reconcile(context))
+            except ReconciliationFailure as error:
+                completed = tuple(dict(entry.result) for entry in journal.items if entry.result is not None)
+                raise replace(error, completed_results=completed) from error
+        return tuple(results)
+
+    def _state(self, scenario_id: str):
+        state = self.state_store.load(scenario_id)
+        if state is None:
+            raise ValueError("completed behavior evidence state is unavailable")
+        return state
+
+
+def canonical_test_node_for(contract: BehaviorContract, behavior_ref: str) -> str:
+    index = contract.requirement_refs().index(behavior_ref)
+    test_path = contract.test_paths[min(index, len(contract.test_paths) - 1)]
+    name = "test_" + "".join(char if char.isalnum() else "_" for char in behavior_ref).strip("_")
+    return f"{test_path}::{name}"
+
+
+def _ticket_for(request: FeatureScenarioRequest) -> TddStepProposal:
+    index = request.contract.requirement_refs().index(request.behavior.ref)
+    test_path = request.contract.test_paths[min(index, len(request.contract.test_paths) - 1)]
+    production_path = request.contract.production_paths[0]
+    name = canonical_test_node_for(request.contract, request.behavior.ref).partition("::")[2]
+    # TODO(cleanup): Behavior Planner test_hint is stored as red_objective here, but the
+    # strict-TDD Tester payload does not consume red_objective. Wire the advisory hint through or remove the dead handoff.
+    return TddStepProposal(
+        request.behavior.ref, [request.behavior.ref], request.behavior.summary,
+        f"{test_path}::{name}", request.behavior.observable_outcome, test_path, production_path,
+        request.behavior.test_hint, request.behavior.observable_outcome,
+        "next dependency-ready observable behavior",
+    )
+
+
+def _facts(root: Path, revision: str, ticket: TddStepProposal) -> ScenarioRepositoryFacts:
+    paths = tuple(_git(root, "ls-tree", "-r", "--name-only", revision).splitlines())
+    return ScenarioRepositoryFacts(
+        revision, paths, _show(root, revision, ticket.production_path),
+        _show(root, revision, ticket.test_path),
+    )
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+
+def _show(root: Path, revision: str, path: str) -> str:
+    result = subprocess.run(
+        ["git", "show", f"{revision}:{path}"], cwd=root, capture_output=True, text=True, check=False
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _evidence(state: MicrocycleState) -> tuple[str, ...]:
+    values = tuple(state.regression.evidence_refs)
+    review = tuple(state.behavior_review.evidence_refs)
+    return values + review or (f"microcycle:{state.scenario_draft.scenario_id}",)

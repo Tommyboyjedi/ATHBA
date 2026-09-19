@@ -1,5 +1,6 @@
 from core.dataclasses.project import Project
 from core.datastore.repos.code_repo import CodeRepo
+from core.datastore.repos.mongo_requests import CodeFileSaveRequest, MongoFindRequest
 from core.datastore.repos.project_repo import ProjectRepo
 from core.datastore.repos.spec_version_repo import SpecVersionRepo
 from core.datastore.repos.ticket_repo import TicketRepo
@@ -17,8 +18,7 @@ class ProjectsService:
         return await self.project_repo.list_all()
 
     async def list_active_projects(self) -> list[Project]:
-        projects = await self.project_repo.list_all()
-        return [project for project in projects if project.active]
+        return await self.project_repo.list_active()
 
     async def get_project_by_id(self, project_id: str) -> Project:
         return await self.project_repo.get_by_id(project_id)
@@ -43,14 +43,19 @@ class ProjectsService:
     def get_code_file(self, project_id: str, filename: str) -> str:
         return self.code_repo.get_file(project_id, filename)
 
-    def save_code_file(self, project_id: str, filename: str, code: str):
-        self.code_repo.save_file(project_id, filename, code)
+    def save_code_file(self, request_or_project_id, *args):
+        if isinstance(request_or_project_id, CodeFileSaveRequest):
+            self.code_repo.save_file(request_or_project_id)
+            return
+        self.code_repo.save_file(request_or_project_id, *args)
 
     async def get_milestones(self, project_id: str) -> list[dict]:
         return await self.project_repo.get_milestones(project_id)
 
     async def get_latest_spec(self, project_id: str) -> dict | None:
-        versions = await self.spec_repo.find({"project_id": project_id}, sort=[("version", -1)], limit=1)
+        versions = await self.spec_repo.find(
+            MongoFindRequest(filter={"project_id": project_id}, sort=[("version", -1)], limit=1)
+        )
         return versions[0] if versions else None
 
     async def get_latest_ticket(self, project_id: str):
