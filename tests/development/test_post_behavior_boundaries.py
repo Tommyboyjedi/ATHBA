@@ -22,7 +22,7 @@ from core.development.specification_evidence_policy import RevisionFile, Specifi
 from core.execution.local_only_post_behavior_reasoning import LocalOnlyPostBehaviorReasoning
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_request import RepositoryBinding
-from core.execution.rack_ai_workspace_connector import RackAiV2WorkspaceSerializer
+from core.execution.rack_ai_workspace_connector import RackAiWorkspaceSerializer
 from core.execution.reasoning_gateway import ReasoningRequest
 from core.execution.workspace_execution_port import WorkspaceExecutionResult, WorkspaceExecutionStatus
 from core.llm.contracts.provider import NormalizedResult, ProviderRetryPolicy
@@ -220,12 +220,11 @@ def test_refactor_request_has_only_one_objective_and_production_tests_not_writab
     }
     assert TEST not in request.objective
     assert "SENTINEL" not in request.objective
-    payload = RackAiV2WorkspaceSerializer().serialize(request)
-    routing = payload["work_unit"]["routing"]
-    assert routing["required_capabilities"] == ["coding"]
-    assert routing["priority"] == "low"
-    assert payload["work_unit"]["requirements"] == {"complexity": "small", "requires_large_context": False}
-    assert payload["work_unit"]["limits"]["max_implementation_attempts"] == 1
+    payload = RackAiWorkspaceSerializer().serialize(request)
+    assert payload["service"] == "local-coder"
+    assert "priority" not in payload
+    assert payload["payload"]["workspace"]["requirements"] == {"complexity": "small", "requires_large_context": False}
+    assert payload["payload"]["workspace"]["limits"]["max_implementation_attempts"] == 1
     serialized = json.dumps(payload)
     for forbidden in ("Naming Assessor", "Renamer", "Refactor Assessor", "Refactorer",
                       "Gatekeeper", "post_behavior", "worker_id", "model_id", "endpoint",
@@ -276,8 +275,8 @@ def test_authorized_readonly_runtime_resources_survive_generic_serialization():
     request = PostBehaviorWorkspaceRequests().refactor(
         input_value, RefactorOpportunity("Remove duplicate computation.", "Avoid repeated work."),
     )
-    payload = RackAiV2WorkspaceSerializer().serialize(request)
-    assert payload["work_unit"]["environment_resources"] == ["/srv/ATHBA/.venv"]
+    payload = RackAiWorkspaceSerializer().serialize(request)
+    assert payload["payload"]["workspace"]["environment_resources"] == ["/srv/ATHBA/.venv"]
     assert request.allowed_writable_paths == ("subject.py",)
     assert "/srv/ATHBA/.venv" not in request.objective
 

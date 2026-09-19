@@ -1,5 +1,7 @@
 """Persisted feature transitions for exhausted-parent recovery."""
 from __future__ import annotations
+from core.execution.rack_ai_runtime import RackAiResourceWait
+from core.execution.provider_reasoning_gateway import wait_for_reasoning
 
 from dataclasses import dataclass, replace
 
@@ -76,10 +78,14 @@ async def advance_replan(
         if len(state.behavior_replans) > service.replan_policy.max_splits:
             return _block(service, context, replace(record, blocker=BehaviorReplanBlocker.UNSPLITTABLE,
                           detail="Configured total split safety budget reached; human escalation required."))
+        await wait_for_reasoning(service.contract_planner.gateway)
         started = replace(record, phase=BehaviorReplanPhase.STARTED)
         service.states.save(_with_record(state, started))
         try:
             response = await service.contract_planner.replan_requirement(record.request)
+        except RackAiResourceWait:
+            service.states.save(state)
+            raise
         except BehaviorReplanFailure as error:
             return _block(service, context, replace(started, blocker=error.kind, detail=error.detail,
                                                    rejected_response=error.raw_response))

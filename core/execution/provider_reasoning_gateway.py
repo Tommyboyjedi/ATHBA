@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from core.execution.reasoning_gateway import ReasoningRequest, ReasoningResult
+from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
 from core.llm.contracts.provider import Provider, ProviderRequest
 
 
@@ -15,6 +15,11 @@ class ProviderReasoningGateway:
     model: str
     temperature: float = 0.0
     max_tokens: int = 4096
+
+    async def wait_ready(self) -> None:
+        access = getattr(self.provider, "runtime_access", None)
+        if access is not None:
+            await asyncio.to_thread(access.reservation.ready, access.service)
 
     async def reason(self, request: ReasoningRequest) -> ReasoningResult:
         provider_request = ProviderRequest(
@@ -32,3 +37,9 @@ class ProviderReasoningGateway:
         if model_name is not None:
             model_name = str(model_name)
         return ReasoningResult(text=result.text, provider=provider_name, model=model_name or self.model)
+
+
+async def wait_for_reasoning(gateway: ReasoningGateway) -> None:
+    ready = getattr(gateway, "wait_ready", None)
+    if ready is not None:
+        await ready()

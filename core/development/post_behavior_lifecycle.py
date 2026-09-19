@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from core.execution.rack_ai_reservation import RackAiReservation
+from core.execution.rack_ai_runtime import RackAiResourceWait
 
 from core.development.post_behavior_assessment_transition import PostBehaviorAssessmentTransition
 from core.development.post_behavior_change_transition import PostBehaviorChangeTransition
@@ -22,6 +24,8 @@ class PostBehaviorLifecycle:
     def __init__(self, repository: PostBehaviorStateRepository, ports: PostBehaviorPorts):
         self.repository = repository
         self.ports = ports
+        self.reservation: RackAiReservation | None = None
+        self.reasoning_service = "local-primary"
 
     def start(self, entry: PostBehaviorEntry, policy: PostBehaviorPolicy | None = None) -> PostBehaviorState:
         prior = self.repository.load(entry.delivery_id)
@@ -39,23 +43,47 @@ class PostBehaviorLifecycle:
         if state is None:
             raise ValueError("post-behavior processing requires a persisted Gatekeeper-approved entry")
         if state.terminal:
+            self.stop()
             return state
+        if self.reservation is not None:
+            active = state.active_pass
+            self.reservation.transition(f"{state.status.value}:{len(state.passes)}:{active.submission_id if active else ''}")
         journal = PostBehaviorJournal(self.repository, state)
+        journal.reservation = self.reservation
+        journal.reasoning_service = self.reasoning_service
         if not restart_safe(state):
+            self.stop()
             return journal.blocked(PostBehaviorReason.INTERRUPTED_CALL,
                                    f"{state.pending_call.value} began without a durable result")
         try:
-            return await PostBehaviorTransitionDispatch(journal, self.ports).advance()
+            result = await PostBehaviorTransitionDispatch(journal, self.ports).advance()
+            if self.reservation is not None:
+                self.reservation.mark_workspace(None)
+            if result.terminal:
+                self.stop()
+            return result
+        except RackAiResourceWait as error:
+            journal.persist(replace(journal.state, pending_call=PostBehaviorCall.NONE, diagnostic=str(error)))
+            raise
         except Exception as error:
+            self.stop()
             if journal.state.pending_call == PostBehaviorCall.PROMOTION:
                 raise
             return journal.blocked(PostBehaviorReason.HUMAN_INTERVENTION,
                                    f"{type(error).__name__}: {error}")
+        except BaseException:
+            self.stop()
+            raise
+
+    def stop(self) -> None:
+        if self.reservation is not None:
+            self.reservation.finish()
 
     async def run(self, delivery_id: str) -> PostBehaviorState:
         state = await self.advance(delivery_id)
         while not state.terminal:
             state = await self.advance(delivery_id)
+        self.stop()
         return state
 
 
@@ -87,6 +115,9 @@ class PostBehaviorTransitionDispatch:
 
 
 def restart_safe(state: PostBehaviorState) -> bool:
+    if (state.pending_call == PostBehaviorCall.MUTATION and state.active_pass is not None
+            and state.rack_ai is not None and state.rack_ai.pending_workspace is not None):
+        return state.active_pass.submission_id is not None
     if state.pending_call in RESTART_SAFE_CALLS:
         return True
     if state.pending_call != PostBehaviorCall.GATEKEEPER or state.active_pass is None:

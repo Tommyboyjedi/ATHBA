@@ -1,6 +1,7 @@
 """Deterministic fake for ATHBA workspace-port tests."""
 from __future__ import annotations
 from dataclasses import dataclass, field
+from core.development.athba_workspace_routing import AthbaWorkspaceIdentity
 from core.execution.workspace_execution_port import WorkspaceExecutionRequest, WorkspaceExecutionResult, WorkspaceExecutionStatus
 
 @dataclass(frozen=True)
@@ -37,8 +38,8 @@ class DeterministicFakeWorkspacePort:
         self._results[request.identity.submission_id] = result
         return result
 
-    def get_result(self, submission_id: str) -> WorkspaceExecutionResult | None:
-        return self._results.get(submission_id)
+    def get_result(self, identity: AthbaWorkspaceIdentity) -> WorkspaceExecutionResult | None:
+        return self._results.get(identity.submission_id)
 
     def cancel(self, submission_id: str) -> bool:
         return self._results.pop(submission_id, None) is not None

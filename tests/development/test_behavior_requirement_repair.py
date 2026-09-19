@@ -466,3 +466,15 @@ asyncio.run(main())
                            capture_output=True, text=True, timeout=30)
     assert child.returncode == 0, child.stdout + child.stderr
     assert len(gateway.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_resource_wait_preserves_requirement_repair_budget(tmp_path):
+    from core.execution.rack_ai_runtime import RackAiResourceWait
+    app, gateway, store, state = await setup(tmp_path, RackAiResourceWait("preparing"))
+    await app.advance(request())
+    before = app.states.load("feature")
+    assert before.behavior_repairs[-1].phase == BehaviorRepairPhase.REQUIRED
+    with pytest.raises(RackAiResourceWait):
+        await app.advance(request())
+    assert app.states.load("feature") == before

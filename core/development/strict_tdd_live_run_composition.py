@@ -30,6 +30,13 @@ from core.execution.reasoning_gateway import ReasoningGateway
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway
 from core.llm.contracts.provider import ProviderRetryPolicy
 from core.llm.providers.openai_provider import OpenAIProvider
+from core.execution.rack_ai_runtime import RackAiRuntimeConfiguration, RackAiRuntimeClient
+from core.execution.rack_ai_reservation import RackAiReservation
+from core.execution.rack_ai_scoped_access import RackAiScopedAccess
+from core.execution.rack_ai_workspace_runtime import RackAiWorkspaceRuntime
+from core.execution.rack_ai_workspace_connector import RackAiWorkspaceConnector
+from core.execution.profiled_workspace_gateway import ProfiledWorkspaceExecutionGateway, ProfiledWorkspaceGatewayDependencies
+from core.development.athba_workspace_routing import AthbaExecutionProfileResolver
 
 
 @dataclass(frozen=True)
@@ -83,14 +90,26 @@ class StrictTddLiveRunCompositionFactory:
         diagnostic = self.preflight.check(config.state_root / "probe-preflight")
         if diagnostic.kind != "green":
             raise PythonProbePreflightError(diagnostic)
-        reasoning = request.reasoning_gateway or self._live_reasoning(config)
+        reservation = None
+        execution = request.execution_gateway
+        reasoning = request.reasoning_gateway
+        if execution is None or reasoning is None:
+            services = {"local-primary", "local-coder"} if execution is None else set()
+            if reasoning is None:
+                services.add(config.reasoning_model)
+            reservation = RackAiReservation(RackAiRuntimeClient(RackAiRuntimeConfiguration.from_env()), tuple(sorted(services)))
+            if execution is None:
+                execution = ProfiledWorkspaceExecutionGateway(ProfiledWorkspaceGatewayDependencies(
+                    RackAiWorkspaceConnector(RackAiWorkspaceRuntime(reservation)), AthbaExecutionProfileResolver()))
+            if reasoning is None:
+                reasoning = self._live_reasoning(config, reservation)
         feature = StrictTddFeatureCompositionFactory().build(
             StrictTddCompositionRequest(
                 config.state_root,
                 config.repository_root,
                 config.workload_id,
                 reasoning,
-                request.execution_gateway,
+                execution,
             )
         )
         lifecycle = StrictTddLifecycleEventRepository(config.state_root / "lifecycle-events")
@@ -108,6 +127,7 @@ class StrictTddLiveRunCompositionFactory:
                 lifecycle,
                 StrictTddRunEvidenceSnapshotCollector(evidence),
                 StrictTddRunReportWriter(config.evidence_root),
+                reservation,
             )
         )
         return StrictTddLiveRunComposition(
@@ -116,6 +136,8 @@ class StrictTddLiveRunCompositionFactory:
             config.rack_ai_revision or self.versions.resolve(Path("/srv/rack-ai")),
         )
 
-    def _live_reasoning(self, config: StrictTddLiveRunConfiguration) -> ReasoningGateway:
+    def _live_reasoning(self, config: StrictTddLiveRunConfiguration, reservation: RackAiReservation) -> ProviderReasoningGateway:
         policy = ProviderRetryPolicy(timeout=300.0, max_retries=1, backoff_factor=2.0)
-        return ProviderReasoningGateway(OpenAIProvider(policy=policy), config.reasoning_model)
+        provider = OpenAIProvider(policy=policy)
+        provider.runtime_access = RackAiScopedAccess(reservation, config.reasoning_model)
+        return ProviderReasoningGateway(provider, config.reasoning_model)

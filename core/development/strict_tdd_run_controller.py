@@ -7,6 +7,10 @@ import json
 from pathlib import Path
 from typing import Protocol
 
+from core.execution.rack_ai_reservation import RackAiReservation
+from core.execution.rack_ai_reservation_state import ReservationBinding
+from core.execution.rack_ai_runtime import RackAiResourceWait
+
 from core.development.strict_tdd_feature_application import StrictTddFeatureApplicationService
 from core.development.reconciliation_resume import reconciliation_resume_available
 from core.development.strict_tdd_lifecycle_evidence import (
@@ -54,12 +58,14 @@ class StrictTddRunControllerDependencies:
     lifecycle: StrictTddLifecycleEventRepository
     snapshots: StrictTddRunEvidenceSnapshotCollector
     reports: StrictTddRunReportWriter
+    reservation: RackAiReservation | None = None
 
 
 class StrictTddRunController:
     """Owns durable delivery, stopping, and reporting, not feature routing."""
 
     def __init__(self, dependencies: StrictTddRunControllerDependencies):
+        self.reservation = dependencies.reservation
         self.application = dependencies.application
         self.states = dependencies.states
         self.lifecycle = dependencies.lifecycle
@@ -84,10 +90,25 @@ class StrictTddRunController:
 
     async def _advance(self, request: StrictTddRunRequest, announce_resume: bool) -> StrictTddRunResult:
         state, context = _prepare(self, request, announce_resume)
+        if self.reservation is not None:
+            try:
+                self.reservation.bind(ReservationBinding(self.states, request.run_id))
+            except RackAiResourceWait as error:
+                if state.status in {StrictTddRunStatus.COMPLETED, StrictTddRunStatus.BLOCKED,
+                                    StrictTddRunStatus.STALLED, StrictTddRunStatus.RECOVERY_REQUIRED}:
+                    raise
+                waiting = replace(state, status=StrictTddRunStatus.RESOURCE_WAITING, reason=str(error))
+                self.states.save(waiting)
+                return _report_result(self, context, waiting, None)
+            self.reservation.transition(str(state.total_application_transition_count + 1))
+        if state.status == StrictTddRunStatus.RESOURCE_WAITING:
+            state = replace(state, status=StrictTddRunStatus.RUNNING, reason=None)
         if state.pending_transition_receipt is not None:
             return _deliver(self, request, state, context, state.pending_transition_receipt)
         if state.transition_in_flight is not None:
-            if not reconciliation_resume_available(self.application.states.load(request.project_id)):
+            access = self.states.load_reservation(request.run_id)
+            resumable = access is not None and (access.waiting_service is not None or access.pending_workspace is not None)
+            if not resumable and not reconciliation_resume_available(self.application.states.load(request.project_id)):
                 return _recover_required(self, request, state, context)
             state = replace(state, status=StrictTddRunStatus.RUNNING, reason=None)
 
@@ -98,7 +119,14 @@ class StrictTddRunController:
         self.states.save(running)
         try:
             transition = await self.application.advance(request.feature_request())
-        except Exception:
+        except RackAiResourceWait as error:
+            waiting = replace(running, status=StrictTddRunStatus.RESOURCE_WAITING,
+                              transition_in_flight=None, reason=str(error))
+            self.states.save(waiting)
+            return _report_result(self, context, waiting, None)
+        except BaseException:
+            if self.reservation is not None:
+                self.reservation.finish()
             self.states.save(
                 replace(
                     running,
@@ -107,10 +135,16 @@ class StrictTddRunController:
                 )
             )
             raise
+        if self.reservation is not None:
+            self.reservation.mark_workspace(None)
         receipt = self.receipts.create(transition, marker.occurrence)
         pending = replace(running, transition_in_flight=None, pending_transition_receipt=receipt)
         self.states.save(pending)
         return _deliver(self, request, pending, context, receipt)
+
+    def stop(self) -> None:
+        if self.reservation is not None:
+            self.reservation.finish()
 
     async def run(self, request: StrictTddRunRequest) -> StrictTddRunResult:
         remaining = request.configuration.max_application_transitions_per_invocation
@@ -263,6 +297,9 @@ def _required_state(self, request: StrictTddRunRequest) -> StrictTddRunState:
     return state
 
 def _report_result(self, context: StrictTddLifecycleRunContext, state: StrictTddRunState, event: StrictTddLifecycleEvent | None) -> StrictTddRunResult:
+    if self.reservation is not None and state.status not in {StrictTddRunStatus.RUNNING, StrictTddRunStatus.RESOURCE_WAITING}:
+        self.reservation.finish()
+    state = self.states.load(state.run_id) or state
     paths = self.reports.write(state.run_id, self.snapshots.collect(context, state))
     saved = replace(state, structured_report_path=paths.structured, markdown_report_path=paths.markdown)
     self.states.save(saved)

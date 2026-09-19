@@ -1,6 +1,8 @@
 """Reconcile an independent checklist only against accepted TDD test evidence."""
 
 from __future__ import annotations
+from core.execution.rack_ai_runtime import RackAiResourceWait
+from core.execution.provider_reasoning_gateway import wait_for_reasoning
 
 import ast
 import hashlib
@@ -226,10 +228,15 @@ class ChecklistItemReconciler:
                         saved.rationale, tuple(submissions), (evidence.test_name,), tuple(attempts))
                 continue
             single = replace(request, accepted=[evidence])
+            await wait_for_reasoning(self.gateway)
             if request.before_call is not None:
                 request.before_call()
             try:
                 submission = await ReconciliationSubmission(self.gateway).submit(_reasoning_request(single))
+            except RackAiResourceWait:
+                if request.checkpoint is not None:
+                    request.checkpoint(tuple(progress))
+                raise
             except ReconciliationFailure as error:
                 raise replace(error, checklist_ref=request.checklist_ref,
                               accepted_test_names=(evidence.test_name,)) from error

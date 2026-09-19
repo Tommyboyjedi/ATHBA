@@ -1,5 +1,7 @@
 """Restartable recursive checklist evaluation using feature-owned checkpoints."""
 from __future__ import annotations
+from core.execution.rack_ai_runtime import RackAiResourceWait
+from core.execution.provider_reasoning_gateway import wait_for_reasoning
 
 from dataclasses import dataclass, replace
 
@@ -113,12 +115,17 @@ class ChecklistReconciliationTree:
                                                    rejection_reason="split_depth_exhausted"))
             return
         item = context.item
+        await wait_for_reasoning(self.planner.gateway)
         checkpoint.before_split()
-        split = await self.planner.split_item(ChecklistSplitRequest(
-            context.project_id, context.source, item.ref, item.text, item.kind, item.modality,
-            item.source_quote, item.subject,
-            tuple(attempt.to_dict() for attempt in checkpoint.state.individual_attempts),
-            context.revision, context.ancestry))
+        try:
+            split = await self.planner.split_item(ChecklistSplitRequest(
+                context.project_id, context.source, item.ref, item.text, item.kind, item.modality,
+                item.source_quote, item.subject,
+                tuple(attempt.to_dict() for attempt in checkpoint.state.individual_attempts),
+                context.revision, context.ancestry))
+        except RackAiResourceWait:
+            checkpoint.save(replace(checkpoint.state, pending_call=PendingReconciliationCall.NONE))
+            raise
         occupied = {entry.item.ref for entry in self.journal.items} | set(self.journal.request.root_refs)
         if any(child.ref in occupied for child in split.children):
             checkpoint.split(ChecklistSplitProgress("unsplittable", split.rationale,
