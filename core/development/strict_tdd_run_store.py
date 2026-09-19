@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from core.execution.rack_ai_reservation_state import RackAiReservationState, ReservationRecord
 
 from core.atomic_json_file import read_json_file, write_json_atomically
 from core.development.strict_tdd_run_domain import StrictTddRunState
@@ -22,7 +23,14 @@ class StrictTddRunStateRepository:
             raise ValueError("malformed strict TDD run state document") from error
 
     def save(self, state: StrictTddRunState) -> None:
-        write_json_atomically(self._path_for(state.run_id), state.to_dict())
+        path = self._path_for(state.run_id)
+        write_json_atomically(path, ReservationRecord(path).preserve(state.to_dict()))
+
+    def load_reservation(self, identity: str) -> RackAiReservationState | None:
+        return ReservationRecord(self._path_for(identity)).load()
+
+    def save_reservation(self, identity: str, state: RackAiReservationState) -> None:
+        ReservationRecord(self._path_for(identity)).save(state)
 
     def exists(self, run_id: str) -> bool:
         return self._path_for(run_id).exists()

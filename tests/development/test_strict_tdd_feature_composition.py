@@ -135,11 +135,10 @@ class Gatekeeper:
         return SpecificationGatekeeperRunState(checklist)
 
 
-def test_default_composition_uses_profiled_v2_workspace_gateway(tmp_path):
-    composition = StrictTddFeatureCompositionFactory().build(StrictTddCompositionRequest(tmp_path / "state", tmp_path / "repository", "feature", DeterministicReasoning()))
-    assert isinstance(composition.rack_ai, ProfiledWorkspaceExecutionGateway)
-    assert composition.rack_ai.port.__class__.__name__ == "RackAiWorkspaceConnector"
-    assert composition.rack_ai.port.transport.__class__.__name__ == "RackAiWorkspaceCliTransport"
+def test_production_execution_requires_durable_run_composition(tmp_path):
+    with pytest.raises(ValueError, match="durable run composition"):
+        StrictTddFeatureCompositionFactory().build(StrictTddCompositionRequest(
+            tmp_path, tmp_path / "repository", "feature", DeterministicReasoning()))
 
 
 def feature_request():

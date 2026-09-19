@@ -412,3 +412,15 @@ async def test_feature_infrastructure_exhaustion_blocks_without_planner(tmp_path
     assert result.blocked_reason == "attempts_exhausted"
     assert gateway.requests == [] and reconciler.calls == []
     assert not app.states.load("feature").behavior_replans
+
+
+@pytest.mark.asyncio
+async def test_resource_wait_preserves_planner_replan_budget(tmp_path):
+    from core.execution.rack_ai_runtime import RackAiResourceWait
+    app, gateway, *_ = await pending_application(tmp_path, RackAiResourceWait("held"))
+    before = app.states.load("feature")
+    for _ in range(2):
+        with pytest.raises(RackAiResourceWait):
+            await app.advance(request())
+        assert app.states.load("feature") == before
+    assert before.behavior_replans[-1].phase == BehaviorReplanPhase.REQUIRED

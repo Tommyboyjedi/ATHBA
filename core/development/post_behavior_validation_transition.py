@@ -31,18 +31,21 @@ class PostBehaviorValidationTransition:
         return await self._promote()
 
     async def _tests(self) -> PostBehaviorState:
+        await self.journal.wait_ready(PostBehaviorCall.TESTS)
         self.journal.mark(PostBehaviorCall.TESTS)
         evidence = await self.ports.validation.test_candidate(self.journal.state)
         return self.journal.persist(replace(self.journal.state, active_pass=replace(
             self.journal.active(), tests=evidence), pending_call=PostBehaviorCall.NONE))
 
     async def _gatekeeper(self) -> PostBehaviorState:
+        await self.journal.wait_ready(PostBehaviorCall.GATEKEEPER)
         self.journal.mark(PostBehaviorCall.GATEKEEPER)
         evidence = await self.ports.validation.reconcile_candidate(self.journal.state, self.journal.checkpoint)
         return self.journal.persist(replace(self.journal.state, active_pass=replace(
             self.journal.active(), gatekeeper=evidence), pending_call=PostBehaviorCall.NONE))
 
     async def _promote(self) -> PostBehaviorState:
+        await self.journal.wait_ready(PostBehaviorCall.PROMOTION)
         self.journal.mark(PostBehaviorCall.PROMOTION)
         evidence = await self.ports.promotion.promote_candidate(self.journal.state)
         active = self.journal.active()

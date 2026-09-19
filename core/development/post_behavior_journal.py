@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import asyncio
+from core.execution.rack_ai_reservation import RackAiReservation
 
 from core.development.post_behavior_domain import (
     PostBehaviorCall, PostBehaviorOutcome, PostBehaviorPass, PostBehaviorReason,
@@ -15,12 +17,21 @@ class PostBehaviorJournal:
     def __init__(self, repository: PostBehaviorStateRepository, state: PostBehaviorState):
         self.repository = repository
         self.state = state
+        self.reservation: RackAiReservation | None = None
+        self.reasoning_service = "local-primary"
 
     def persist(self, state: PostBehaviorState) -> PostBehaviorState:
         updated = replace(state, generation=self.state.generation + 1)
         self.repository.save(updated)
         self.state = updated
         return updated
+
+    async def wait_ready(self, call: PostBehaviorCall) -> None:
+        if call == PostBehaviorCall.MUTATION and self.state.rack_ai is not None and self.state.rack_ai.pending_workspace:
+            return  # Reconcile the existing work even while its service is Held.
+        if self.reservation is not None and call not in {PostBehaviorCall.TESTS, PostBehaviorCall.PROMOTION}:
+            service = "local-coder" if call == PostBehaviorCall.MUTATION else self.reasoning_service
+            await asyncio.to_thread(self.reservation.ready, service)
 
     def mark(self, call: PostBehaviorCall) -> None:
         self.persist(replace(self.state, pending_call=call))

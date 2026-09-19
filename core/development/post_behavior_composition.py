@@ -22,7 +22,12 @@ from core.development.post_behavior_validation import (
 from core.development.project_environment import ProjectEnvironmentService
 from core.execution.local_only_post_behavior_reasoning import LocalOnlyPostBehaviorReasoning
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
-from core.execution.rack_ai_workspace_cli_transport import RackAiWorkspaceCliConfig, RackAiWorkspaceCliTransport
+from core.execution.rack_ai_runtime import RackAiRuntimeClient, RackAiRuntimeConfiguration
+from core.execution.rack_ai_reservation import RackAiReservation
+from core.execution.rack_ai_reservation_state import ReservationBinding
+from core.execution.rack_ai_scoped_access import RackAiScopedAccess
+from core.execution.rack_ai_workspace_runtime import RackAiWorkspaceRuntime
+from core.llm.providers.openai_provider import OpenAIProvider
 from core.execution.rack_ai_workspace_connector import RackAiWorkspaceConnector
 from core.execution.workspace_execution_port import AiWorkspaceExecutionPort
 
@@ -54,6 +59,16 @@ class PostBehaviorCompositionFactory:
         delivery = AcceptedBehavioralDeliveryLoader(request.state_root).load(request.project_id)
         repository = PostBehaviorStateRepository(request.state_root / "post-behavior")
         evidence = PostBehaviorEvidenceStore(repository.root / request.project_id / "evidence")
+        reservation = None
+        execution = request.execution
+        if execution is None:
+            reservation = RackAiReservation(RackAiRuntimeClient(RackAiRuntimeConfiguration.from_env()),
+                                            tuple(sorted({request.reasoning.model, "local-coder"})))
+            provider = request.reasoning.provider
+            if type(provider) is not OpenAIProvider:
+                raise ValueError("managed post-behavior reasoning requires the local OpenAI provider")
+            provider.runtime_access = RackAiScopedAccess(reservation, request.reasoning.model)
+            execution = RackAiWorkspaceConnector(RackAiWorkspaceRuntime(reservation))
         local = LocalOnlyPostBehaviorReasoning(request.reasoning, PostBehaviorReasoningRecorder(evidence))
         git = PostBehaviorGit(Path(delivery.project.repository_root))
         source = PostBehaviorSource(git)
@@ -61,13 +76,17 @@ class PostBehaviorCompositionFactory:
         ports = PostBehaviorPorts(
             PostBehaviorAssessors(PostBehaviorAssessorDependencies(delivery, source, local, evidence)),
             PostBehaviorMutation(PostBehaviorMutationDependencies(delivery, source,
-                request.execution or RackAiWorkspaceConnector(RackAiWorkspaceCliTransport(RackAiWorkspaceCliConfig())),
+                execution,
                 evidence)),
             PostBehaviorValidators(PostBehaviorTestValidation(delivery, authority, evidence),
                 PostBehaviorGatekeeper(PostBehaviorGatekeeperDependencies(delivery, authority, evidence, local))),
             PostBehaviorPromotion(ProjectEnvironmentService(request.state_root / "projects"), git))
         lifecycle = PostBehaviorLifecycle(repository, ports)
         current = lifecycle.start(delivery.entry)
+        lifecycle.reservation = reservation
+        lifecycle.reasoning_service = request.reasoning.model
+        if reservation is not None:
+            reservation.bind(ReservationBinding(repository, delivery.entry.delivery_id))
         legal = {current.current_post_behavior_revision}
         active = current.active_pass
         if active is not None and active.candidate is not None and active.tests is not None and active.gatekeeper is not None:

@@ -172,3 +172,58 @@ async def test_identical_nested_state_with_same_path_still_stalls(tmp_path):
 
     assert repeated.status == StrictTddRunStatus.STALLED
     assert repeated.reason == "stable_transition_fingerprint_stalled"
+
+
+@pytest.mark.asyncio
+async def test_resource_wait_preserves_transition_budget_and_completion_releases_once(tmp_path):
+    from tests.execution.test_rack_ai_runtime_reservations import Runtime, operations
+    from core.execution.rack_ai_reservation import RackAiReservation
+    from core.execution.rack_ai_runtime import RackAiResourceWait
+
+    completed = replace(transition(), kind=FeatureTransitionKind.FEATURE_COMPLETED,
+                        transition_path=StrictTddTransitionPath(FeatureTransitionKind.FEATURE_COMPLETED))
+    value = controller(tmp_path, [RackAiResourceWait("held"), completed])
+    runtime = Runtime(tmp_path)
+    value.reservation = RackAiReservation(runtime, ("local-primary", "local-coder"))
+    original = value.application.advance
+    async def with_access(request):
+        value.reservation.ready("local-coder")
+        return await original(request)
+    value.application.advance = with_access
+    result = await value.advance(request())
+    assert result.status == StrictTddRunStatus.RESOURCE_WAITING
+    state = value.states.load("run-one")
+    assert state.total_application_transition_count == 0
+    assert state.transition_in_flight is None and state.pending_transition_receipt is None
+    assert state.rack_ai.reservation_id == "R1"
+    assert not operations(runtime, "release_reservation")
+
+    result = await value.advance(request(StrictTddRunMode.RESUME))
+    assert result.status == StrictTddRunStatus.COMPLETED
+    value.stop()
+    assert len(operations(runtime, "reserve")) == 1
+    assert len(operations(runtime, "release_reservation")) == 1
+    assert value.states.load("run-one").rack_ai.released
+
+
+@pytest.mark.asyncio
+async def test_completed_campaign_is_not_reopened_by_resume_transport_error(tmp_path, monkeypatch):
+    from tests.execution.test_rack_ai_runtime_reservations import Runtime
+    from core.execution.rack_ai_reservation import RackAiReservation
+    from core.execution.rack_ai_reservation_state import ReservationBinding
+    from core.execution.rack_ai_runtime import RackAiResourceWait, RackAiRuntimeError
+    value = controller(tmp_path, [])
+    value.states.save(StrictTddRunState("run-one", "project-one", request().immutable_identity_hash,
+                                      StrictTddRunStatus.COMPLETED))
+    runtime = Runtime(tmp_path)
+    reservation = RackAiReservation(runtime, ("local-primary",))
+    reservation.bind(ReservationBinding(value.states, "run-one"))
+    reservation.ready("local-primary")
+    value.reservation = RackAiReservation(runtime, ("local-primary",))
+    def disconnected(_):
+        raise RackAiRuntimeError("disconnected")
+    monkeypatch.setattr(runtime, "operation", disconnected)
+    with pytest.raises(RackAiResourceWait):
+        await value.advance(request(StrictTddRunMode.RESUME))
+    assert value.states.load("run-one").status == StrictTddRunStatus.COMPLETED
+    assert value.application.calls == 0

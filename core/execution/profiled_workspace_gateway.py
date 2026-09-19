@@ -1,5 +1,6 @@
 """Adapter from existing ATHBA work units to the generic workspace port."""
 from __future__ import annotations
+import asyncio
 from dataclasses import dataclass
 from typing import Mapping
 from core.development.athba_workspace_routing import AthbaExecutionProfileResolver, AthbaProfileResolutionRequest
@@ -28,7 +29,8 @@ class ProfiledWorkspaceExecutionGateway:
         if profile is None:
             raise ValueError("deterministic or reasoning-only work must not use the workspace port")
         request = WorkspaceExecutionRequest(identity, profile, repository_binding, tuple(work_unit.allowed_paths), work_unit.network, tuple(tuple(command) for command in work_unit.acceptance.commands), tuple(work_unit.acceptance.required_artifacts), work_unit.objective)
-        return self._result_for(work_unit, self.port.submit_workspace_change(request))
+        result = await asyncio.to_thread(self.port.submit_workspace_change, request)
+        return self._result_for(work_unit, result)
 
     @staticmethod
     def _result_for(work_unit: DevelopmentWorkUnit, result: WorkspaceExecutionResult) -> WorkUnitExecutionResult:

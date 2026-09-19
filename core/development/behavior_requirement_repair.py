@@ -1,5 +1,6 @@
 """One narrow Behavior Planner submission and exact semantic response validation."""
 from __future__ import annotations
+from core.execution.rack_ai_runtime import RackAiResourceWait
 
 import json
 from dataclasses import replace
@@ -24,6 +25,8 @@ class BehaviorRequirementRepairPlanner:
             result = await self.gateway.reason(ReasoningRequest(
                 REPAIR_PURPOSE, repair_prompt(request), request.project_id,
             ))
+        except RackAiResourceWait:
+            raise
         except Exception as error:
             # External boundary: never retry an uncertain submission.
             raise BehaviorRepairFailure(

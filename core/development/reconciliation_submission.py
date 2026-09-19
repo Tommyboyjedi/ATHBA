@@ -1,5 +1,6 @@
 """One reconciliation decision and at most one format-only repair submission."""
 from __future__ import annotations
+from core.execution.rack_ai_runtime import RackAiResourceWait
 
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -33,6 +34,8 @@ class ReconciliationSubmission:
         for index in range(1 + MAX_FORMAT_REPAIR_ATTEMPTS):
             try:
                 result = await self.gateway.reason(current)
+            except RackAiResourceWait:
+                raise
             except Exception as error:
                 # Only the external gateway await is inside this boundary. Decode
                 # failures below remain separately typed reconciliation output failures.

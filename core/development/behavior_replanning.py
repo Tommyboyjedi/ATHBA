@@ -1,5 +1,6 @@
 """Behavior Planner adapter; one semantic submission, no hidden retries."""
 from __future__ import annotations
+from core.execution.rack_ai_runtime import RackAiResourceWait
 
 import json
 from dataclasses import dataclass
@@ -41,6 +42,8 @@ class BehaviorRequirementReplanner:
             result = await self.gateway.reason(ReasoningRequest(
                 "athba_behavior_requirement_replan", _prompt(request), request.project_id,
             ))
+        except RackAiResourceWait:
+            raise
         except Exception as error:
             # External gateway boundary: no speculative resubmission after an uncertain call.
             raise BehaviorReplanFailure(

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from core.execution.rack_ai_reservation_state import RackAiReservationState, ReservationRecord
 from typing import Any
 
 from core.atomic_json_file import read_json_file, write_json_atomically
@@ -80,7 +81,8 @@ class PostBehaviorStateCodec:
         if gatekeeper is None:
             raise ValueError("persisted behavioral entry has no final Gatekeeper evidence")
         return PostBehaviorState(**{
-            **fields, "entry": PostBehaviorEntry(**{
+            **fields, "rack_ai": None if value.get("rack_ai") is None else RackAiReservationState.from_dict(value["rack_ai"]),
+            "entry": PostBehaviorEntry(**{
                 **entry, "production_paths": tuple(entry["production_paths"]),
                 "gatekeeper_evidence": gatekeeper}),
             "status": PostBehaviorStatus(value["status"]),
@@ -119,7 +121,14 @@ class PostBehaviorStateRepository:
                 raise ValueError("terminal post-behavior state cannot restart autonomous work")
         elif state.generation != 0 or state.status != PostBehaviorStatus.BEHAVIOR_GATEKEEPER_ACCEPTED:
             raise ValueError("post-behavior state must begin at the accepted behavioral entry")
-        write_json_atomically(self._path(state.delivery_id), PostBehaviorStateCodec.encode(state))
+        path = self._path(state.delivery_id)
+        write_json_atomically(path, ReservationRecord(path).preserve(PostBehaviorStateCodec.encode(state)))
+
+    def load_reservation(self, identity: str) -> RackAiReservationState | None:
+        return ReservationRecord(self._path(identity)).load()
+
+    def save_reservation(self, identity: str, state: RackAiReservationState) -> None:
+        ReservationRecord(self._path(identity)).save(state)
 
     def _path(self, delivery_id: str) -> Path:
         return resolve_identifier_path(self.root, delivery_id, "behavioral delivery id").with_suffix(".json")

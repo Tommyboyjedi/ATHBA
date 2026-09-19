@@ -1,5 +1,6 @@
 """Durable values for the narrow PR30 post-behavior lifecycle."""
 from __future__ import annotations
+from core.execution.rack_ai_reservation_state import RackAiReservationState
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -190,6 +191,7 @@ class PostBehaviorState:
     generation: int = 0
     policy: PostBehaviorPolicy = field(default_factory=PostBehaviorPolicy)
     attempt_state: WorkspaceAttemptState | None = None
+    rack_ai: RackAiReservationState | None = None
 
     def __post_init__(self) -> None:
         _validate_state(self)
