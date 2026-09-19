@@ -122,6 +122,7 @@ class StrictTddFeatureApplicationService:
             request.project_id, request.source_requirement_hash, StrictTddFeatureStatus.RUNNING.value,
             contract.to_dict(), checklist.to_dict(), canonical_ref=f"refs/heads/{project.default_ref}",
             canonical_development_base=project.trusted_base_sha,
+            behavioral_entry_revision=project.trusted_base_sha,
         )
         self.states.save(state)
         return state

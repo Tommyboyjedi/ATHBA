@@ -101,6 +101,7 @@ class StrictTddFeatureState:
     reconciliation_progress: tuple[dict[str, object], ...] = ()
     atomization_failure: tuple[ChecklistAtomizationAttempt, ...] = ()
     behavior_repairs: tuple[BehaviorRepairRecord, ...] = ()
+    behavioral_entry_revision: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -150,6 +151,7 @@ class StrictTddFeatureState:
             tuple(dict(item) for item in payload.get("reconciliation_progress", ())),
             tuple(ChecklistAtomizationAttempt.from_dict(dict(item)) for item in payload.get("atomization_failure", ())),
             tuple(BehaviorRepairRecord.from_dict(item) for item in payload.get("behavior_repairs", ())),
+            payload.get("behavioral_entry_revision"),
         )
 
 

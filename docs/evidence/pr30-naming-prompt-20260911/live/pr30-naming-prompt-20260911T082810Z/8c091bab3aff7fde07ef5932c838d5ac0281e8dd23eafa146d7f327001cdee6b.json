@@ -1,0 +1,23 @@
+{
+  "kind": "behavioral_delivery_result",
+  "payload": {
+    "canonical_ref": null,
+    "canonical_sha": null,
+    "final_reconciliation": [],
+    "last_lifecycle_event_id": "controller-c813c4fbfbef35cd7670c2cdd98da0a0c667ec100e03cb94ba2552aeaf2a828b",
+    "last_transition_path": {
+      "feature_kind": "blocked",
+      "microcycle_kind": null,
+      "scenario_kind": null
+    },
+    "markdown_report_path": "/srv/ATHBA/evidence/pr30-naming-prompt-20260911/live/pr30-naming-prompt-20260911T082810Z/proof-report.md",
+    "project_id": "pr30-naming-prompt-20260911T082810Z",
+    "reached_checkpoint": null,
+    "reason": "specification_gatekeeper_failed",
+    "run_id": "pr30-naming-prompt-20260911T082810Z",
+    "status": "blocked",
+    "structured_report_path": "/srv/ATHBA/evidence/pr30-naming-prompt-20260911/live/pr30-naming-prompt-20260911T082810Z/proof-report.json",
+    "working_ref": null,
+    "working_sha": null
+  }
+}

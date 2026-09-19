@@ -1,0 +1,67 @@
+{
+  "classification": "read-only deterministic replay, not a resumed live proof or full Gatekeeper approval",
+  "original_run": "pr30-provenance-routing-20260910T133659Z",
+  "original_revision": "0039443078c3b591be8108d386c2606f4fe8affe",
+  "model_calls": 0,
+  "original_record": {
+    "accepted_test_names": [],
+    "adapter": {
+      "id": "python-specification",
+      "language": "python",
+      "version": "1"
+    },
+    "answer": "NO",
+    "checklist_ref": "REQ-007",
+    "evidence_policy": "no_storage",
+    "evidence_status": "unsupported_evidence_policy",
+    "findings": [],
+    "inspected_paths": [
+      ".gitignore",
+      "running_total.py",
+      "tests/test_running_total.py"
+    ],
+    "rationale": "unsupported_evidence_policy; line 15: opaque decorator effects",
+    "response_attempts": [],
+    "revision": "0039443078c3b591be8108d386c2606f4fe8affe",
+    "source_item": {
+      "kind": "constraint",
+      "modality": "required",
+      "ref": "REQ-007",
+      "source_quote": "Keep the implementation ... in memory",
+      "subject": "in memory",
+      "text": "Keep the implementation in memory."
+    }
+  },
+  "current_storage_record": {
+    "checklist_ref": "REQ-007",
+    "answer": "YES",
+    "accepted_test_names": [],
+    "rationale": "Storage requirement passed by bounded static inspection; decorator effects were not statically verified.",
+    "evidence_policy": "no_storage",
+    "evidence_status": "pass",
+    "revision": "0039443078c3b591be8108d386c2606f4fe8affe",
+    "findings": [
+      "assurance_warning: running_total.py:14: @property on total; decorator effects were not statically verified"
+    ],
+    "source_item": {
+      "ref": "REQ-007",
+      "text": "Keep the implementation in memory.",
+      "kind": "constraint",
+      "modality": "required",
+      "source_quote": "Keep the implementation ... in memory",
+      "subject": "in memory"
+    },
+    "response_attempts": [],
+    "inspected_paths": [
+      ".gitignore",
+      "running_total.py",
+      "tests/test_running_total.py"
+    ],
+    "adapter": {
+      "id": "python-specification",
+      "version": "1",
+      "language": "python"
+    }
+  },
+  "original_state_or_target_modified": false
+}

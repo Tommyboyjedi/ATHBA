@@ -1,0 +1,13 @@
+{
+  "athba_revision": "f4b491fb2bb92f6a1865c29fd763d2c42b49e823",
+  "endpoint": "http://127.0.0.1:8017/v1/responses",
+  "request": {
+    "prompt": "Reply with READY only.",
+    "model": "local-primary",
+    "temperature": 0.0,
+    "max_tokens": 64,
+    "response_schema": null
+  },
+  "timeout_seconds": 45,
+  "automatic_retries": 0
+}

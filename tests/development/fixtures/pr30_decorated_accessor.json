@@ -1,0 +1,7 @@
+{
+  "origin_run": "pr30-provenance-routing-20260910T133659Z",
+  "revision": "0039443078c3b591be8108d386c2606f4fe8affe",
+  "path": "running_total.py",
+  "source_sha256": "bb7cb5c47be3107c857ff4facce12b222d16961b5da6980abe5e887d0aab977c",
+  "source": "\"\"\"ATHBA initial production module.\"\"\"\n\n\nclass RunningTotal:\n    \"\"\"A container that exposes calculated totals.\"\"\"\n    \n    def __init__(self):\n        self._total = 0\n    \n    def add(self, value):\n        \"\"\"Add a value to the running total.\"\"\"\n        self._total += value\n    \n    @property\n    def total(self):\n        \"\"\"Get the current running total.\"\"\"\n        return self._total\n    \n    def get(self):\n        \"\"\"Get the current running total.\"\"\"\n        return self._total\n"
+}

@@ -1,0 +1,23 @@
+{
+  "kind": "behavioral_delivery_result",
+  "payload": {
+    "canonical_ref": null,
+    "canonical_sha": null,
+    "final_reconciliation": [],
+    "last_lifecycle_event_id": "controller-4b0bb4b7c694d1ca1aee4232298c754ca2a451861e55b6a7f98091d802853e12",
+    "last_transition_path": {
+      "feature_kind": "blocked",
+      "microcycle_kind": null,
+      "scenario_kind": null
+    },
+    "markdown_report_path": "/srv/ATHBA/docs/evidence/pr30-omission-20260910/live/pr30-omission-running-total-20260910T114333Z/proof-report.md",
+    "project_id": "pr30-omission-running-total-20260910T114333Z",
+    "reached_checkpoint": null,
+    "reason": "specification_gatekeeper_failed",
+    "run_id": "pr30-omission-running-total-20260910T114333Z",
+    "status": "blocked",
+    "structured_report_path": "/srv/ATHBA/docs/evidence/pr30-omission-20260910/live/pr30-omission-running-total-20260910T114333Z/proof-report.json",
+    "working_ref": null,
+    "working_sha": null
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "proof_pass_claimed": false,
+  "reason": "User requested stopping the live proof and will perform it manually.",
+  "recorded_at": "2026-09-10T09:30:26.092326+00:00",
+  "run_id": "pr30-live-running-total-20260910",
+  "status": "cancelled_by_user",
+  "target_code_manually_edited": false,
+  "target_pids": [
+    1248851
+  ],
+  "terminated_processes": [
+    {
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-B",
+        "-m",
+        "scripts.run_pr30_post_behavior_proof",
+        "--run-id",
+        "pr30-live-running-total-20260910",
+        "--project-id",
+        "pr30-live-running-total-20260910",
+        "--requirement-file",
+        "docs/evidence/pr30-20260910/live-requirement.txt",
+        "--state-root",
+        "/srv/ATHBA/state",
+        "--evidence-root",
+        "/srv/ATHBA/docs/evidence/pr30-20260910/live",
+        "--reasoning-model",
+        "local-primary",
+        "--production-path",
+        "running_total.py",
+        "--test-path",
+        "tests/test_running_total.py",
+        ""
+      ],
+      "pid": 1248851
+    }
+  ]
+}

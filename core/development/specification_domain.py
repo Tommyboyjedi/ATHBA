@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.development.specification_obligations import ObligationModality, grounded_modality
+from core.development.specification_provenance import PROVENANCE_ERROR, resolve_source_quote
 
 from core.development.tdd_progression_validation import (
     enum_value,
@@ -71,6 +72,14 @@ class SpecificationChecklistItem:
         source = self.source_quote or self.text
         object.__setattr__(self, "modality", (grounded_modality(self.modality, source) if self.source_quote else ObligationModality(self.modality)).value)
 
+    def source_context(self, source: str) -> str:
+        """Revalidate quoted facts wherever original source authority is available."""
+        provenance = resolve_source_quote(source, self.source_quote)
+        if not self.subject.strip() or not provenance.grounds_subject(self.subject):
+            raise ValueError(PROVENANCE_ERROR)
+        grounded_modality(self.modality, provenance.context)
+        return provenance.context
+
     def to_dict(self) -> dict[str, Any]:
         return {"ref": self.ref, "text": self.text, "kind": self.kind,
                 "modality": self.modality, "source_quote": self.source_quote, "subject": self.subject}
@@ -110,11 +119,15 @@ class SpecificationChecklist:
         items = payload.get("items")
         if not isinstance(items, list):
             raise ValueError("specification checklist items must be a list")
-        return cls(
+        checklist = cls(
             project_id=str(payload["project_id"]),
             requirement_text=str(payload["requirement_text"]),
             items=[SpecificationChecklistItem.from_dict(dict(item)) for item in items],
         )
+        for item in checklist.items:
+            if isinstance(item, SpecificationChecklistItem) and item.source_quote:
+                item.source_context(checklist.requirement_text)
+        return checklist
 
 
 @dataclass(frozen=True)

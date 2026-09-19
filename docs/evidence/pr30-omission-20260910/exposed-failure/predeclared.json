@@ -1,0 +1,36 @@
+{
+  "athba_revision": "1ed201ca38723e10df553adb16c522efabd0ddf8",
+  "evidence_root": "/srv/ATHBA/docs/evidence/pr30-20260910/live",
+  "manual_target_edits_permitted": false,
+  "max_behavior_transitions": 1000,
+  "max_promoted_refactors": 4,
+  "production_paths": [
+    "running_total.py"
+  ],
+  "project_id": "pr30-live-running-total-20260910-100901",
+  "rack_ai_revision": "469dc13c4d669266de21c629cc449f889364b7e2",
+  "reasoning_model": "local-primary",
+  "required_chain": [
+    "Gatekeeper-approved behavior",
+    "naming YES",
+    "production/test exact rename",
+    "accepted tests GREEN",
+    "Gatekeeper YES",
+    "naming NO",
+    "refactor YES",
+    "production-only refactor",
+    "unchanged tests GREEN",
+    "Gatekeeper YES",
+    "refactor NO",
+    "POST_BEHAVIOR_COMPLETE"
+  ],
+  "requirement_file": "/srv/ATHBA/docs/evidence/pr30-20260910/live-requirement.txt",
+  "requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "requirement_text": "Provide a RunningTotal class in running_total.py. A newly created RunningTotal starts with a total of zero. Calling add(amount) adds the signed integer amount to its running total. Calling total() returns the current total without changing it. Adding 3 and then -1 must expose a total of 2. Keep the implementation dependency-free and in memory.\n",
+  "run_id": "pr30-live-running-total-20260910-100901",
+  "schema": "pr30-disposable-proof/v1",
+  "state_root": "/srv/ATHBA/state",
+  "test_paths": [
+    "tests/test_running_total.py"
+  ]
+}

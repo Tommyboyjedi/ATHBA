@@ -40,13 +40,13 @@ class RoutedChecklistReconciler:
 
     async def reconcile(self, request: RoutedChecklistRequest) -> dict[str, object]:
         item = request.item
-        decision = replace(EvidencePolicyRouter().route(item), required_subjects=request.required_subjects)
-        quote = getattr(item, "source_quote", "")
-        if (quote and quote not in request.original_source) or (
-            decision.policy != EvidencePolicy.BEHAVIORAL and not quote and item.text not in request.original_source
-        ):
+        try:
+            decision = replace(EvidencePolicyRouter().route_source(item, request.original_source),
+                               required_subjects=request.required_subjects)
+        except ValueError as error:
             return EvidenceResult(EvidenceStatus.UNSUPPORTED, EvidencePolicy.UNSUPPORTED,
-                                  self.catalog.semantic_revision, ("source provenance mismatch",)).to_record(item)
+                                  self.catalog.semantic_revision,
+                                  ("source provenance mismatch", str(error))).to_record(item)
         if decision.policy == EvidencePolicy.ENGINEERING:
             return EvidenceResult(
                 EvidenceStatus.ENGINEERING_COVERED, EvidencePolicy.ENGINEERING,
@@ -79,8 +79,9 @@ class RoutedChecklistReconciler:
 def required_source_subjects(checklist: SpecificationChecklist) -> tuple[str, ...]:
     subjects = []
     for item in checklist.items:
-        quote = getattr(item, "source_quote", "") or item.text
-        decision = EvidencePolicyRouter().route(item)
-        if decision.modality == ObligationModality.REQUIRED and quote in checklist.requirement_text:
-            subjects.append(decision.subject)
+        decision = EvidencePolicyRouter().route_source(item, checklist.requirement_text)
+        if decision.modality == ObligationModality.REQUIRED:
+            # Preserve the legacy requirement that paraphrases grant no subject authority.
+            if getattr(item, "source_quote", "") or item.text in checklist.requirement_text:
+                subjects.append(decision.subject)
     return tuple(subjects)

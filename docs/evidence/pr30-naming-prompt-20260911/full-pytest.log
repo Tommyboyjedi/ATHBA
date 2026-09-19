@@ -1,0 +1,358 @@
+........................................................................ [  6%]
+........................................................................ [ 12%]
+........................................................................ [ 18%]
+........................................................................ [ 24%]
+........................................................................ [ 30%]
+........................................................................ [ 36%]
+........................................................................ [ 42%]
+........................................................................ [ 48%]
+........................................................................ [ 54%]
+........................................................................ [ 60%]
+........................................................................ [ 66%]
+........................................................................ [ 72%]
+........................................................................ [ 78%]
+........................................................................ [ 84%]
+........................................................................ [ 90%]
+........................................................................ [ 96%]
+................................................                         [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:169: 97458 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:169: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    return asyncio.iscoroutinefunction(obj) or inspect.isasyncgenfunction(obj)
+
+.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:433: 1197 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:433: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    return asyncio.iscoroutinefunction(func)
+
+core/development/microcycle_domain.py:81
+  /srv/ATHBA/core/development/microcycle_domain.py:81: PytestCollectionWarning: cannot collect test class 'TestScenarioDraft' because it has a __init__ constructor (from: tests/development/test_microcycle_domain.py)
+    @dataclass(frozen=True)
+
+core/development/microcycle_domain.py:81
+  /srv/ATHBA/core/development/microcycle_domain.py:81: PytestCollectionWarning: cannot collect test class 'TestScenarioDraft' because it has a __init__ constructor (from: tests/development/test_post_behavior_integration.py)
+    @dataclass(frozen=True)
+
+core/development/microcycle_domain.py:81
+  /srv/ATHBA/core/development/microcycle_domain.py:81: PytestCollectionWarning: cannot collect test class 'TestScenarioDraft' because it has a __init__ constructor (from: tests/development/test_python_pytest_adapter.py)
+    @dataclass(frozen=True)
+
+core/development/microcycle_domain.py:81
+  /srv/ATHBA/core/development/microcycle_domain.py:81: PytestCollectionWarning: cannot collect test class 'TestScenarioDraft' because it has a __init__ constructor (from: tests/development/test_python_pytest_isolation.py)
+    @dataclass(frozen=True)
+
+core/development/microcycle_domain.py:81
+  /srv/ATHBA/core/development/microcycle_domain.py:81: PytestCollectionWarning: cannot collect test class 'TestScenarioDraft' because it has a __init__ constructor (from: tests/development/test_strict_microcycle.py)
+    @dataclass(frozen=True)
+
+tests/api/test_projects_active.py::ActiveProjectEndpointTests::test_stale_id
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:1005: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    return asyncio.get_event_loop_policy()
+
+tests/api/test_projects_active.py::ActiveProjectEndpointTests::test_stale_id
+tests/api/test_projects_active.py::ActiveProjectEndpointTests::test_stale_id
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/django/contrib/auth/decorators.py:38: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    if asyncio.iscoroutinefunction(view_func):
+
+tests/agents/test_architect_agent.py: 6 warnings
+tests/agents/test_legacy_agent_smoke.py: 5 warnings
+tests/api/test_tickets.py: 5 warnings
+tests/behaviors/test_analyze_spec_behavior.py: 6 warnings
+tests/behaviors/test_execute_tests_behavior.py: 1 warning
+tests/behaviors/test_spec_behavior_boundaries.py: 5 warnings
+tests/development/test_behavior_completion.py: 4 warnings
+tests/development/test_behavior_contract_coordinator.py: 89 warnings
+tests/development/test_behavior_repair.py: 5 warnings
+tests/development/test_behavior_replan_protocol.py: 22 warnings
+tests/development/test_behavior_replanning.py: 18 warnings
+tests/development/test_behavior_replanning_pipeline.py: 2 warnings
+tests/development/test_behavior_requirement_repair.py: 28 warnings
+tests/development/test_coordinator.py: 5 warnings
+tests/development/test_gatekeeper_progress_resume.py: 18 warnings
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+tests/development/test_provider_behavior_reviewer.py: 4 warnings
+tests/development/test_python_storage_assurance.py: 1 warning
+tests/development/test_reconciliation_output.py: 31 warnings
+tests/development/test_scenario_drafting.py: 73 warnings
+tests/development/test_session7_persistence_conformance.py: 4 warnings
+tests/development/test_specification_evidence_routing.py: 18 warnings
+tests/development/test_specification_gatekeeper.py: 21 warnings
+tests/development/test_specification_provenance.py: 15 warnings
+tests/development/test_specification_provenance_routing.py: 26 warnings
+tests/development/test_strict_microcycle.py: 15 warnings
+tests/development/test_strict_tdd_feature_application.py: 8 warnings
+tests/development/test_strict_tdd_feature_composition.py: 1 warning
+tests/development/test_strict_tdd_run_controller.py: 7 warnings
+tests/development/test_tdd_coordinator.py: 10 warnings
+tests/development/test_test_evidence_reconciliation.py: 7 warnings
+tests/execution/test_athba_workspace_execution.py: 2 warnings
+tests/execution/test_rack_ai_cli_gateway.py: 19 warnings
+tests/integration/test_spec_to_tickets_flow.py: 4 warnings
+tests/services/test_git_service.py: 15 warnings
+tests/services/test_test_execution_service.py: 3 warnings
+tests/test_foundation_contracts.py: 1 warning
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:751: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    _restore_event_loop_policy(asyncio.get_event_loop_policy()),
+
+tests/agents/test_architect_agent.py: 6 warnings
+tests/agents/test_legacy_agent_smoke.py: 5 warnings
+tests/api/test_tickets.py: 5 warnings
+tests/behaviors/test_analyze_spec_behavior.py: 6 warnings
+tests/behaviors/test_execute_tests_behavior.py: 1 warning
+tests/behaviors/test_spec_behavior_boundaries.py: 5 warnings
+tests/development/test_behavior_completion.py: 4 warnings
+tests/development/test_behavior_contract_coordinator.py: 89 warnings
+tests/development/test_behavior_repair.py: 5 warnings
+tests/development/test_behavior_replan_protocol.py: 22 warnings
+tests/development/test_behavior_replanning.py: 18 warnings
+tests/development/test_behavior_replanning_pipeline.py: 2 warnings
+tests/development/test_behavior_requirement_repair.py: 28 warnings
+tests/development/test_coordinator.py: 5 warnings
+tests/development/test_gatekeeper_progress_resume.py: 18 warnings
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+tests/development/test_provider_behavior_reviewer.py: 4 warnings
+tests/development/test_python_storage_assurance.py: 1 warning
+tests/development/test_reconciliation_output.py: 31 warnings
+tests/development/test_scenario_drafting.py: 73 warnings
+tests/development/test_session7_persistence_conformance.py: 4 warnings
+tests/development/test_specification_evidence_routing.py: 18 warnings
+tests/development/test_specification_gatekeeper.py: 21 warnings
+tests/development/test_specification_provenance.py: 15 warnings
+tests/development/test_specification_provenance_routing.py: 26 warnings
+tests/development/test_strict_microcycle.py: 15 warnings
+tests/development/test_strict_tdd_feature_application.py: 8 warnings
+tests/development/test_strict_tdd_feature_composition.py: 1 warning
+tests/development/test_strict_tdd_run_controller.py: 7 warnings
+tests/development/test_tdd_coordinator.py: 10 warnings
+tests/development/test_test_evidence_reconciliation.py: 7 warnings
+tests/execution/test_athba_workspace_execution.py: 2 warnings
+tests/execution/test_rack_ai_cli_gateway.py: 19 warnings
+tests/integration/test_spec_to_tickets_flow.py: 4 warnings
+tests/services/test_git_service.py: 15 warnings
+tests/services/test_test_execution_service.py: 3 warnings
+tests/test_foundation_contracts.py: 1 warning
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:977: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(new_loop_policy)
+
+tests/agents/test_architect_agent.py: 6 warnings
+tests/agents/test_legacy_agent_smoke.py: 5 warnings
+tests/api/test_tickets.py: 5 warnings
+tests/behaviors/test_analyze_spec_behavior.py: 6 warnings
+tests/behaviors/test_execute_tests_behavior.py: 1 warning
+tests/behaviors/test_spec_behavior_boundaries.py: 5 warnings
+tests/development/test_behavior_completion.py: 4 warnings
+tests/development/test_behavior_contract_coordinator.py: 89 warnings
+tests/development/test_behavior_repair.py: 5 warnings
+tests/development/test_behavior_replan_protocol.py: 22 warnings
+tests/development/test_behavior_replanning.py: 18 warnings
+tests/development/test_behavior_replanning_pipeline.py: 2 warnings
+tests/development/test_behavior_requirement_repair.py: 28 warnings
+tests/development/test_coordinator.py: 5 warnings
+tests/development/test_gatekeeper_progress_resume.py: 18 warnings
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+tests/development/test_provider_behavior_reviewer.py: 4 warnings
+tests/development/test_python_storage_assurance.py: 1 warning
+tests/development/test_reconciliation_output.py: 31 warnings
+tests/development/test_scenario_drafting.py: 73 warnings
+tests/development/test_session7_persistence_conformance.py: 4 warnings
+tests/development/test_specification_evidence_routing.py: 18 warnings
+tests/development/test_specification_gatekeeper.py: 21 warnings
+tests/development/test_specification_provenance.py: 15 warnings
+tests/development/test_specification_provenance_routing.py: 26 warnings
+tests/development/test_strict_microcycle.py: 15 warnings
+tests/development/test_strict_tdd_feature_application.py: 8 warnings
+tests/development/test_strict_tdd_feature_composition.py: 1 warning
+tests/development/test_strict_tdd_run_controller.py: 7 warnings
+tests/development/test_tdd_coordinator.py: 10 warnings
+tests/development/test_test_evidence_reconciliation.py: 7 warnings
+tests/execution/test_athba_workspace_execution.py: 2 warnings
+tests/execution/test_rack_ai_cli_gateway.py: 19 warnings
+tests/integration/test_spec_to_tickets_flow.py: 4 warnings
+tests/services/test_git_service.py: 15 warnings
+tests/services/test_test_execution_service.py: 3 warnings
+tests/test_foundation_contracts.py: 1 warning
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:978: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+
+tests/agents/test_architect_agent.py: 6 warnings
+tests/agents/test_legacy_agent_smoke.py: 5 warnings
+tests/api/test_tickets.py: 5 warnings
+tests/behaviors/test_analyze_spec_behavior.py: 6 warnings
+tests/behaviors/test_execute_tests_behavior.py: 1 warning
+tests/behaviors/test_spec_behavior_boundaries.py: 5 warnings
+tests/development/test_behavior_completion.py: 4 warnings
+tests/development/test_behavior_contract_coordinator.py: 89 warnings
+tests/development/test_behavior_repair.py: 5 warnings
+tests/development/test_behavior_replan_protocol.py: 22 warnings
+tests/development/test_behavior_replanning.py: 18 warnings
+tests/development/test_behavior_replanning_pipeline.py: 2 warnings
+tests/development/test_behavior_requirement_repair.py: 28 warnings
+tests/development/test_coordinator.py: 5 warnings
+tests/development/test_gatekeeper_progress_resume.py: 18 warnings
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+tests/development/test_provider_behavior_reviewer.py: 4 warnings
+tests/development/test_python_storage_assurance.py: 1 warning
+tests/development/test_reconciliation_output.py: 31 warnings
+tests/development/test_scenario_drafting.py: 73 warnings
+tests/development/test_session7_persistence_conformance.py: 4 warnings
+tests/development/test_specification_evidence_routing.py: 18 warnings
+tests/development/test_specification_gatekeeper.py: 21 warnings
+tests/development/test_specification_provenance.py: 15 warnings
+tests/development/test_specification_provenance_routing.py: 26 warnings
+tests/development/test_strict_microcycle.py: 15 warnings
+tests/development/test_strict_tdd_feature_application.py: 8 warnings
+tests/development/test_strict_tdd_feature_composition.py: 1 warning
+tests/development/test_strict_tdd_run_controller.py: 7 warnings
+tests/development/test_tdd_coordinator.py: 10 warnings
+tests/development/test_test_evidence_reconciliation.py: 7 warnings
+tests/execution/test_athba_workspace_execution.py: 2 warnings
+tests/execution/test_rack_ai_cli_gateway.py: 19 warnings
+tests/integration/test_spec_to_tickets_flow.py: 4 warnings
+tests/services/test_git_service.py: 15 warnings
+tests/services/test_test_execution_service.py: 3 warnings
+tests/test_foundation_contracts.py: 1 warning
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:766: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/agents/test_architect_agent.py: 6 warnings
+tests/agents/test_legacy_agent_smoke.py: 5 warnings
+tests/api/test_tickets.py: 5 warnings
+tests/behaviors/test_analyze_spec_behavior.py: 6 warnings
+tests/behaviors/test_execute_tests_behavior.py: 1 warning
+tests/behaviors/test_spec_behavior_boundaries.py: 5 warnings
+tests/development/test_behavior_completion.py: 4 warnings
+tests/development/test_behavior_contract_coordinator.py: 89 warnings
+tests/development/test_behavior_repair.py: 5 warnings
+tests/development/test_behavior_replan_protocol.py: 22 warnings
+tests/development/test_behavior_replanning.py: 18 warnings
+tests/development/test_behavior_replanning_pipeline.py: 2 warnings
+tests/development/test_behavior_requirement_repair.py: 28 warnings
+tests/development/test_coordinator.py: 5 warnings
+tests/development/test_gatekeeper_progress_resume.py: 18 warnings
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+tests/development/test_provider_behavior_reviewer.py: 4 warnings
+tests/development/test_python_storage_assurance.py: 1 warning
+tests/development/test_reconciliation_output.py: 31 warnings
+tests/development/test_scenario_drafting.py: 73 warnings
+tests/development/test_session7_persistence_conformance.py: 4 warnings
+tests/development/test_specification_evidence_routing.py: 18 warnings
+tests/development/test_specification_gatekeeper.py: 21 warnings
+tests/development/test_specification_provenance.py: 15 warnings
+tests/development/test_specification_provenance_routing.py: 26 warnings
+tests/development/test_strict_microcycle.py: 15 warnings
+tests/development/test_strict_tdd_feature_application.py: 8 warnings
+tests/development/test_strict_tdd_feature_composition.py: 1 warning
+tests/development/test_strict_tdd_run_controller.py: 7 warnings
+tests/development/test_tdd_coordinator.py: 10 warnings
+tests/development/test_test_evidence_reconciliation.py: 7 warnings
+tests/execution/test_athba_workspace_execution.py: 2 warnings
+tests/execution/test_rack_ai_cli_gateway.py: 19 warnings
+tests/integration/test_spec_to_tickets_flow.py: 4 warnings
+tests/services/test_git_service.py: 15 warnings
+tests/services/test_test_execution_service.py: 3 warnings
+tests/test_foundation_contracts.py: 1 warning
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:811: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/agents/test_architect_agent.py: 6 warnings
+tests/agents/test_legacy_agent_smoke.py: 5 warnings
+tests/api/test_tickets.py: 5 warnings
+tests/behaviors/test_analyze_spec_behavior.py: 6 warnings
+tests/behaviors/test_execute_tests_behavior.py: 1 warning
+tests/behaviors/test_spec_behavior_boundaries.py: 5 warnings
+tests/development/test_behavior_completion.py: 4 warnings
+tests/development/test_behavior_contract_coordinator.py: 89 warnings
+tests/development/test_behavior_repair.py: 5 warnings
+tests/development/test_behavior_replan_protocol.py: 22 warnings
+tests/development/test_behavior_replanning.py: 18 warnings
+tests/development/test_behavior_replanning_pipeline.py: 2 warnings
+tests/development/test_behavior_requirement_repair.py: 28 warnings
+tests/development/test_coordinator.py: 5 warnings
+tests/development/test_gatekeeper_progress_resume.py: 18 warnings
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+tests/development/test_provider_behavior_reviewer.py: 4 warnings
+tests/development/test_python_storage_assurance.py: 1 warning
+tests/development/test_reconciliation_output.py: 31 warnings
+tests/development/test_scenario_drafting.py: 73 warnings
+tests/development/test_session7_persistence_conformance.py: 4 warnings
+tests/development/test_specification_evidence_routing.py: 18 warnings
+tests/development/test_specification_gatekeeper.py: 21 warnings
+tests/development/test_specification_provenance.py: 15 warnings
+tests/development/test_specification_provenance_routing.py: 26 warnings
+tests/development/test_strict_microcycle.py: 15 warnings
+tests/development/test_strict_tdd_feature_application.py: 8 warnings
+tests/development/test_strict_tdd_feature_composition.py: 1 warning
+tests/development/test_strict_tdd_run_controller.py: 7 warnings
+tests/development/test_tdd_coordinator.py: 10 warnings
+tests/development/test_test_evidence_reconciliation.py: 7 warnings
+tests/execution/test_athba_workspace_execution.py: 2 warnings
+tests/execution/test_rack_ai_cli_gateway.py: 19 warnings
+tests/integration/test_spec_to_tickets_flow.py: 4 warnings
+tests/services/test_git_service.py: 15 warnings
+tests/services/test_test_execution_service.py: 3 warnings
+tests/test_foundation_contracts.py: 1 warning
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:835: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(previous_policy)
+
+tests/agents/test_architect_agent.py: 6 warnings
+tests/agents/test_legacy_agent_smoke.py: 5 warnings
+tests/api/test_tickets.py: 5 warnings
+tests/behaviors/test_analyze_spec_behavior.py: 6 warnings
+tests/behaviors/test_execute_tests_behavior.py: 1 warning
+tests/behaviors/test_spec_behavior_boundaries.py: 5 warnings
+tests/development/test_behavior_completion.py: 4 warnings
+tests/development/test_behavior_contract_coordinator.py: 89 warnings
+tests/development/test_behavior_repair.py: 5 warnings
+tests/development/test_behavior_replan_protocol.py: 22 warnings
+tests/development/test_behavior_replanning.py: 18 warnings
+tests/development/test_behavior_replanning_pipeline.py: 2 warnings
+tests/development/test_behavior_requirement_repair.py: 28 warnings
+tests/development/test_coordinator.py: 5 warnings
+tests/development/test_gatekeeper_progress_resume.py: 18 warnings
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+tests/development/test_provider_behavior_reviewer.py: 4 warnings
+tests/development/test_python_storage_assurance.py: 1 warning
+tests/development/test_reconciliation_output.py: 31 warnings
+tests/development/test_scenario_drafting.py: 73 warnings
+tests/development/test_session7_persistence_conformance.py: 4 warnings
+tests/development/test_specification_evidence_routing.py: 18 warnings
+tests/development/test_specification_gatekeeper.py: 21 warnings
+tests/development/test_specification_provenance.py: 15 warnings
+tests/development/test_specification_provenance_routing.py: 26 warnings
+tests/development/test_strict_microcycle.py: 15 warnings
+tests/development/test_strict_tdd_feature_application.py: 8 warnings
+tests/development/test_strict_tdd_feature_composition.py: 1 warning
+tests/development/test_strict_tdd_run_controller.py: 7 warnings
+tests/development/test_tdd_coordinator.py: 10 warnings
+tests/development/test_test_evidence_reconciliation.py: 7 warnings
+tests/execution/test_athba_workspace_execution.py: 2 warnings
+tests/execution/test_rack_ai_cli_gateway.py: 19 warnings
+tests/integration/test_spec_to_tickets_flow.py: 4 warnings
+tests/services/test_git_service.py: 15 warnings
+tests/services/test_test_execution_service.py: 3 warnings
+tests/test_foundation_contracts.py: 1 warning
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:847: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1200 passed, 102499 warnings in 631.00s (0:10:31)

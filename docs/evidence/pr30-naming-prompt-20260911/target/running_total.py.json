@@ -1,0 +1,4 @@
+{
+  "source": "\"\"\"ATHBA initial production module.\"\"\"\n\nclass RunningTotal:\n    \"\"\"Represents a running total calculation.\"\"\"\n    def __init__(self):\n        self.total = 0\n    \n    def add(self, amount):\n        self.total += amount\n    \n    def value(self):\n        return self.total\n\n",
+  "sha256": "b306cefb815e3e9d1cb1ce81b8a78cf640e0fc8732f2ef416e4dc1ea0749d4b4"
+}

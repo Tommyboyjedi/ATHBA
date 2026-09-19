@@ -1,0 +1,116 @@
+{
+  "starting_head": "b2e9b0e81b95b164cfa4d868b8b0e9d7620ebc65",
+  "sources": {
+    "core/development/post_behavior_adapters.py": "1be0f13b974194fbd37870c3ec0af86177c5af65f3568230d3da48b3223fa147",
+    "core/development/post_behavior_assessment.py": "13af05bb8ea3e9feee6b9d99d4c45dd187088a431d74b276b8df7681d263cc11",
+    "core/development/post_behavior_assessment_transition.py": "34ab891dbba45dbe0a187706c40e2d2d5de6a0babf608479440bfce1f4011bd7",
+    "core/development/post_behavior_authority.py": "967bb4b751418c94bd6f065c9c9e1737d9068c0230e6e91dd814356c374d9afd",
+    "core/development/post_behavior_change_transition.py": "6d1ef457d9b198f0616c0a3a6afe2915d68da08d5a99ec530faf1488bb60ac55",
+    "core/development/post_behavior_composition.py": "90adab2e652ec5c64300c96bc2f6df01a0039c91e649b93597f30694998fc396",
+    "core/development/post_behavior_domain.py": "2262c87a41f61a3babffc86fbb8b48e2500f4178a64cdbbdf66645c278c75899",
+    "core/development/post_behavior_entry.py": "28215961c7761ba0d8de99be7ef6c99ec9783438c9bce4ba7703dfa43ff470c9",
+    "core/development/post_behavior_evidence.py": "ec241ab9f88e83520d2e9f92945ec19c7855ae71687f7d35810b0d00735e9bbf",
+    "core/development/post_behavior_gatekeeper.py": "79196ce8c5f2bd11e44333920185c30902c82a404de27de12368aad7b0285035",
+    "core/development/post_behavior_git.py": "f58471ea46e2cb67d3fbb58896973850e7275b9bb57c3f012625f6e4da7df4f2",
+    "core/development/post_behavior_journal.py": "825965d7a210723faf3ed6c0bf40fc29a9c1f07a69fb493c94cbd2eb158f9e65",
+    "core/development/post_behavior_lifecycle.py": "09d70af5513b86ad954e406ce44d284531f6c1cef194bb90b52484648023f13b",
+    "core/development/post_behavior_ports.py": "0d1f6b5082d44dce6ae4d2b235793a4945214ca82d5e825a1afcf1ad6cf1c573",
+    "core/development/post_behavior_refactor.py": "041e2fbdf78d704eb7f5c2ecfb84ae9dcb252e52f6102ab7171cfa3d00d7602f",
+    "core/development/post_behavior_rename.py": "137511ddf569c981f247e7956db14127dce4003b68cf346ee383f2de05b548c7",
+    "core/development/post_behavior_slice.py": "e36dd2bb1ea91bbac44c908325ea10db7660dc778164c956586eacf38d7a3731",
+    "core/development/post_behavior_store.py": "5747c4504cb5c00ecb0728ed65200f3e6251b8ab5794de57807f74a4958f5c82",
+    "core/development/post_behavior_test_context.py": "06a43b0c3f5a51a82f11e9466410c6a7f0f858dfbd8c2c17e22d4d0978a65ee1",
+    "core/development/post_behavior_validation.py": "376765154b8c8728f7de034f5dd064828296a9b85671b7172ba002dd928ae02c",
+    "core/development/post_behavior_validation_transition.py": "7ad09e0976ef8c6b7e840bb1156e593fc972891c463d5802269c21c5dea55072",
+    "core/development/post_behavior_workspace.py": "ff2e36fbc7ea4e4135576ccfd376ee2800003786ebbdfe5de9b783ebe101424b",
+    "core/development/strict_tdd_feature_application.py": "b744df3daf595a075aa2d934ef25f73865c843af5498d9e5b634bfef953f362a",
+    "core/development/strict_tdd_feature_application_advance.py": "4f356bf8f9509572f09a7df9056c6a0020c23fa8029088017ae847cb3696f7f9",
+    "core/development/strict_tdd_feature_domain.py": "acc43fa094c91e98f80e93915dc2b1d1d648b3776428974e67f6f307b66cbae7",
+    "core/execution/local_only_post_behavior_reasoning.py": "d8e22dd6e8947df6291e4f2156a0abc6c1df5b711046e2da4445350522425c2f",
+    "pyproject.toml": "475f2777189722720ad2282d6dee953b064597528f7a6999fa4aa57dd59c6489",
+    "scripts/run_post_behavior_lifecycle.py": "738ea35bb00f8b6fb046bbb592e9516ab683c79299beaaa1c4041884113686f1",
+    "scripts/run_pr30_post_behavior_proof.py": "1c5e83f00b8899765f44ff731bfec4948bb979388eb4ae303a8f5e5581be4b71",
+    "tests/development/test_post_behavior_authority.py": "4aca1286c487da4d0e0868872104ed98f68c337236c30cda065cde34c6101049",
+    "tests/development/test_post_behavior_boundaries.py": "66f5245b6acd358978ce290c794804be300cbd2189b37929352e6f8602dc34f9",
+    "tests/development/test_post_behavior_integration.py": "91bacc180dc155ffa3534e7982309060c627d071867e79d6e5d8b046f1116701",
+    "tests/development/test_post_behavior_lifecycle.py": "68beb45a8853915e434a9cf10d8056597b98ec8efe4527e93f7c7fea5a4845d4",
+    "tests/development/test_post_behavior_material.py": "30fc75a4e8e49f57fcfaf80183a1f6a98324e1aeeaa386008a34c0a9fcd7ccbc",
+    "tests/development/test_post_behavior_proof_runner.py": "16d4c962c82fbd57e43cf9f1173fb8d31b3d34f9e0db7a58f700c59bf55fc30c"
+  },
+  "checks": [
+    {
+      "name": "focused",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings",
+        "tests/development/test_post_behavior_authority.py",
+        "tests/development/test_post_behavior_boundaries.py",
+        "tests/development/test_post_behavior_integration.py",
+        "tests/development/test_post_behavior_lifecycle.py",
+        "tests/development/test_post_behavior_material.py",
+        "tests/development/test_post_behavior_proof_runner.py"
+      ],
+      "exit_code": 0,
+      "seconds": 9.74
+    },
+    {
+      "name": "full",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "--disable-warnings"
+      ],
+      "exit_code": 0,
+      "seconds": 617.27
+    },
+    {
+      "name": "coding-principles",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "scripts/check_coding_principles.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.77
+    },
+    {
+      "name": "mypy",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "mypy"
+      ],
+      "exit_code": 0,
+      "seconds": 0.36
+    },
+    {
+      "name": "compileall",
+      "command": [
+        "/srv/ATHBA/.venv/bin/python",
+        "-m",
+        "compileall",
+        "-q",
+        "core",
+        "athba",
+        "llm_service",
+        "scripts"
+      ],
+      "exit_code": 0,
+      "seconds": 0.11
+    },
+    {
+      "name": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "seconds": 0.01
+    }
+  ]
+}

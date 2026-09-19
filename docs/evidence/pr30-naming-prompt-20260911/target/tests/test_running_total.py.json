@@ -1,0 +1,4 @@
+{
+  "source": "import pytest\nfrom running_total import RunningTotal\n\ndef test_REQ_001():\n    rt = RunningTotal()\n    assert rt.total == 0\n\ndef test_REQ_002():\n    rt = RunningTotal()\n    rt.add(10)\n    assert rt.value() == 10\n    rt.add(-5)\n    assert rt.value() == 5\n    rt.add(3)\n    assert rt.value() == 8\n\ndef test_REQ_003():\n    rt = RunningTotal()\n    rt.add(10)\n    assert rt.value() == 10\n    assert rt.value() == 10\n\ndef test_REQ_004():\n    rt = RunningTotal()\n    rt.add(3)\n    rt.add(-1)\n    assert rt.value() == 2\n",
+  "sha256": "2772a3eb0c1d66d9e46db43e12002fe399630225d3a2603a5347f4613a1791e5"
+}

@@ -1,0 +1,19 @@
+{
+  "run_id": "pr30-omission-running-total-20260910T114333Z",
+  "project_id": "pr30-omission-running-total-20260910T114333Z",
+  "requirement_path": "docs/evidence/pr30-20260910/live-requirement.txt",
+  "requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "state_root": "/srv/ATHBA/state",
+  "evidence_root": "/srv/ATHBA/docs/evidence/pr30-omission-20260910/live",
+  "reasoning_model": "local-primary",
+  "production_paths": [
+    "running_total.py"
+  ],
+  "test_paths": [
+    "tests/test_running_total.py"
+  ],
+  "readiness_timeout_seconds": 45,
+  "automatic_readiness_retries": 0,
+  "stop_rule": "Preserve the first genuine blocker or missing positive proof phase; do not modify the requirement, target code, checklist, model configuration or harness after observing the outcome.",
+  "manual_target_edits": false
+}

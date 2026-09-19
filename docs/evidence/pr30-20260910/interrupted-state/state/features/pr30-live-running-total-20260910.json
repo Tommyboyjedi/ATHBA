@@ -1,0 +1,153 @@
+{
+  "atomization_failure": [],
+  "behavior_repairs": [],
+  "behavior_replans": [],
+  "behavioral_entry_revision": "92aa8b6a8e39a1ea0f8f0d0090c5f880cecc5f91",
+  "blocked_reason": null,
+  "canonical_development_base": "92aa8b6a8e39a1ea0f8f0d0090c5f880cecc5f91",
+  "canonical_ref": "refs/heads/main",
+  "completed_behaviors": [],
+  "contract_payload": {
+    "capability": "Maintain and retrieve a running sum of signed integers in memory.",
+    "completion_criteria": [
+      "Instance initializes at zero",
+      "add(amount) correctly updates the internal state",
+      "total() returns the current state without side effects",
+      "Negative values are correctly handled in addition"
+    ],
+    "component_name": "RunningTotal",
+    "error_semantics": [
+      "TypeError if non-integer types are passed to add",
+      "AttributeError if methods are called on non-existent attributes"
+    ],
+    "id": "pr30-live-running-total-20260910",
+    "invariants": [
+      "The running total must always be a numeric type",
+      "The total() method must not modify the internal state"
+    ],
+    "non_goals": [
+      "Persistence to disk",
+      "Thread-safe concurrency controls",
+      "External library dependencies"
+    ],
+    "observable_requirements": [
+      {
+        "depends_on": [],
+        "error_expectation": null,
+        "observable_outcome": "Initial total is zero",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-001",
+        "source_refs": [
+          "PR16-001"
+        ],
+        "summary": "Verify initial state is zero",
+        "test_hint": "Check total() immediately after instantiation"
+      },
+      {
+        "depends_on": [
+          "REQ-001"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "Total increases by positive amount",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-002",
+        "source_refs": [
+          "PR16-002"
+        ],
+        "summary": "Verify addition of positive integers",
+        "test_hint": "Add 5 and verify total is 5"
+      },
+      {
+        "depends_on": [
+          "REQ-001"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "Total decreases by negative amount",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-003",
+        "source_refs": [
+          "PR16-004"
+        ],
+        "summary": "Verify addition of negative integers",
+        "test_hint": "Add 3 then -1 and verify total is 2"
+      },
+      {
+        "depends_on": [
+          "REQ-002"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "total() returns value without changing state",
+        "preserves_state_on_failure": true,
+        "ref": "REQ-004",
+        "source_refs": [
+          "PR16-003"
+        ],
+        "summary": "Verify total() is a read-only operation",
+        "test_hint": "Call total() multiple times and ensure value remains constant"
+      }
+    ],
+    "production_paths": [
+      "running_total.py"
+    ],
+    "project_id": "pr30-live-running-total-20260910",
+    "public_api": [
+      "add(amount: int)",
+      "total() -> int"
+    ],
+    "requirement_source": "Provide a RunningTotal class in running_total.py. A newly created RunningTotal starts with a total of zero. Calling add(amount) adds the signed integer amount to its running total. Calling total() returns the current total without changing it. Adding 3 and then -1 must expose a total of 2. Keep the implementation dependency-free and in memory.\n",
+    "source_clauses": [
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16-001",
+        "text": "A newly created RunningTotal instance must start with a total of zero."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16-002",
+        "text": "The add(amount) method must add the signed integer amount to the running total."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16-003",
+        "text": "The total() method must return the current total without modifying the running total."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16-004",
+        "text": "Adding 3 and then -1 must result in a total of 2."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "ref": "PR16-005",
+        "text": "The implementation must be dependency-free."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "ref": "PR16-006",
+        "text": "The implementation must be in-memory."
+      }
+    ],
+    "status": "tdd_ready",
+    "test_paths": [
+      "tests/test_running_total.py"
+    ]
+  },
+  "current_scenario_id": null,
+  "evidence_refs": [],
+  "final_reconciliation": [],
+  "gatekeeper_payload": null,
+  "pending_completed_behavior": null,
+  "project_id": "pr30-live-running-total-20260910",
+  "reconciliation_failure": null,
+  "reconciliation_progress": [],
+  "source_requirement_hash": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "status": "planning",
+  "working_ref": null,
+  "working_revision": null
+}

@@ -1,0 +1,21 @@
+{
+  "run_id": "pr30-provenance-routing-20260910T133659Z",
+  "recorded_at": "2026-09-10T13:45:47.042439+00:00",
+  "CHECKLIST_CREATED": "PASS",
+  "PERSISTENCE_RELOAD": "PASS",
+  "REQUIRED_SUBJECT_COLLECTION": "PASS",
+  "source_sha256": "0bbf138653c1055fffe92442c82a6662b5c691645b0d5772485fa6f9022f241d",
+  "atomization_attempts": 1,
+  "checklist_items": 7,
+  "required_subjects": [
+    "runningtotal class",
+    "starts with a total of zero",
+    "add(amount)",
+    "total()",
+    "adding 3 and then -1",
+    "dependency-free",
+    "in memory"
+  ],
+  "omission_quote": "Keep the implementation ... in memory",
+  "final_gatekeeper_approval_claimed": false
+}

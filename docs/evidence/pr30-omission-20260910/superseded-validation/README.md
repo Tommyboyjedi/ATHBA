@@ -1,0 +1,1 @@
+Full validation at a107c7a was intentionally stopped after 121.005 seconds to add coordinated-clause regression coverage. Exit -15 is incomplete, not PASS. Final validation is recorded in the parent directory.

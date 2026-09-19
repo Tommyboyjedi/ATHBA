@@ -1,0 +1,21 @@
+{
+  "implementation_revision": "77e473e0d79792ded35ecfaac08a56765c0db29a",
+  "unchanged_code_hashes": {
+    "core/development/checklist_reconciliation_tree.py": true,
+    "core/development/specification_atomization.py": true,
+    "core/development/specification_domain.py": true,
+    "core/development/specification_evidence_policy.py": true,
+    "core/development/specification_evidence_routing.py": true,
+    "core/development/specification_provenance.py": true,
+    "tests/development/test_specification_provenance_routing.py": true,
+    "tests/development/test_post_behavior_provenance.py": true,
+    "tests/development/fixtures/pr30_routing_omission.json": true,
+    "scripts/run_pr30_post_behavior_proof.py": true
+  },
+  "original_requirement_sha256": "f94d99e83d826442c4d70d581dd46e91ebf1dc0e580eb3182f38a5c9d02e1f78",
+  "preserved_old_target_sha": "8257a3c1ebec6bb492ff81e22b73bdc47c1b7bb1",
+  "preserved_old_target_clean": true,
+  "working_diff_check": "PASS",
+  "staged_diff_check": "PASS",
+  "post_validation_changes": "documentation and retained evidence only"
+}

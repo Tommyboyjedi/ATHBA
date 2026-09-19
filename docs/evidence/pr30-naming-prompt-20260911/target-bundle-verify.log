@@ -1,0 +1,26 @@
+/srv/ATHBA/docs/evidence/pr30-naming-prompt-20260911/target-repository.bundle is okay
+The bundle contains these 22 refs:
+b9e6643daa95c3a6eb9327cc295bbc05010e09b6 refs/heads/main
+28444b8ca6d8945c2ecc28774ab720940e9fe686 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_001--frontier-0--pr30-naming-prompt-20260911T082810Z--REQ_001--frontier-0--developer-1--submission-5770053322446557545
+c679075e4c224a84d64277b316ecd354f1faae68 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_001--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_001--scenario-draft-1--submission-13758446437843883159
+c679075e4c224a84d64277b316ecd354f1faae68 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_001--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_001--scenario-draft-2--submission-13758447537355511370
+e269fabd4a230afb4320556059ee5f0ba691b3bb refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_001--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_001--scenario-draft-3--submission-13758448636867139581
+995119dadb17fd6dd2a03166ea48164c220617a3 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_002--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_002--scenario-draft-1--submission-13212939835373584806
+ec24e6408bc2d4fa3feb88b6b31823431720ee46 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_002--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_002--scenario-draft-2--submission-13212938735861956595
+eacc55232b9d6886481b14a312fec2abd847ab09 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_003--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_003--scenario-draft-1--submission-16980176548158866897
+77f3d937cbb38d1d39ff5015fda2605472d372f4 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_004--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_004--scenario-draft-1--submission-12225727694840767776
+a96e7187c95a193e0a62e3adf46139a5eea4e855 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_004--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_004--scenario-draft-2--submission-12225730993375652409
+c5eba0e8e7c7ba432de24762b9ab7344a2939621 refs/heads/rack/change-pr30-naming-prompt-20260911T082810Z--REQ_004--scenario-draft--pr30-naming-prompt-20260911T082810Z--REQ_004--scenario-draft-3--submission-12225729893864024198
+b9e6643daa95c3a6eb9327cc295bbc05010e09b6 HEAD
+c679075e4c224a84d64277b316ecd354f1faae68 worktrees/repo/HEAD
+28444b8ca6d8945c2ecc28774ab720940e9fe686 worktrees/repo3/HEAD
+995119dadb17fd6dd2a03166ea48164c220617a3 worktrees/repo4/HEAD
+ec24e6408bc2d4fa3feb88b6b31823431720ee46 worktrees/repo5/HEAD
+eacc55232b9d6886481b14a312fec2abd847ab09 worktrees/repo6/HEAD
+77f3d937cbb38d1d39ff5015fda2605472d372f4 worktrees/repo7/HEAD
+c679075e4c224a84d64277b316ecd354f1faae68 worktrees/repo1/HEAD
+c5eba0e8e7c7ba432de24762b9ab7344a2939621 worktrees/repo9/HEAD
+e269fabd4a230afb4320556059ee5f0ba691b3bb worktrees/repo2/HEAD
+a96e7187c95a193e0a62e3adf46139a5eea4e855 worktrees/repo8/HEAD
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1

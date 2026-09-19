@@ -1,0 +1,33 @@
+{
+  "current_invocation_count": 0,
+  "immutable_identity_hash": "7e18e4e26287c2c7aa0c583deaff46c96238b7cb3ee5187b6c91cd4badf95f2c",
+  "last_delivered_fingerprint": {
+    "behavior_ref": null,
+    "canonical_sha": "b9e6643daa95c3a6eb9327cc295bbc05010e09b6",
+    "frontier_index": null,
+    "pending_action": "feature_completion",
+    "retry_counts": [
+      4
+    ],
+    "scenario_id": null,
+    "status": "blocked",
+    "working_sha": null
+  },
+  "last_delivered_path": {
+    "feature_kind": "blocked",
+    "microcycle_kind": null,
+    "scenario_kind": null
+  },
+  "last_lifecycle_event_id": "controller-c813c4fbfbef35cd7670c2cdd98da0a0c667ec100e03cb94ba2552aeaf2a828b",
+  "markdown_report_path": "/srv/ATHBA/evidence/pr30-naming-prompt-20260911/live/pr30-naming-prompt-20260911T082810Z/proof-report.md",
+  "pending_transition_receipt": null,
+  "project_id": "pr30-naming-prompt-20260911T082810Z",
+  "reached_checkpoints": [],
+  "reason": "specification_gatekeeper_failed",
+  "run_id": "pr30-naming-prompt-20260911T082810Z",
+  "schema_version": 1,
+  "status": "blocked",
+  "structured_report_path": "/srv/ATHBA/evidence/pr30-naming-prompt-20260911/live/pr30-naming-prompt-20260911T082810Z/proof-report.json",
+  "total_application_transition_count": 139,
+  "transition_in_flight": null
+}

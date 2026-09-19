@@ -1,0 +1,109 @@
+[
+  {
+    "name": "naming-focused-configured",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/development/test_post_behavior_boundaries.py",
+      "tests/development/test_post_behavior_material.py"
+    ],
+    "exit_code": 0,
+    "seconds": 1.619,
+    "log_path": "docs/evidence/pr30-naming-prompt-20260911/naming-focused-configured.log",
+    "log_sha256": "e25556e29aa2aa0f25f46682d35f5dd49937640501c6b6e4c878c26da68d80be",
+    "result_summary": "59 passed, 2641 warnings in 0.57s"
+  },
+  {
+    "name": "pr30-focused",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/development/test_post_behavior_authority.py",
+      "tests/development/test_post_behavior_boundaries.py",
+      "tests/development/test_post_behavior_integration.py",
+      "tests/development/test_post_behavior_lifecycle.py",
+      "tests/development/test_post_behavior_material.py",
+      "tests/development/test_post_behavior_proof_runner.py",
+      "tests/development/test_post_behavior_provenance.py"
+    ],
+    "exit_code": 0,
+    "seconds": 13.342,
+    "log_path": "docs/evidence/pr30-naming-prompt-20260911/pr30-focused.log",
+    "log_sha256": "ac4ffec24570e913113fa38b4a082f4c2afa07117900cc26fdcb3dc58815926f",
+    "result_summary": "175 passed, 9228 warnings in 12.15s"
+  },
+  {
+    "name": "full-pytest",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "pytest",
+      "-q"
+    ],
+    "exit_code": 0,
+    "seconds": 633.861,
+    "log_path": "docs/evidence/pr30-naming-prompt-20260911/full-pytest.log",
+    "log_sha256": "78a839c89adfba4dcc851691bcb10a41555aaee6cfbcd6834ce53ae2538916e9",
+    "result_summary": "1200 passed, 102499 warnings in 631.00s (0:10:31)"
+  },
+  {
+    "name": "coding-principles",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "scripts/check_coding_principles.py"
+    ],
+    "exit_code": 0,
+    "seconds": 0.816,
+    "log_path": "docs/evidence/pr30-naming-prompt-20260911/coding-principles.log",
+    "log_sha256": "676846ef0b703090bfc76e42aa1529e8104b0023bd0d843b89e467cc81cc13ea",
+    "result_summary": "coding principles gate passed"
+  },
+  {
+    "name": "mypy",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "mypy"
+    ],
+    "exit_code": 0,
+    "seconds": 0.415,
+    "log_path": "docs/evidence/pr30-naming-prompt-20260911/mypy.log",
+    "log_sha256": "caf4cb276b1b834b69b4a51aa776668a80ee64e1a2fd04bb890970c67d4fd7e7",
+    "result_summary": "Success: no issues found in 57 source files"
+  },
+  {
+    "name": "compileall",
+    "command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-m",
+      "compileall",
+      "-q",
+      "core",
+      "athba",
+      "llm_service",
+      "scripts"
+    ],
+    "exit_code": 0,
+    "seconds": 0.065,
+    "log_path": "docs/evidence/pr30-naming-prompt-20260911/compileall.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "result_summary": "Completed successfully without output"
+  },
+  {
+    "name": "diff-check",
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "seconds": 0.008,
+    "log_path": "docs/evidence/pr30-naming-prompt-20260911/diff-check.log",
+    "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "result_summary": "Completed successfully without output"
+  }
+]

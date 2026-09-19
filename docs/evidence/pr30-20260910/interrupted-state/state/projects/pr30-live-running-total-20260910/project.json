@@ -1,0 +1,32 @@
+{
+  "default_ref": "main",
+  "generated_paths": [
+    "__pycache__",
+    ".pytest_cache"
+  ],
+  "project_id": "pr30-live-running-total-20260910",
+  "repository_root": "/srv/ATHBA/state/projects/pr30-live-running-total-20260910/repository",
+  "runtime": {
+    "build_command": null,
+    "environment_path": "/srv/ATHBA/.venv/bin/python",
+    "environment_resources": [
+      "/srv/ATHBA/.venv"
+    ],
+    "kind": "python",
+    "lifetime": "shared",
+    "test_command": [
+      "/srv/ATHBA/.venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "."
+    ],
+    "version": "3.14"
+  },
+  "status": "ready",
+  "trusted_base_sha": "92aa8b6a8e39a1ea0f8f0d0090c5f880cecc5f91",
+  "workspace_lifetime": "disposable"
+}

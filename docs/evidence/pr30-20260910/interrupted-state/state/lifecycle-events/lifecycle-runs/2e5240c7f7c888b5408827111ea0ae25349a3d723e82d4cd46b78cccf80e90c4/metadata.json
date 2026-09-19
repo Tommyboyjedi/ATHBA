@@ -1,0 +1,7 @@
+{
+  "athba_version": "32dfe17d4969927a784305d2892f63b927e76f35",
+  "original_requirement": "Provide a RunningTotal class in running_total.py. A newly created RunningTotal starts with a total of zero. Calling add(amount) adds the signed integer amount to its running total. Calling total() returns the current total without changing it. Adding 3 and then -1 must expose a total of 2. Keep the implementation dependency-free and in memory.\n",
+  "project_id": "pr30-live-running-total-20260910",
+  "rack_ai_version": "469dc13c4d669266de21c629cc449f889364b7e2",
+  "run_id": "pr30-live-running-total-20260910"
+}

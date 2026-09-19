@@ -1,0 +1,21 @@
+{
+  "behaviorally_accepted_revision": null,
+  "completed_behavioral_transitions": 2,
+  "implementation_revision": "32dfe17d4969927a784305d2892f63b927e76f35",
+  "phase_at_interruption": "behavioral planning: gatekeeper_checklist",
+  "post_behavior_started": false,
+  "runner_alive": false,
+  "runtime_state_modified_to_claim_completion": false,
+  "snapshot_sha256": {
+    "interrupted-state/state/features/pr30-live-running-total-20260910.json": "d43b50d852365ac59ee5604d455e8686160c9f135df7fea9012c3b8a98daf61c",
+    "interrupted-state/state/lifecycle-events/lifecycle-runs/2e5240c7f7c888b5408827111ea0ae25349a3d723e82d4cd46b78cccf80e90c4/events.jsonl": "641c383b5e1bdb26d870b96554948403e5581b9d8e5ff2e6b81d1b236310ceea",
+    "interrupted-state/state/lifecycle-events/lifecycle-runs/2e5240c7f7c888b5408827111ea0ae25349a3d723e82d4cd46b78cccf80e90c4/metadata.json": "bfd65ee67d27e08f269c1e2004c5ca02eef8c76079d65bb5e01d9214072758f7",
+    "interrupted-state/state/projects/pr30-live-running-total-20260910/project.json": "ab6b2cc9ec7bf6231fb65f844b026c40d7b114f692b94f7894e6f47786aa7660",
+    "interrupted-state/state/runs/pr30-live-running-total-20260910.json": "fe2fdc1384ea2da70f01df88e98d5bf3c5a2916e94641b45721bcd6abe446e1c",
+    "interrupted-state/target-repository.bundle": "01a948a92d53fd0399b17b50a3b102d0eb3b77419a81ebe899935f4b9d07f347"
+  },
+  "status": "cancelled_by_user",
+  "target_setup_revision": "92aa8b6a8e39a1ea0f8f0d0090c5f880cecc5f91",
+  "target_tracked_status": "",
+  "transition_in_flight": 3
+}

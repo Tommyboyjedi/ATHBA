@@ -1,0 +1,71 @@
+........................................................................ [ 41%]
+........................................................................ [ 82%]
+...............................                                          [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:169: 8743 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:169: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    return asyncio.iscoroutinefunction(obj) or inspect.isasyncgenfunction(obj)
+
+.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:433: 175 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:433: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    return asyncio.iscoroutinefunction(func)
+
+core/development/microcycle_domain.py:81
+  /srv/ATHBA/core/development/microcycle_domain.py:81: PytestCollectionWarning: cannot collect test class 'TestScenarioDraft' because it has a __init__ constructor (from: tests/development/test_post_behavior_integration.py)
+    @dataclass(frozen=True)
+
+tests/development/test_post_behavior_authority.py::test_focused_context_excludes_tests_documents_and_unchanged_same_file_function
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:1005: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    return asyncio.get_event_loop_policy()
+
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:751: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    _restore_event_loop_policy(asyncio.get_event_loop_policy()),
+
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:977: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(new_loop_policy)
+
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:978: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:766: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:811: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:835: DeprecationWarning: 'asyncio.set_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    asyncio.set_event_loop_policy(previous_policy)
+
+tests/development/test_post_behavior_boundaries.py: 8 warnings
+tests/development/test_post_behavior_integration.py: 7 warnings
+tests/development/test_post_behavior_lifecycle.py: 27 warnings
+tests/development/test_post_behavior_provenance.py: 2 warnings
+  /srv/ATHBA/.venv/lib/python3.14/site-packages/pytest_asyncio/plugin.py:847: DeprecationWarning: 'asyncio.get_event_loop_policy' is deprecated and slated for removal in Python 3.16
+    policy = asyncio.get_event_loop_policy()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+175 passed, 9228 warnings in 12.15s

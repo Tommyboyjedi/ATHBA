@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 
 from core.development.microcycle_domain import LanguageAdapterDescriptor
 from core.development.python_specification_dependencies import dependency_findings
-from core.development.python_specification_storage import storage_findings
+from core.development.python_specification_storage import DECORATOR_ASSURANCE, decorator_warnings, storage_findings
 from core.development.python_specification_surface import capability_matches, inspect_surface, known_capability
 from core.development.specification_evidence_policy import EvidenceDecision, EvidenceResult, EvidenceStatus, SpecificationSnapshot
 from core.development.specification_obligations import EvidencePolicy, ObligationModality
@@ -29,12 +29,14 @@ class PythonSpecificationEvidenceAdapter:
             return unsupported(decision, snapshot, snapshot.diagnostics + ("incomplete/unsupported source boundary",))
         if decision.policy in {EvidencePolicy.NON_GOAL, EvidencePolicy.PUBLIC_SURFACE}:
             return surface_result(decision, snapshot, trees)
+        warnings: tuple[str, ...] = ()
         if decision.policy == EvidencePolicy.DEPENDENCY:
             failed, unknown = dependency_findings(snapshot)
         elif decision.policy == EvidencePolicy.STORAGE:
             if decision.modality != ObligationModality.FORBIDDEN and "in-memory" not in decision.subject and "in memory" not in decision.subject:
                 return unsupported(decision, snapshot, ("positive persistence has no static absence policy",))
             failed, unknown = storage_findings(trees)
+            warnings = decorator_warnings(trees, tuple(file.path for file in snapshot.files if production_python(file)))
             dependencies, metadata_unknown = dependency_findings(snapshot)
             unknown += metadata_unknown + dependencies
             unknown += tuple(f"{file.path}: unsupported persistence configuration" for file in snapshot.files
@@ -45,11 +47,11 @@ class PythonSpecificationEvidenceAdapter:
         else:
             return unsupported(decision, snapshot, ("no deterministic verifier registered",))
         if failed:
-            return EvidenceResult(EvidenceStatus.FAIL, decision.policy, snapshot.revision, failed)
+            return EvidenceResult(EvidenceStatus.FAIL, decision.policy, snapshot.revision, failed, warnings)
         if unknown:
-            return unsupported(decision, snapshot, unknown)
-        return EvidenceResult(EvidenceStatus.PASS, decision.policy, snapshot.revision,
-                              ("canonical source and declarations satisfy the bounded static policy",))
+            return replace(unsupported(decision, snapshot, unknown), findings=warnings)
+        details = (DECORATOR_ASSURANCE,) if warnings else ("canonical source and declarations satisfy the bounded static policy",)
+        return EvidenceResult(EvidenceStatus.PASS, decision.policy, snapshot.revision, details, warnings)
 
 
 def unsupported(decision: EvidenceDecision, snapshot: SpecificationSnapshot, details: tuple[str, ...]) -> EvidenceResult:

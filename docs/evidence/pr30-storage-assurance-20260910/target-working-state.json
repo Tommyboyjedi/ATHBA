@@ -1,0 +1,8 @@
+{
+  "head": "eafb172da6d834725b70e409ff7f756a194bc0e8",
+  "status": "M  tests/test_running_total.py\n",
+  "staged_diff": "diff --git a/tests/test_running_total.py b/tests/test_running_total.py\nindex 0d8d5df..7d6dadf 100644\n--- a/tests/test_running_total.py\n+++ b/tests/test_running_total.py\n@@ -8,7 +8,3 @@ def test_REQ_02():\n     rt = RunningTotal()\n     rt.add(10)\n     assert rt.total == 10\n-\n-def test_REQ_03_S001():\n-    rt = RunningTotal()\n-    rt.add(5)\n",
+  "unstaged_diff": "",
+  "index_entries": "100644 6c56ff1bd9054f9e9a0147f85233c996b06536d7 0\t.gitignore\n100644 5b58ffb0ddb9d4845fe475593041fa51e64f718d 0\trunning_total.py\n100644 7d6dadf6c7ef28c3e56fe6df2ddb3d59b66f998b 0\ttests/test_running_total.py\n",
+  "note": "Original stopped worktree/index retained without cleanup; snapshots and patches preserve generated frontier test state."
+}

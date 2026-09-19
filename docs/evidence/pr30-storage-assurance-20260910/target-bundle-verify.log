@@ -1,0 +1,29 @@
+The bundle contains these 25 refs:
+eafb172da6d834725b70e409ff7f756a194bc0e8 refs/heads/athba/microcycles/f53ae3e641a164d4b73554aa4b5e0723db47e0a3dd4ed8955fbb899973321514
+eafb172da6d834725b70e409ff7f756a194bc0e8 refs/heads/main
+56e3ce8ad5d4d361beb6ebff8934b18cb3f43a1a refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_01--frontier-0--pr30-storage-assurance-20260910T151020Z--REQ_01--frontier-0--developer-1--submission-3701482993578738602
+9277ff9d627eb5c037191303b76b370ce94f104f refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_01--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_01--scenario-draft-1--submission-3315799675791801070
+500449d5ffc6a9755a232c858111e379b11bbfe4 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_02--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_02--scenario-draft-1--submission-15263031390143388607
+0f3995602c394720db7b195a396184fec82527af refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_02--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_02--scenario-draft-2--submission-15263032489655016818
+5cb874108984019602e83de149b42a62c7b928c8 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft-1--submission-7105236011776239844
+a1d85023d65685b9d5d641c663baeef4160b2119 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft-2--submission-7105239310311124477
+a1d85023d65685b9d5d641c663baeef4160b2119 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft-3--submission-7105238210799496266
+9c66be5c80b8e46f6600a8459f2d6ae790b30920 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_03--scenario-draft-4--submission-7105232713241355211
+6217f7b7f1405bdce10c203fae06c921d039dc74 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_03-S001--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_03-S001--scenario-draft-1--submission-17751329686830960883
+6b8a5dd84a0f027bfb0a3b4ace7fc1f7c8aeb608 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_03-S001--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_03-S001--scenario-draft-2--submission-17751330786342589094
+bad2dacbe00c955a99d3f1d8b6a12483748bc955 refs/heads/rack/change-pr30-storage-assurance-20260910T151020Z--REQ_03-S001--scenario-draft--pr30-storage-assurance-20260910T151020Z--REQ_03-S001--scenario-draft-3--submission-17751331885854217305
+eafb172da6d834725b70e409ff7f756a194bc0e8 HEAD
+bad2dacbe00c955a99d3f1d8b6a12483748bc955 worktrees/repo10/HEAD
+9277ff9d627eb5c037191303b76b370ce94f104f worktrees/repo/HEAD
+0f3995602c394720db7b195a396184fec82527af worktrees/repo3/HEAD
+5cb874108984019602e83de149b42a62c7b928c8 worktrees/repo4/HEAD
+a1d85023d65685b9d5d641c663baeef4160b2119 worktrees/repo5/HEAD
+a1d85023d65685b9d5d641c663baeef4160b2119 worktrees/repo6/HEAD
+9c66be5c80b8e46f6600a8459f2d6ae790b30920 worktrees/repo7/HEAD
+56e3ce8ad5d4d361beb6ebff8934b18cb3f43a1a worktrees/repo1/HEAD
+6b8a5dd84a0f027bfb0a3b4ace7fc1f7c8aeb608 worktrees/repo9/HEAD
+500449d5ffc6a9755a232c858111e379b11bbfe4 worktrees/repo2/HEAD
+6217f7b7f1405bdce10c203fae06c921d039dc74 worktrees/repo8/HEAD
+The bundle records a complete history.
+The bundle uses this hash algorithm: sha1
+/srv/ATHBA/docs/evidence/pr30-storage-assurance-20260910/target-repository.bundle is okay
