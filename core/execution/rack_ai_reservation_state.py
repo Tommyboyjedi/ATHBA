@@ -19,6 +19,7 @@ class RackAiReservationState:
     pending_workspace: str | None = None
     pending_inference: str | None = None
     ready_observed: bool = False
+    service_limits: dict[str, dict[str, int]] = field(default_factory=dict)
     workspace_generations: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -29,6 +30,15 @@ class RackAiReservationState:
         for key, value in self.workspace_generations.items():
             if not isinstance(key, str) or not key.strip() or not isinstance(value, int) or value < 0:
                 raise ValueError("workspace execution generations must be non-negative by submission")
+        for service, limits in self.service_limits.items():
+            if not isinstance(service, str) or not service.strip():
+                raise ValueError("service limit keys must be non-empty service names")
+            if not isinstance(limits, dict):
+                raise ValueError("service limits must be mappings")
+            for field in ("max_input_tokens", "max_output_tokens"):
+                value = limits.get(field)
+                if isinstance(value, bool) or type(value) is not int or value <= 0:
+                    raise ValueError(f"service limits require positive {field}")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -38,12 +48,25 @@ class RackAiReservationState:
         generations = value.get("workspace_generations", {})
         if not isinstance(generations, dict):
             raise ValueError("workspace execution generations must be a mapping")
+        service_limits = value.get("service_limits", {})
+        if not isinstance(service_limits, dict):
+            raise ValueError("service limits must be a mapping")
         return cls(**{
             **value,
             "services": tuple(value["services"]),
             "ready_observed": bool(value.get("ready_observed", False)),
+            "service_limits": _service_limits_from_dict(service_limits),
             "workspace_generations": {str(key): int(item) for key, item in generations.items()},
         })
+
+
+def _service_limits_from_dict(value: dict) -> dict[str, dict[str, int]]:
+    limits: dict[str, dict[str, int]] = {}
+    for service, published in value.items():
+        if not isinstance(published, dict):
+            raise ValueError("service limits must be mappings")
+        limits[str(service)] = {str(key): item for key, item in published.items()}
+    return limits
 
 
 class ReservationStateRepository(Protocol):

@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from core.execution.rack_ai_reservation import RackAiReservation
 from core.execution.rack_ai_runtime import RackAiResourceWait
+from core.execution.rack_ai_service_limits import RackAiServiceLimits
 
 
 class RackAiScopedAccess:
@@ -23,7 +24,9 @@ class RackAiScopedAccess:
         if not isinstance(model, str) or not model:
             raise RackAiResourceWait("Ready service did not identify its model")
         config = self.reservation.client.configuration
+        limits = RackAiServiceLimits.from_reserved_service(self.service, member)
         body = {**payload, "model": model}
+        _require_output_within_service_limit(self.service, body, limits)
         if "response_format" in body:
             # Preserve the JSON-schema constraint in the Responses API's native field.
             schema = body.pop("response_format")["json_schema"]
@@ -46,3 +49,15 @@ class RackAiScopedAccess:
             if identity is not None and state.pending_inference not in {None, identity}:
                 raise RackAiResourceWait("scoped inference is unresolved; reconcile its original identity")
             binding.save(replace(state, pending_inference=identity))
+
+
+def _require_output_within_service_limit(
+    service: str, body: dict, limits: RackAiServiceLimits
+) -> None:
+    value = body.get("max_output_tokens")
+    if isinstance(value, bool) or type(value) is not int or value <= 0:
+        raise RackAiResourceWait(f"ATHBA {service} output budget is malformed")
+    if value > limits.max_output_tokens:
+        raise RackAiResourceWait(
+            f"ATHBA {service} output budget exceeds RackAI max_output_tokens"
+        )

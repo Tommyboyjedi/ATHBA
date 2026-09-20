@@ -1,5 +1,6 @@
 """Focused campaign lifecycle tests; no live RackAI or model calls."""
 from copy import deepcopy
+import inspect
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -10,8 +11,11 @@ import pytest
 
 from core.development.strict_tdd_run_domain import StrictTddRunState, StrictTddRunStatus
 from core.development.strict_tdd_run_store import StrictTddRunStateRepository
+from core.execution import rack_ai_service_limits as service_limits_source
+from core.execution import rack_ai_workspace_runtime as workspace_runtime_source
 from core.execution.rack_ai_reservation import RackAiReservation
 from core.execution.rack_ai_reservation_state import ReservationBinding
+from core.execution.rack_ai_service_limits import RackAiServiceLimits
 from core.execution.rack_ai_runtime import RackAiRuntimeConfiguration, RackAiRuntimeError, RackAiResourceWait
 from core.execution.rack_ai_scoped_access import RackAiScopedAccess
 from core.execution.rack_ai_workspace_runtime import RackAiWorkspaceRuntime
@@ -29,6 +33,10 @@ class Runtime:
         self.reservations = {}
         self.acquisitions = {}
         self.states = {'local-primary': 'ready', 'local-coder': 'ready'}
+        self.service_limits = {
+            'local-primary': dict(max_input_tokens=32768, max_output_tokens=4096),
+            'local-coder': dict(max_input_tokens=8192, max_output_tokens=2048),
+        }
         self.inspect_hook = None
         self.inspect_work_hook = None
         self.fail_reserve = False
@@ -50,7 +58,11 @@ class Runtime:
             if key not in self.acquisitions:
                 identity = f'R{len(self.acquisitions)+1}'
                 view = dict(id=identity, priority=request['priority'], services={
-                    name: dict(state=self.states[name], model=name, gateway_path=f'/scoped/{identity}/{name}/v1')
+                    name: dict(
+                        state=self.states[name], model=name,
+                        gateway_path=f'/scoped/{identity}/{name}/v1',
+                        **self.service_limits[name],
+                    )
                     for name in request['services']})
                 self.acquisitions[key] = identity
                 self.reservations[identity] = view
@@ -140,6 +152,48 @@ def configure_runtime_env(tmp_path, monkeypatch):
     return token
 
 
+def workspace_payload(service='local-primary', requirements=None):
+    return dict(work_id='stable-submission', service=service, payload=dict(
+        kind='workspace', workspace=dict(
+            repository=dict(id='fixture', base_ref='main'),
+            objective='Make a bounded change.',
+            allowed_paths=['tests/test_fixture.py'],
+            acceptance=dict(commands=[['python3', '-m', 'pytest']]),
+            requirements={} if requirements is None else dict(requirements),
+            limits=dict(
+                max_implementation_attempts=1, timeout_seconds=10,
+                network='disabled',
+            ),
+        ),
+    ))
+
+
+def test_reserved_service_limits_parse_published_input_and_output_metadata():
+    limits = RackAiServiceLimits.from_reserved_service(
+        'local-primary',
+        dict(max_input_tokens=12345, max_output_tokens=678),
+    )
+    assert limits.max_input_tokens == 12345
+    assert limits.max_output_tokens == 678
+
+
+def test_reserved_service_limits_parse_nested_limits_metadata():
+    limits = RackAiServiceLimits.from_reserved_service(
+        'local-primary',
+        dict(limits=dict(max_input_tokens=23456, max_output_tokens=789)),
+    )
+    assert limits.max_input_tokens == 23456
+    assert limits.max_output_tokens == 789
+
+
+def test_rack_ai_limit_integration_has_no_fixed_local_primary_budget():
+    source = (
+        inspect.getsource(service_limits_source)
+        + inspect.getsource(workspace_runtime_source)
+    )
+    assert '65536' not in source
+
+
 def test_runtime_configuration_defaults_resource_wait_for_cold_backend_start(tmp_path, monkeypatch):
     configure_runtime_env(tmp_path, monkeypatch)
     monkeypatch.delenv("ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS", raising=False)
@@ -172,6 +226,9 @@ def test_one_campaign_reserves_required_services_once_and_persists_identity(tmp_
     assert calls[0]['request']['priority'] == 'low'
     assert store.load('campaign').rack_ai.reservation_id == 'R1'
     assert store.load('campaign').rack_ai.work_id == calls[0]['request']['work_id']
+    persisted_limits = store.load_reservation('campaign').service_limits
+    assert persisted_limits['local-primary'] == client.service_limits['local-primary']
+    assert persisted_limits['local-coder'] == client.service_limits['local-coder']
     # Unrelated semantic persistence cannot overwrite the access receipt.
     store.save(StrictTddRunState('campaign', 'project', 'identity', StrictTddRunStatus.RUNNING))
     assert store.load('campaign').rack_ai.reservation_id == 'R1'
@@ -593,3 +650,68 @@ def test_uncertain_scoped_inference_blocks_terminal_member_replacement(tmp_path,
     with pytest.raises(RackAiResourceWait, match="unresolved work"):
         reservation.ready("local-primary")
     assert not operations(client, "release_reservation")
+
+
+@pytest.mark.parametrize('advertised_input_limit', [32768, 65536])
+def test_workspace_context_window_uses_reserved_service_max_input_tokens(
+    tmp_path, monkeypatch, advertised_input_limit
+):
+    reservation, client, _store = session(tmp_path)
+    monkeypatch.setattr(
+        'core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read',
+        lambda _, value: value,
+    )
+    client.service_limits['local-primary']['max_input_tokens'] = advertised_input_limit
+    transport = RackAiWorkspaceRuntime(reservation)
+    transport.submit(workspace_payload(
+        requirements=dict(
+            complexity='medium', requires_large_context=False, context_window=1,
+        ),
+    ))
+    submitted = operations(client, 'submit_work')[0]['request']
+    requirements = submitted['payload']['workspace']['requirements']
+    assert requirements['context_window'] == advertised_input_limit
+    assert requirements['complexity'] == 'medium'
+    assert requirements['requires_large_context'] is False
+
+
+def test_workspace_context_window_prefers_reserved_service_over_stale_payload(
+    tmp_path, monkeypatch
+):
+    reservation, client, _store = session(tmp_path)
+    monkeypatch.setattr(
+        'core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read',
+        lambda _, value: value,
+    )
+    client.service_limits['local-primary']['max_input_tokens'] = 24576
+    transport = RackAiWorkspaceRuntime(reservation)
+    transport.submit(workspace_payload(requirements=dict(context_window=1024)))
+    submitted = operations(client, 'submit_work')[0]['request']
+    assert submitted['payload']['workspace']['requirements']['context_window'] == 24576
+
+
+def test_missing_reserved_input_limit_fails_before_workspace_submission(tmp_path):
+    reservation, client, _store = session(tmp_path)
+    del client.service_limits['local-primary']['max_input_tokens']
+    transport = RackAiWorkspaceRuntime(reservation)
+    with pytest.raises(RackAiResourceWait, match='local-primary.*max_input_tokens'):
+        transport.submit(workspace_payload())
+    assert not operations(client, 'submit_work')
+
+
+def test_scoped_reasoning_rejects_output_budget_above_reserved_ceiling(
+    tmp_path, monkeypatch
+):
+    reservation, client, _store = session(tmp_path)
+    monkeypatch.setenv('OPENAI_API_KEY', 'fixture')
+    provider = OpenAIProvider(max_retries=0)
+    provider.runtime_access = RackAiScopedAccess(reservation, 'local-primary')
+    client.service_limits['local-primary']['max_output_tokens'] = 128
+    sent = []
+    def post(url, **kwargs):
+        sent.append((url, kwargs))
+        raise AssertionError('output ceiling failure must happen before transport')
+    monkeypatch.setattr('core.llm.providers.openai_provider.httpx.post', post)
+    with pytest.raises(RackAiResourceWait, match='max_output_tokens'):
+        provider.invoke(ProviderRequest('prompt', 'local-primary', max_tokens=129))
+    assert sent == []

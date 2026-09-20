@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from core.execution.rack_ai_reservation_state import RackAiReservationState, ReservationBinding
 from core.execution.rack_ai_runtime import RackAiResourceWait, RackAiRuntimeClient, RackAiRuntimeError
+from core.execution.rack_ai_service_limits import RackAiServiceLimits
 
 TERMINAL_RESERVATIONS = frozenset({"released", "cancelled", "expired", "preempted"})
 WAITING_RESERVATIONS = frozenset({"preparing", "partial", "preempting", "releasing", "recovery_required"})
@@ -43,7 +44,7 @@ class RackAiReservation:
                 except RackAiRuntimeError as error:
                     if (error.code == "not_found" and state.reservation_id.startswith("unavailable-")
                             and not state.pending_workspace and not state.pending_inference):
-                        state = replace(state, reservation_id=None, ready_observed=False)
+                        state = replace(state, reservation_id=None, ready_observed=False, service_limits={})
                         binding.save(state)
                     else:
                         raise
@@ -80,7 +81,7 @@ class RackAiReservation:
                 except RackAiRuntimeError as error:
                     if (error.code == "not_found" and state.reservation_id.startswith("unavailable-")
                             and not state.pending_workspace and not state.pending_inference):
-                        state = replace(state, reservation_id=None, ready_observed=False)
+                        state = replace(state, reservation_id=None, ready_observed=False, service_limits={})
                         binding.save(state)
                     else:
                         raise RackAiResourceWait(f"reservation inspect: {error.code}") from error
@@ -130,6 +131,18 @@ class RackAiReservation:
 
     def ready(self, service: str) -> dict:
         return ReservationAccessWait(self).ready(service)
+
+    def service_limits(self, service: str) -> RackAiServiceLimits:
+        with self.lock:
+            if service not in self.services:
+                raise RackAiResourceWait("service was not requested by this campaign")
+            state = self._binding().load()
+            if state is None:
+                raise RackAiResourceWait(f"RackAI {service} did not publish max_input_tokens")
+            member = state.service_limits.get(service)
+            if member is None:
+                raise RackAiResourceWait(f"RackAI {service} did not publish max_input_tokens")
+            return RackAiServiceLimits.from_reserved_service(service, member)
 
     def finish(self) -> None:
         self.closed = True
@@ -216,10 +229,30 @@ def _finish_reservation(client: RackAiRuntimeClient, binding: ReservationBinding
 
 
 def _remember_ready_state(binding: ReservationBinding, state: RackAiReservationState, view: dict) -> RackAiReservationState:
-    if not state.ready_observed and _reservation_ready(view, state.services):
-        state = replace(state, ready_observed=True)
-        binding.save(state)
+    if _reservation_ready(view, state.services):
+        service_limits = _ready_service_limits(view, state.services)
+        updated = replace(state, ready_observed=True, service_limits=service_limits)
+        if updated != state:
+            binding.save(updated)
+        return updated
     return state
+
+
+def _ready_service_limits(view: dict, services: tuple[str, ...]) -> dict[str, dict[str, int]]:
+    members = view.get("services")
+    if not isinstance(members, dict):
+        raise RackAiResourceWait("RackAI reservation services are malformed")
+    limits: dict[str, dict[str, int]] = {}
+    for service in services:
+        member = members.get(service)
+        if not isinstance(member, dict):
+            raise RackAiResourceWait(f"RackAI {service} service record is malformed")
+        published = RackAiServiceLimits.from_reserved_service(service, member)
+        limits[service] = {
+            "max_input_tokens": published.max_input_tokens,
+            "max_output_tokens": published.max_output_tokens,
+        }
+    return limits
 
 
 def _workspace_execution_identity(binding: ReservationBinding, submission_id: str) -> str:
@@ -243,7 +276,7 @@ def _advance_workspace_generation(binding: ReservationBinding, submission_id: st
 def _reserve_state(client: RackAiRuntimeClient, binding: ReservationBinding, state: RackAiReservationState) -> dict:
     state = replace(
         state, priority="low", reservation_id=None, ready_observed=False,
-        release_requested=False, released=False,
+        service_limits={}, release_requested=False, released=False,
     )
     result = client.operation({"operation": "reserve", "request": {
         "work_id": state.work_id, "acquisition_id": state.acquisition_id,
@@ -256,10 +289,12 @@ def _reserve_state(client: RackAiRuntimeClient, binding: ReservationBinding, sta
     if not isinstance(reservation_id, str) or not reservation_id:
         raise RackAiRuntimeError("missing_reservation_identity")
     state = replace(state, reservation_id=reservation_id,
-                    ready_observed=_reservation_ready(result, state.services))
+                    ready_observed=False, service_limits={})
     binding.save(state)
     # Reserve replay is the durable original receipt, never a status/refresh query.
-    return client.operation({"operation": "inspect_reservation", "reservation_id": reservation_id})
+    view = client.operation({"operation": "inspect_reservation", "reservation_id": reservation_id})
+    _remember_ready_state(binding, state, view)
+    return view
 
 
 class _StillWaiting(Exception):
