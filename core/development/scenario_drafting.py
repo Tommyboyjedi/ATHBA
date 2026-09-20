@@ -535,6 +535,7 @@ def _initial_state(request: ScenarioDraftRequest) -> ScenarioDraftRunState:
         test_framework=request.test_framework,
         allowed_test_path=request.allowed_test_path,
         development_base_revision=request.development_base_revision,
+        semantic_annotations=request.semantic_annotations,
     )
 
 
@@ -546,6 +547,7 @@ def _validate_resume(state: ScenarioDraftRunState, request: ScenarioDraftRequest
         (state.test_framework, request.test_framework),
         (state.allowed_test_path, request.allowed_test_path),
         (state.development_base_revision, request.development_base_revision),
+        (state.semantic_annotations, request.semantic_annotations),
     )
     if any(left != right for left, right in immutable):
         raise ValueError("stale scenario draft state must not be reused after ticket, source, or base changes")
@@ -779,6 +781,10 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "do not materialise a frontier or start implementation",
         ],
     }
+    if request.semantic_annotations:
+        payload["semantic_annotations"] = [
+            item.to_dict() for item in request.semantic_annotations
+        ]
     if repair is not None:
         payload["previous_candidate"] = {
             "attempt": repair.attempt_number,

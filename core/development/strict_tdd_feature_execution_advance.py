@@ -20,6 +20,11 @@ from core.development.scenario_drafting_domain import (
 from core.development.strict_microcycle import StrictMicrocycleRequest
 from core.development.strict_tdd_feature_application import FeatureScenarioRequest, FeatureScenarioResult
 from core.development.strict_tdd_feature_execution import _evidence, _facts, _ticket_for
+from core.development.semantic_api_annotations import (
+    ApiExpressionDescriptionRequest,
+    SemanticApiAnnotation,
+    SemanticInteraction,
+)
 from core.development.strict_tdd_transitions import (
     MicrocycleTransitionKind,
     ScenarioAdvanceResult,
@@ -125,24 +130,94 @@ def _source_requirement_evidence(request: FeatureScenarioRequest):
         raise ValueError("behavior source refs are absent from the behavior contract")
     return tuple(clauses[ref] for ref in request.behavior.source_refs)
 
+
+def _scenario_draft_request(
+    executor: "StrictFeatureScenarioExecutor",
+    request: FeatureScenarioRequest,
+    scenario_id: str,
+) -> ScenarioDraftRequest:
+    ticket = _ticket_for(request)
+    language_id = "python"
+    source_evidence = _source_requirement_evidence(request)
+    return ScenarioDraftRequest(
+        scenario_id,
+        ticket,
+        tuple(request.behavior.source_refs),
+        language_id,
+        "pytest",
+        ticket.test_path,
+        _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
+        request.canonical_development_base,
+        source_evidence,
+        _semantic_annotations(executor, request, language_id, source_evidence),
+    )
+
+
+def _semantic_annotations(
+    executor: "StrictFeatureScenarioExecutor",
+    request: FeatureScenarioRequest,
+    language_id: str,
+    source_evidence: tuple[object, ...],
+) -> tuple[SemanticApiAnnotation, ...]:
+    try:
+        adapter = executor.drafting.adapter_catalog.for_language(language_id)
+    except ValueError:
+        return ()
+    describer = getattr(adapter, "describe_api_expression", None)
+    if describer is None:
+        return ()
+    annotations: list[SemanticApiAnnotation] = []
+    seen_symbols: set[str] = set()
+    for expression in _semantic_expression_sources(adapter, request, source_evidence):
+        try:
+            annotation = describer(ApiExpressionDescriptionRequest(expression))
+        except ValueError:
+            continue
+        if annotation.interaction == SemanticInteraction.UNKNOWN.value:
+            continue
+        if annotation.symbol is not None and annotation.symbol in seen_symbols:
+            continue
+        if annotation.symbol is not None:
+            seen_symbols.add(annotation.symbol)
+        annotations.append(annotation)
+    return tuple(annotations)
+
+
+def _semantic_expression_sources(
+    adapter: object,
+    request: FeatureScenarioRequest,
+    source_evidence: tuple[object, ...],
+) -> tuple[str, ...]:
+    expressions: list[str] = []
+    seen: set[str] = set()
+
+    def add(expression: str) -> None:
+        normalized = expression.strip()
+        if not normalized or normalized in seen:
+            return
+        seen.add(normalized)
+        expressions.append(normalized)
+
+    extractor = getattr(adapter, "extract_api_expressions", None)
+    if extractor is not None:
+        for text in (
+            request.behavior.observable_outcome,
+            request.behavior.test_hint,
+            *(str(getattr(item, "text", "")) for item in source_evidence),
+        ):
+            for expression in extractor(text):
+                add(expression)
+    for expression in request.contract.public_api:
+        add(expression)
+    return tuple(expressions)
+
 async def _submit_draft(
     executor: StrictFeatureScenarioExecutor,
     request: FeatureScenarioRequest,
     scenario_id: str,
 ) -> ScenarioAdvanceResult:
-    ticket = _ticket_for(request)
     outcome = await executor.drafting.submit_candidate(
-        ScenarioDraftRequest(
-            scenario_id,
-            ticket,
-            tuple(request.behavior.source_refs),
-            "python",
-            "pytest",
-            ticket.test_path,
-            _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
-            request.canonical_development_base,
-            _source_requirement_evidence(request),
-        ),
+        _scenario_draft_request(executor, request, scenario_id),
         request.project.binding().with_base_sha(request.canonical_development_base),
     )
     result = _draft_outcome(request, scenario_id, outcome.state.status)
@@ -161,19 +236,8 @@ async def _review_intent(
     request: FeatureScenarioRequest,
     scenario_id: str,
 ) -> ScenarioAdvanceResult:
-    ticket = _ticket_for(request)
     outcome = await executor.drafting.review_intent(
-        ScenarioDraftRequest(
-            scenario_id,
-            ticket,
-            tuple(request.behavior.source_refs),
-            "python",
-            "pytest",
-            ticket.test_path,
-            _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
-            request.canonical_development_base,
-            _source_requirement_evidence(request),
-        )
+        _scenario_draft_request(executor, request, scenario_id)
     )
     status = outcome.state.status
     if status == "intent_protocol_failure":

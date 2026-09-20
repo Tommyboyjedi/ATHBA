@@ -5,6 +5,11 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Protocol
 
+from core.development.semantic_api_annotations import (
+    ApiExpressionDescriptionRequest,
+    SemanticApiAnnotation,
+)
+
 MICROCYCLE_SCHEMA_VERSION = 2
 MAX_MICROCYCLE_ATTEMPTS = 4
 
@@ -889,6 +894,7 @@ class LanguageTestAdapter(Protocol):
     def classify_boundary(self, request: BoundaryClassificationRequest) -> BoundaryAssessment: ...
     def materialise_final_test(self, request: FinalTestMaterialisationRequest) -> MaterialisedTestArtifact: ...
     def regression_contract(self, request: RegressionContractRequest) -> RegressionContract: ...
+    def describe_api_expression(self, request: ApiExpressionDescriptionRequest) -> SemanticApiAnnotation: ...
 
 
 @dataclass(frozen=True)

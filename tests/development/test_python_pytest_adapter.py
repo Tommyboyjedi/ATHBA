@@ -3,6 +3,10 @@ from dataclasses import replace
 
 import pytest
 
+from core.development.semantic_api_annotations import (
+    ApiExpressionDescriptionRequest,
+    SemanticInteraction,
+)
 from core.development.microcycle_domain import (
     BoundaryClassificationRequest, BoundaryDiagnostic, DiagnosticFact,
     FinalTestMaterialisationRequest, FragmentationRequest, FrontierExecutionRequest,
@@ -44,6 +48,46 @@ def diagnostic_with_artifact(adapter, tmp_path, model, value):
     diagnostic = execute(adapter, tmp_path, model, value)
     object.__setattr__(diagnostic, "_artifact", value)
     return diagnostic
+
+
+def test_python_api_expression_describer_classifies_safe_forms():
+    adapter = PythonPytestAdapter()
+
+    cases = [
+        ("RunningTotal.total() -> int", "total", SemanticInteraction.INVOKE.value, "int"),
+        ("RunningTotal.total", "total", SemanticInteraction.READ.value, None),
+        ("RunningTotal()", "RunningTotal", SemanticInteraction.CONSTRUCT.value, None),
+        ("obj.total()", "total", SemanticInteraction.INVOKE.value, None),
+        ("total()", "total", SemanticInteraction.INVOKE.value, None),
+        ("RunningTotal.add(amount: int) -> None", "add", SemanticInteraction.INVOKE.value, "None"),
+    ]
+
+    for expression, symbol, interaction, result in cases:
+        annotation = adapter.describe_api_expression(
+            ApiExpressionDescriptionRequest(expression)
+        )
+        assert annotation.symbol == symbol
+        assert annotation.interaction == interaction
+        assert annotation.source_expression == expression
+        assert annotation.result == result
+
+
+def test_python_api_expression_extractor_finds_explicit_source_text_forms():
+    expressions = PythonPytestAdapter().extract_api_expressions(
+        "Calling total() twice leaves obj.total unchanged after add(amount)."
+    )
+
+    assert expressions == ("total()", "obj.total", "add(amount)")
+
+
+def test_python_api_expression_describer_is_fail_soft_for_unknown_forms():
+    annotation = PythonPytestAdapter().describe_api_expression(
+        ApiExpressionDescriptionRequest("total + 1")
+    )
+
+    assert annotation.symbol is None
+    assert annotation.interaction == SemanticInteraction.UNKNOWN.value
+    assert annotation.source_expression == "total + 1"
 
 
 def test_missing_import_at_active_frontier_is_valid_red(tmp_path):
