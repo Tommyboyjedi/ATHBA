@@ -153,13 +153,15 @@ def configure_runtime_env(tmp_path, monkeypatch):
 
 
 def workspace_payload(service='local-primary', requirements=None):
+    if requirements is None:
+        requirements = dict(complexity='small', requires_large_context=False)
     return dict(work_id='stable-submission', service=service, payload=dict(
         kind='workspace', workspace=dict(
             repository=dict(id='fixture', base_ref='main'),
             objective='Make a bounded change.',
             allowed_paths=['tests/test_fixture.py'],
             acceptance=dict(commands=[['python3', '-m', 'pytest']]),
-            requirements={} if requirements is None else dict(requirements),
+            requirements=dict(requirements),
             limits=dict(
                 max_implementation_attempts=1, timeout_seconds=10,
                 network='disabled',
@@ -338,6 +340,41 @@ def test_model_payload_uses_returned_scoped_access_and_preserves_schema(tmp_path
     assert store.load_reservation('campaign').pending_inference is None
 
 
+def test_scoped_reasoning_freezes_published_input_limit_before_dispatch(tmp_path, monkeypatch):
+    reservation, client, store = session(tmp_path)
+    monkeypatch.setenv('OPENAI_API_KEY', 'fixture')
+    provider = OpenAIProvider(max_retries=0)
+    provider.runtime_access = RackAiScopedAccess(reservation, 'local-primary')
+    client.service_limits['local-primary']['max_input_tokens'] = 12321
+    sent = []
+    def post(url, **kwargs):
+        sent.append((url, kwargs))
+        return httpx.Response(200, request=httpx.Request('POST', url), json={
+            'model': 'local-primary', 'output': [{'content': [{'text': 'ok'}]}]})
+    monkeypatch.setattr('core.llm.providers.openai_provider.httpx.post', post)
+    provider.invoke(ProviderRequest('prompt', 'local-primary', max_tokens=64))
+    assert sent
+    frozen = store.load_reservation('campaign').service_limits['local-primary']
+    assert frozen['max_input_tokens'] == 12321
+    assert frozen['max_output_tokens'] == client.service_limits['local-primary']['max_output_tokens']
+
+
+def test_scoped_reasoning_missing_input_limit_fails_before_dispatch(tmp_path, monkeypatch):
+    reservation, client, _store = session(tmp_path)
+    monkeypatch.setenv('OPENAI_API_KEY', 'fixture')
+    provider = OpenAIProvider(max_retries=0)
+    provider.runtime_access = RackAiScopedAccess(reservation, 'local-primary')
+    del client.service_limits['local-primary']['max_input_tokens']
+    sent = []
+    def post(url, **kwargs):
+        sent.append((url, kwargs))
+        raise AssertionError('missing input metadata must fail before transport')
+    monkeypatch.setattr('core.llm.providers.openai_provider.httpx.post', post)
+    with pytest.raises(RackAiResourceWait, match='local-primary.*max_input_tokens'):
+        provider.invoke(ProviderRequest('prompt', 'local-primary', max_tokens=64))
+    assert sent == []
+
+
 
 def test_scoped_reasoning_does_not_dispatch_through_preempting_or_preempted(tmp_path, monkeypatch):
     reservation, client, _ = session(tmp_path)
@@ -367,6 +404,7 @@ def test_workspace_reconciles_before_submit_and_cancels_remotely(tmp_path, monke
     client.configuration = replace(client.configuration, resource_wait_seconds=960.0)
     transport = RackAiWorkspaceRuntime(reservation)
     payload = dict(work_id='stable-submission',service='local-coder',payload=dict(kind='workspace',workspace=dict(
+        requirements=dict(complexity='small', requires_large_context=False),
         limits=dict(timeout_seconds=10))))
     transport.submit(payload)
     first = operations(client,'submit_work')[0]['request']
@@ -521,6 +559,7 @@ def test_changed_workspace_payload_under_existing_work_id_fails_without_generati
     monkeypatch.setattr('core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read', lambda _, value: value)
     transport = RackAiWorkspaceRuntime(reservation)
     payload = dict(work_id='stable-submission', service='local-coder', payload=dict(kind='workspace', workspace=dict(
+        requirements=dict(complexity='small', requires_large_context=False),
         limits=dict(timeout_seconds=10))))
     transport.submit(payload)
     changed = deepcopy(payload)
@@ -653,29 +692,32 @@ def test_uncertain_scoped_inference_blocks_terminal_member_replacement(tmp_path,
 
 
 @pytest.mark.parametrize('advertised_input_limit', [32768, 65536])
-def test_workspace_context_window_uses_reserved_service_max_input_tokens(
+def test_workspace_requirements_keep_only_public_schema_and_freeze_dynamic_limits(
     tmp_path, monkeypatch, advertised_input_limit
 ):
-    reservation, client, _store = session(tmp_path)
+    reservation, client, store = session(tmp_path)
     monkeypatch.setattr(
         'core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read',
         lambda _, value: value,
     )
     client.service_limits['local-primary']['max_input_tokens'] = advertised_input_limit
+    client.service_limits['local-primary']['max_output_tokens'] = advertised_input_limit // 2
     transport = RackAiWorkspaceRuntime(reservation)
     transport.submit(workspace_payload(
         requirements=dict(
             complexity='medium', requires_large_context=False, context_window=1,
+            max_input_tokens=2, max_output_tokens=3, model='local-primary',
         ),
     ))
     submitted = operations(client, 'submit_work')[0]['request']
     requirements = submitted['payload']['workspace']['requirements']
-    assert requirements['context_window'] == advertised_input_limit
-    assert requirements['complexity'] == 'medium'
-    assert requirements['requires_large_context'] is False
+    assert requirements == {'complexity': 'medium', 'requires_large_context': False}
+    assert set(requirements) == {'complexity', 'requires_large_context'}
+    frozen = store.load_reservation('campaign').service_limits['local-primary']
+    assert frozen == client.service_limits['local-primary']
 
 
-def test_workspace_context_window_prefers_reserved_service_over_stale_payload(
+def test_workspace_request_without_stale_token_fields_matches_current_rack_ai_schema(
     tmp_path, monkeypatch
 ):
     reservation, client, _store = session(tmp_path)
@@ -683,11 +725,14 @@ def test_workspace_context_window_prefers_reserved_service_over_stale_payload(
         'core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read',
         lambda _, value: value,
     )
-    client.service_limits['local-primary']['max_input_tokens'] = 24576
     transport = RackAiWorkspaceRuntime(reservation)
-    transport.submit(workspace_payload(requirements=dict(context_window=1024)))
+    transport.submit(workspace_payload(requirements=dict(
+        complexity='small', requires_large_context=True,
+    )))
     submitted = operations(client, 'submit_work')[0]['request']
-    assert submitted['payload']['workspace']['requirements']['context_window'] == 24576
+    assert submitted['payload']['workspace']['requirements'] == {
+        'complexity': 'small', 'requires_large_context': True,
+    }
 
 
 def test_missing_reserved_input_limit_fails_before_workspace_submission(tmp_path):

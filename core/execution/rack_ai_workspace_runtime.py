@@ -14,6 +14,7 @@ from core.filesystem_policy import resolve_confined_absolute_path
 
 ACTIVE_WORK_STATES = frozenset({"queued", "running", "waiting", "preempting", "preempted"})
 PREEMPTED_BEFORE_START = "reservation_superseded_by_higher_priority"
+PUBLIC_WORKSPACE_REQUIREMENTS = ("complexity", "requires_large_context")
 
 
 class RackAiWorkspaceRuntime:
@@ -40,12 +41,12 @@ class RackAiWorkspaceRuntime:
             raise RackAiResourceWait("workspace was cancelled by reservation preemption; retry after reacquisition")
         if work is None:
             member = self.reservation.ready(payload["service"])
-            limits = RackAiServiceLimits.from_reserved_service(payload["service"], member)
+            RackAiServiceLimits.from_reserved_service(payload["service"], member)
             reservation_id = member["reservation_id"]
         else:
-            limits = self.reservation.service_limits(payload["service"])
+            self.reservation.service_limits(payload["service"])
             reservation_id = work["reservation_id"]
-        payload = _with_service_limits(payload, limits)
+        payload = _with_public_workspace_requirements(payload)
         self.reservation.mark_workspace(identity)
         request = {**payload, "work_id": self.work_id(identity), "reservation_id": reservation_id}
         try:
@@ -117,13 +118,16 @@ def _preempted_before_start(work: dict) -> bool:
             and work.get("error") == PREEMPTED_BEFORE_START)
 
 
-def _with_service_limits(payload: dict, limits: RackAiServiceLimits) -> dict:
+def _with_public_workspace_requirements(payload: dict) -> dict:
     copied = {**payload}
     payload_body = _required_mapping(copied.get("payload"), "workspace payload")
     workspace = _required_mapping(payload_body.get("workspace"), "workspace body")
-    requirements = dict(_optional_mapping(workspace.get("requirements")))
-    requirements["context_window"] = limits.max_input_tokens
-    workspace["requirements"] = requirements
+    requirements = _optional_mapping(workspace.get("requirements"))
+    workspace["requirements"] = {
+        key: requirements[key]
+        for key in PUBLIC_WORKSPACE_REQUIREMENTS
+        if key in requirements
+    }
     payload_body["workspace"] = workspace
     copied["payload"] = payload_body
     return copied

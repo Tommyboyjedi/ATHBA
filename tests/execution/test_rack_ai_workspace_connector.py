@@ -85,9 +85,16 @@ def test_connector_serializes_canonical_workspace_payload(kind, capabilities, co
     payload = transport.payload
     workspace = payload["payload"]["workspace"]
     assert payload["service"] == ("local-primary" if "reasoning" in capabilities else "local-coder")
-    assert workspace["requirements"]["complexity"] == complexity
-    assert workspace["requirements"]["requires_large_context"] is False
-    assert "priority" not in repr(payload)
+    assert workspace["requirements"] == {
+        "complexity": complexity,
+        "requires_large_context": False,
+    }
+    assert set(workspace["requirements"]) == {"complexity", "requires_large_context"}
+    wire = repr(payload)
+    assert "context_window" not in wire
+    assert "max_input_tokens" not in wire
+    assert "max_output_tokens" not in wire
+    assert "priority" not in wire
     assert "version" not in payload
 
 
