@@ -8,11 +8,13 @@ import time
 
 from core.execution.rack_ai_reservation import RackAiReservation
 from core.execution.rack_ai_runtime import RackAiResourceWait, RackAiRuntimeError
+from core.execution.rack_ai_service_limits import RackAiServiceLimits
 from core.filesystem_policy import resolve_confined_absolute_path
 
 
 ACTIVE_WORK_STATES = frozenset({"queued", "running", "waiting", "preempting", "preempted"})
 PREEMPTED_BEFORE_START = "reservation_superseded_by_higher_priority"
+PUBLIC_WORKSPACE_REQUIREMENTS = ("complexity", "requires_large_context")
 
 
 class RackAiWorkspaceRuntime:
@@ -39,9 +41,12 @@ class RackAiWorkspaceRuntime:
             raise RackAiResourceWait("workspace was cancelled by reservation preemption; retry after reacquisition")
         if work is None:
             member = self.reservation.ready(payload["service"])
+            RackAiServiceLimits.from_reserved_service(payload["service"], member)
             reservation_id = member["reservation_id"]
         else:
+            self.reservation.service_limits(payload["service"])
             reservation_id = work["reservation_id"]
+        payload = _with_public_workspace_requirements(payload)
         self.reservation.mark_workspace(identity)
         request = {**payload, "work_id": self.work_id(identity), "reservation_id": reservation_id}
         try:
@@ -111,3 +116,32 @@ class WorkspacePacketReader:
 def _preempted_before_start(work: dict) -> bool:
     return (work.get("state") == "cancelled" and work.get("started") is None
             and work.get("error") == PREEMPTED_BEFORE_START)
+
+
+def _with_public_workspace_requirements(payload: dict) -> dict:
+    copied = {**payload}
+    payload_body = _required_mapping(copied.get("payload"), "workspace payload")
+    workspace = _required_mapping(payload_body.get("workspace"), "workspace body")
+    requirements = _optional_mapping(workspace.get("requirements"))
+    workspace["requirements"] = {
+        key: requirements[key]
+        for key in PUBLIC_WORKSPACE_REQUIREMENTS
+        if key in requirements
+    }
+    payload_body["workspace"] = workspace
+    copied["payload"] = payload_body
+    return copied
+
+
+def _required_mapping(value: object, label: str) -> dict:
+    if not isinstance(value, dict):
+        raise RackAiResourceWait(f"RackAI {label} is malformed")
+    return {**value}
+
+
+def _optional_mapping(value: object) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise RackAiResourceWait("RackAI workspace requirements are malformed")
+    return {**value}

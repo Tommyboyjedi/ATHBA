@@ -1293,3 +1293,17 @@ async def test_resource_wait_does_not_consume_tester_attempt(monkeypatch):
             await service.submit_candidate(request("catalog"), binding())
     state = store.load("scenario-catalog")
     assert state is None or state.attempts == ()
+
+
+@pytest.mark.asyncio
+async def test_context_limit_failure_does_not_consume_tester_attempt(monkeypatch):
+    from core.execution.rack_ai_runtime import RackAiResourceWait
+    store = MemoryStateStore()
+    service, gateway, _, _ = components([], [], {}, store)
+    async def missing_limit(*_):
+        raise RackAiResourceWait("RackAI local-primary did not publish max_input_tokens")
+    monkeypatch.setattr(gateway, "execute", missing_limit)
+    with pytest.raises(RackAiResourceWait, match="max_input_tokens"):
+        await service.submit_candidate(request("catalog"), binding())
+    state = store.load("scenario-catalog")
+    assert state is None or state.attempts == ()
