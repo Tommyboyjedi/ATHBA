@@ -206,6 +206,93 @@ def test_supported_fragment_missing_production_member(tmp_path, expression):
     assert classify(adapter, fragments, index, diagnostic, "failed").outcome == "failure_before_frontier"
 
 
+def test_non_callable_member_runtime_failure_at_active_frontier_is_valid_red(tmp_path):
+    (tmp_path / "widget_module.py").write_text(
+        "class Widget:\n    def __init__(self):\n        self.total = 0\n"
+    )
+    adapter, model, fragments = prepared(
+        "widget = Widget()\nassert widget.total() == 0",
+        "from widget_module import Widget",
+    )
+    prior = artifact(adapter, model, fragments, 1)
+    assert execute(adapter, tmp_path, model, prior).kind == "green"
+    value = artifact(adapter, model, fragments, 2)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    facts = {item.name: item.value for item in diagnostic.facts}
+    assert facts["exception_type"] == "TypeError"
+    assert "'int' object is not callable" in diagnostic.message
+    assessment = classify(adapter, fragments, 2, diagnostic, "green")
+    assert assessment.outcome == "valid_missing_capability_red"
+    assert assessment.diagnostic is diagnostic
+
+
+@pytest.mark.parametrize("body,production,exception", [
+    (
+        "widget = Widget()\nassert widget.values['missing'] == 1",
+        "class Widget:\n    def __init__(self):\n        self.values = {}\n",
+        "KeyError",
+    ),
+    (
+        "widget = Widget()\nassert widget.values[0] == 1",
+        "class Widget:\n    def __init__(self):\n        self.values = []\n",
+        "IndexError",
+    ),
+    (
+        "widget = Widget()\nassert widget.value == int('bad')",
+        "class Widget:\n    def __init__(self):\n        self.value = 0\n",
+        "ValueError",
+    ),
+])
+def test_other_active_frontier_runtime_exceptions_use_generic_red_fallback(
+    tmp_path, body, production, exception,
+):
+    (tmp_path / "widget_module.py").write_text(production)
+    adapter, model, fragments = prepared(body, "from widget_module import Widget")
+    prior = artifact(adapter, model, fragments, 1)
+    assert execute(adapter, tmp_path, model, prior).kind == "green"
+    index = len(fragments) - 1
+    value = artifact(adapter, model, fragments, index)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    facts = {item.name: item.value for item in diagnostic.facts}
+    assert facts["exception_type"] == exception
+    assert classify(adapter, fragments, index, diagnostic, "green").outcome == "valid_missing_capability_red"
+
+
+def test_runtime_exception_before_active_span_remains_before_frontier(tmp_path):
+    (tmp_path / "widget_module.py").write_text(
+        "class Widget:\n    def __init__(self):\n        self.values = {}\n        self.total = 0\n"
+    )
+    adapter, model, fragments = prepared(
+        "widget = Widget()\nwidget.values.pop('missing')\nassert widget.total == 0",
+        "from widget_module import Widget",
+    )
+    index = len(fragments) - 1
+    value = artifact(adapter, model, fragments, index)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    facts = {item.name: item.value for item in diagnostic.facts}
+    assert facts["exception_type"] == "KeyError"
+    assert classify(adapter, fragments, index, diagnostic, "green").outcome == "failure_before_frontier"
+
+
+@pytest.mark.parametrize("phase", ["setup", "teardown"])
+def test_runtime_exception_outside_call_phase_does_not_become_developer_red(tmp_path, phase):
+    (tmp_path / "widget_module.py").write_text(
+        "class Widget:\n    def total(self):\n        return 0\n"
+    )
+    failure = "    raise KeyError('fixture')\n"
+    fixture_body = failure + "    yield\n" if phase == "setup" else "    yield\n" + failure
+    (tmp_path / "conftest.py").write_text(
+        "import pytest\n@pytest.fixture(autouse=True)\ndef fixture():\n" + fixture_body
+    )
+    adapter, model, fragments = prepared(
+        "widget = Widget()\nassert widget.total() == 0",
+        "from widget_module import Widget",
+    )
+    value = artifact(adapter, model, fragments, 2)
+    diagnostic = diagnostic_with_artifact(adapter, tmp_path, model, value)
+    assert classify(adapter, fragments, 2, diagnostic, "green").outcome != "valid_missing_capability_red"
+
+
 @pytest.mark.parametrize("body,production", [
     ("value = object()\nvalue.entries()", "class Widget: pass\n"),
     ("value = object()\nassert value.entries()", "class Widget: pass\n"),
@@ -213,8 +300,6 @@ def test_supported_fragment_missing_production_member(tmp_path, expression):
     ("widget.entries()", "class Widget:\n    def entries(self):\n        raise AttributeError('unrelated')\n"),
     ("assert widget.entries", "class Widget:\n    @property\n    def entries(self):\n        return object().absent\n"),
     ("assert widget.entries()", "class Widget:\n    def __getattr__(self, name):\n        raise AttributeError(name, name=name, obj=self)\n"),
-    ("assert 1 / 0 == 0", "class Widget: pass\n"),
-    ("assert len(widget) == 0", "class Widget: pass\n"),
     ("from unittest.mock import Mock\nwidget = Mock(spec=[])\nassert widget.entries()", "class Widget: pass\n"),
     ("widget = type('Widget', (), {'__module__': 'widget_module'})()\nassert widget.entries()", "class Widget: pass\n"),
     ("from helper import check\nassert check(widget)", "class Widget: pass\n"),
@@ -358,13 +443,21 @@ def test_valid_structured_probe_parsing_with_pytest_preamble(tmp_path, monkeypat
 @pytest.mark.parametrize("body,change,expected", [
     ("from absent_widget import Widget", {"outcome": "error", "collection_succeeded": False,
      "exception_type": "ImportError"}, "valid_missing_capability_red"),
+    ("from absent_widget import Widget", {"outcome": "error", "collection_succeeded": False,
+     "exception_type": "ModuleNotFoundError"}, "valid_missing_capability_red"),
+    ("Widget()", {"outcome": "failed", "call_outcome": "failed",
+     "exception_type": "NameError"}, "valid_missing_capability_red"),
     ("assert widget.entries()", {"outcome": "failed", "call_outcome": "failed",
      "exception_type": "AttributeError", "missing_production_member": True}, "valid_missing_capability_red"),
     ("assert 1 == 2", {"outcome": "failed", "call_outcome": "failed",
      "exception_type": "AssertionError"}, "valid_behavioral_red"),
     ("assert True", {}, "green"),
     ("assert widget.entries()", {"outcome": "failed", "call_outcome": "failed",
-     "exception_type": "TypeError"}, "unsupported_language_boundary"),
+     "exception_type": "TypeError"}, "valid_missing_capability_red"),
+    ("widget.entries()", {"outcome": "xfailed", "call_outcome": "skipped",
+     "was_xfail": True, "exception_type": "TypeError", "failure_message": "xfail"}, "unsupported_language_boundary"),
+    ("widget.entries()", {"outcome": "xpassed", "call_outcome": "passed",
+     "was_xpass": True, "exception_type": "TypeError", "failure_message": "xpass"}, "unsupported_language_boundary"),
 ])
 def test_valid_probe_outcomes_remain_unchanged(tmp_path, monkeypatch, body, change, expected):
     import json
