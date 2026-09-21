@@ -784,7 +784,28 @@ class PythonBoundaryClassifier:
             return BoundaryAssessment(BoundaryOutcome.VALID_BEHAVIORAL_RED.value, request.active_fragment.fragment_id, request.diagnostic)
         if active_kind == PythonFragmentKind.RAISES_BLOCK and "DID NOT RAISE" in request.diagnostic.message:
             return BoundaryAssessment(BoundaryOutcome.VALID_BEHAVIORAL_RED.value, request.active_fragment.fragment_id, request.diagnostic)
+        if self._is_proven_active_runtime_failure(facts):
+            return BoundaryAssessment(BoundaryOutcome.VALID_MISSING_CAPABILITY_RED.value, request.active_fragment.fragment_id, request.diagnostic)
         return BoundaryAssessment(BoundaryOutcome.UNSUPPORTED_LANGUAGE_BOUNDARY.value, request.active_fragment.fragment_id, request.diagnostic)
+
+    @staticmethod
+    def _is_proven_active_runtime_failure(facts: dict[str, str]) -> bool:
+        if facts.get("was_xfail") == "True" or facts.get("was_xpass") == "True":
+            return False
+        if not facts.get("exception_type"):
+            return False
+        return all(
+            facts.get(name) == expected
+            for name, expected in (
+                ("collection_succeeded", "True"),
+                ("requested_node_found", "True"),
+                ("requested_node_executed", "True"),
+                ("outcome", "failed"),
+                ("setup_outcome", "passed"),
+                ("call_outcome", "failed"),
+                ("teardown_outcome", "passed"),
+            )
+        )
 
     @staticmethod
     def _at_active_span(request: BoundaryClassificationRequest, facts: dict[str, str]) -> bool:

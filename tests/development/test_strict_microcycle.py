@@ -1,4 +1,5 @@
 import ast
+import json
 import subprocess
 import sys
 from dataclasses import replace
@@ -595,6 +596,69 @@ async def test_missing_member_red_transition_is_fragment_independent(tmp_path, m
     assert saved.pending_action == "submit_developer"
     assert saved.frontier.index == 2
     assert gateway.units == []
+
+
+@pytest.mark.asyncio
+async def test_active_runtime_failure_red_routes_to_developer_packet(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        __import__(__name__, fromlist=["SOURCE"]),
+        "SOURCE",
+        "from widget import Widget\n"
+        "def test_widget():\n"
+        "    widget = Widget()\n"
+        "    assert widget.total() == 0\n",
+    )
+    state = initial_state()
+    state = replace(state, frontier=ScenarioFrontier(
+        state.model.scenario_id, 2, state.fragments[2].fragment_id,
+        tuple(item.fragment_id for item in state.fragments),
+    ))
+    store = MemoryStore()
+    candidates = CandidateRepository(
+        tmp_path,
+        {"base": "class Widget:\n    def __init__(self):\n        self.total = 0\n"},
+    )
+    gateway = Gateway([None])
+    service = StrictMicrocycleService(StrictMicrocycleDependencies(
+        store, candidates, gateway,
+        type("Catalog", (), {"for_language": lambda self, language: PythonPytestAdapter()})(),
+        regression(),
+    ))
+
+    initial = await service.advance(request(tmp_path, state))
+    assert initial.kind == MicrocycleTransitionKind.STATE_INITIALISED
+    red = await service.advance(request(tmp_path, state))
+
+    assert red.kind == MicrocycleTransitionKind.FRONTIER_RED_ACCEPTED
+    saved = store.load(state.model.scenario_id)
+    assert saved.pending_action == "submit_developer"
+    assessment = saved.boundary_evidence[-1]
+    assert assessment.outcome == "valid_missing_capability_red"
+    assert assessment.diagnostic.message == "TypeError: 'int' object is not callable"
+    facts = {item.name: item.value for item in assessment.diagnostic.facts}
+    assert facts["exception_type"] == "TypeError"
+    assert facts["call_outcome"] == "failed"
+
+    rejected = await service.advance(request(tmp_path, state))
+
+    assert rejected.kind == MicrocycleTransitionKind.DEVELOPER_CANDIDATE_REJECTED
+    saved = store.load(state.model.scenario_id)
+    assert saved.pending_action == "submit_developer"
+    assert saved.frontier_attempt_counts[-1].developer_attempts == 1
+    assert len(gateway.units) == 1
+    work_unit, _binding = gateway.units[0]
+    objective = json.loads(work_unit.objective)
+    assert "assert widget.total() == 0" in objective["materialised_active_frontier_test"]
+    assert objective["boundary_diagnostic"]["message"] == "TypeError: 'int' object is not callable"
+    diagnostic_facts = {
+        item["name"]: item["value"]
+        for item in objective["boundary_diagnostic"]["facts"]
+    }
+    assert diagnostic_facts["exception_type"] == "TypeError"
+    assert work_unit.acceptance.commands == [
+        [sys.executable, "-m", "pytest", "-q", "tests/test_widget.py::test_widget"]
+    ]
+    assert candidates.cleaned[-1] == "frontier-0-base"
 
 
 @pytest.mark.asyncio
