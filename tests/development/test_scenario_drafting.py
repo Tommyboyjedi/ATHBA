@@ -5,9 +5,15 @@ from pathlib import Path
 import pytest
 
 from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
-from core.development.microcycle_domain import FinalTestMaterialisationRequest, LanguageAdapterCatalog
+from core.development.microcycle_domain import (
+    FinalTestMaterialisationRequest,
+    LanguageAdapterCatalog,
+    ScenarioSourceCandidate,
+)
 from core.development.python_pytest_adapter import PythonPytestAdapter
 from core.development.scenario_drafting import (
+    ScenarioDraftWorkUnitFactory,
+    ScenarioDraftWorkUnitRequest,
     ScenarioDraftingDependencies,
     ScenarioDraftingService,
     ScenarioIntentReviewer,
@@ -15,10 +21,12 @@ from core.development.scenario_drafting import (
 from core.development.scenario_drafting_domain import (
     MAX_TESTER_SCENARIO_ATTEMPTS,
     ScenarioDraftRequest,
+    ScenarioCandidateAssessmentRequest,
     ScenarioDraftStatus,
     ScenarioRepositoryFacts,
     ScenarioDraftRunState,
 )
+from core.development.semantic_api_annotations import SemanticApiAnnotation
 from core.development.tdd_progression import TddStepProposal
 from core.development.behavior_contract_domain import (
     BehaviorContract,
@@ -131,6 +139,78 @@ def request(kind, base="a" * 40):
         repository_facts=ScenarioRepositoryFacts(base, (value.production_path, value.test_path), "bounded production", "bounded tests"),
         development_base_revision=base,
     )
+
+
+def test_semantic_annotations_are_additive_to_tester_payload():
+    base = request("catalog")
+    annotation = SemanticApiAnnotation(
+        "total", "invoke", "RunningTotal.total() -> int", "int"
+    )
+    annotated = replace(base, semantic_annotations=(annotation,))
+    factory = ScenarioDraftWorkUnitFactory()
+
+    base_payload = json.loads(
+        factory.build(ScenarioDraftWorkUnitRequest(base, 1, None)).objective
+    )
+    annotated_payload = json.loads(
+        factory.build(ScenarioDraftWorkUnitRequest(annotated, 1, None)).objective
+    )
+
+    assert annotated_payload.pop("semantic_annotations") == [annotation.to_dict()]
+    assert annotated_payload == base_payload
+
+
+def test_scenario_state_round_trip_preserves_semantic_annotations():
+    annotation = SemanticApiAnnotation(
+        "total", "invoke", "RunningTotal.total() -> int", "int"
+    )
+    state = ScenarioDraftRunState(
+        scenario_id="annotated",
+        behavior_ref="REQ-1",
+        source_requirement_refs=("SRC-1",),
+        language_id="python",
+        test_framework="pytest",
+        allowed_test_path="tests/test_feature.py",
+        development_base_revision="a" * 40,
+        semantic_annotations=(annotation,),
+    )
+
+    assert ScenarioDraftRunState.from_dict(state.to_dict()) == state
+
+
+def test_semantic_annotations_do_not_change_mechanical_candidate_admission():
+    proposal = replace(
+        request("catalog"),
+        semantic_annotations=(
+            SemanticApiAnnotation("item_id", "invoke", "Catalog.item_id() -> str", "str"),
+        ),
+    )
+    source = (
+        "from catalog import Catalog\n\n"
+        "def test_catalog():\n"
+        "    catalog = Catalog()\n"
+        "    assert catalog.item_id == 'a'\n"
+    )
+    candidate_value = ScenarioSourceCandidate(
+        proposal.scenario_id,
+        proposal.ticket.step_id,
+        proposal.language_id,
+        proposal.allowed_test_path,
+        source,
+        proposal.ticket.test_name,
+        "r" * 40,
+        "evidence/r.json",
+    )
+
+    assessment = PythonPytestAdapter().assess_candidate(
+        ScenarioCandidateAssessmentRequest(
+            candidate_value,
+            proposal.ticket.production_path,
+            __import__("core.development.scenario_drafting", fromlist=["_authoring_contract"])._authoring_contract(proposal),
+        )
+    )
+
+    assert assessment.accepted
 
 
 def binding(base="a" * 40):

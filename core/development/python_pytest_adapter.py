@@ -13,6 +13,11 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
+from core.development.semantic_api_annotations import (
+    ApiExpressionDescriptionRequest,
+    SemanticApiAnnotation,
+    SemanticInteraction,
+)
 from core.development.scenario_drafting_domain import (
     ScenarioAuthoringContract, ScenarioCandidateAssessment, ScenarioCandidateAssessmentRequest, ScenarioCandidateIssue,
     ScenarioCandidateIssueCode,
@@ -790,6 +795,104 @@ class PythonBoundaryClassifier:
         return False
 
 
+class PythonApiExpressionDescriber:
+    """Deterministically describes explicit Python API expression syntax."""
+
+    _CALL_SIGNATURE = re.compile(
+        r"^(?P<target>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\((?P<args>.*)\)$"
+    )
+    _ATTRIBUTE_READ = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$")
+    _TEXT_EXPRESSION = re.compile(
+        r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s*\([^)]*\)"
+        r"|\b[A-Za-z_]\w*\.[A-Za-z_]\w*\b"
+    )
+
+    def describe(self, request: ApiExpressionDescriptionRequest) -> SemanticApiAnnotation:
+        source = request.source_expression.strip()
+        expression, result = self._split_result(source)
+        try:
+            node = ast.parse(expression, mode="eval").body
+        except SyntaxError:
+            return self._describe_signature_text(source, expression, result)
+        return self._describe_ast(source, node, result)
+
+    def extract(self, text: str) -> tuple[str, ...]:
+        expressions: list[str] = []
+        seen: set[str] = set()
+        for match in self._TEXT_EXPRESSION.finditer(text):
+            expression = " ".join(match.group(0).split())
+            if expression in seen:
+                continue
+            seen.add(expression)
+            expressions.append(expression)
+        return tuple(expressions)
+
+    @staticmethod
+    def _split_result(source: str) -> tuple[str, str | None]:
+        if "->" not in source:
+            return source.strip(), None
+        expression, result = source.split("->", 1)
+        return expression.strip(), result.strip() or None
+
+    def _describe_ast(
+        self,
+        source: str,
+        node: ast.expr,
+        result: str | None,
+    ) -> SemanticApiAnnotation:
+        if isinstance(node, ast.Call):
+            return self._call_annotation(source, node.func, result)
+        if isinstance(node, ast.Attribute):
+            return SemanticApiAnnotation(node.attr, SemanticInteraction.READ.value, source, result)
+        return self._unknown(source, result)
+
+    def _describe_signature_text(
+        self,
+        source: str,
+        expression: str,
+        result: str | None,
+    ) -> SemanticApiAnnotation:
+        call = self._CALL_SIGNATURE.match(expression)
+        if call is not None:
+            target = call.group("target")
+            symbol = target.rsplit(".", 1)[-1]
+            interaction = (
+                SemanticInteraction.CONSTRUCT.value
+                if "." not in target and symbol[:1].isupper()
+                else SemanticInteraction.INVOKE.value
+            )
+            return SemanticApiAnnotation(symbol, interaction, source, result)
+        if self._ATTRIBUTE_READ.match(expression):
+            return SemanticApiAnnotation(
+                expression.rsplit(".", 1)[-1],
+                SemanticInteraction.READ.value,
+                source,
+                result,
+            )
+        return self._unknown(source, result)
+
+    def _call_annotation(
+        self,
+        source: str,
+        function: ast.expr,
+        result: str | None,
+    ) -> SemanticApiAnnotation:
+        if isinstance(function, ast.Name):
+            interaction = (
+                SemanticInteraction.CONSTRUCT.value
+                if function.id[:1].isupper()
+                else SemanticInteraction.INVOKE.value
+            )
+            return SemanticApiAnnotation(function.id, interaction, source, result)
+        if isinstance(function, ast.Attribute):
+            return SemanticApiAnnotation(function.attr, SemanticInteraction.INVOKE.value, source, result)
+        return self._unknown(source, result)
+
+    @staticmethod
+    def _unknown(source: str, result: str | None) -> SemanticApiAnnotation:
+        return SemanticApiAnnotation(None, SemanticInteraction.UNKNOWN.value, source, result)
+
+
 class PythonPytestAdapter:
     descriptor = LanguageAdapterDescriptor("python-pytest", PYTEST_ADAPTER_VERSION, PYTHON_LANGUAGE_ID)
 
@@ -846,3 +949,12 @@ class PythonPytestAdapter:
 
     def regression_contract(self, request: RegressionContractRequest) -> RegressionContract:
         return RegressionContract((sys.executable, "-m", "pytest", "-q"))
+
+    def describe_api_expression(
+        self,
+        request: ApiExpressionDescriptionRequest,
+    ) -> SemanticApiAnnotation:
+        return PythonApiExpressionDescriber().describe(request)
+
+    def extract_api_expressions(self, text: str) -> tuple[str, ...]:
+        return PythonApiExpressionDescriber().extract(text)

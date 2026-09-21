@@ -16,6 +16,7 @@ from core.development.microcycle_domain import (
 )
 from core.development.tdd_progression import TddStepProposal
 from core.development.specification_domain import SourceRequirementClause
+from core.development.semantic_api_annotations import SemanticApiAnnotation
 from core.development.work_unit import WorkerExecutionProvenance
 
 MAX_TESTER_SCENARIO_ATTEMPTS = 4
@@ -278,6 +279,7 @@ class ScenarioDraftRequest:
     repository_facts: ScenarioRepositoryFacts
     development_base_revision: str
     source_requirement_evidence: tuple[SourceRequirementClause, ...] = ()
+    semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
 
     def __post_init__(self) -> None:
         values = (
@@ -299,6 +301,8 @@ class ScenarioDraftRequest:
             evidence_refs = tuple(item.ref for item in self.source_requirement_evidence)
             if evidence_refs != self.source_requirement_refs:
                 raise ValueError("source requirement evidence must match source requirement refs")
+        if any(not isinstance(item, SemanticApiAnnotation) for item in self.semantic_annotations):
+            raise ValueError("scenario draft semantic annotations must be typed")
 
 
 @dataclass(frozen=True)
@@ -420,6 +424,7 @@ class ScenarioDraftRunState:
     status: str = ScenarioDraftStatus.DRAFTING.value
     project_synchronised: bool = False
     harness_failure_evidence: ScenarioHarnessFailureEvidence | None = None
+    semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
 
     def __post_init__(self) -> None:
         values = (
@@ -441,6 +446,8 @@ class ScenarioDraftRunState:
             raise ValueError("approved scenario state must have approved status")
         if len(self.attempts) > MAX_TESTER_SCENARIO_ATTEMPTS:
             raise ValueError("scenario draft attempt cap exceeded")
+        if any(not isinstance(item, SemanticApiAnnotation) for item in self.semantic_annotations):
+            raise ValueError("scenario draft semantic annotations must be typed")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -456,6 +463,7 @@ class ScenarioDraftRunState:
             "status": self.status,
             "project_synchronised": self.project_synchronised,
             "harness_failure_evidence": None if self.harness_failure_evidence is None else self.harness_failure_evidence.to_dict(),
+            "semantic_annotations": [item.to_dict() for item in self.semantic_annotations],
         }
 
     @classmethod
@@ -471,6 +479,7 @@ class ScenarioDraftRunState:
             allowed_test_path=str(value["allowed_test_path"]),
             development_base_revision=str(value["development_base_revision"]),
             attempts=tuple(ScenarioDraftAttempt.from_dict(dict(item)) for item in value.get("attempts", ())),
+            semantic_annotations=tuple(SemanticApiAnnotation.from_dict(dict(item)) for item in value.get("semantic_annotations", ())),
             approved_microcycle=None if approved is None else MicrocycleState.from_dict(dict(approved)),
             status=str(value.get("status", ScenarioDraftStatus.DRAFTING.value)),
             project_synchronised=bool(value.get("project_synchronised", False)),

@@ -40,6 +40,7 @@ from core.development.strict_tdd_feature_application import (
     StrictTddFeatureDependencies,
 )
 from core.development.strict_tdd_feature_domain import StrictTddFeatureRequest
+from core.development.strict_tdd_feature_execution_advance import _semantic_annotations
 from core.development.strict_tdd_feature_execution import (
     CompletedFeatureReconciler,
     StrictFeatureScenarioDependencies,
@@ -135,6 +136,57 @@ class Gatekeeper:
         return SpecificationGatekeeperRunState(checklist)
 
 
+def test_semantic_annotations_prefer_focused_explicit_call_syntax():
+    clause = SourceRequirementClause(
+        "SRC-total",
+        "Calling total() returns the current total without changing it.",
+        "behavior",
+    )
+    behavior = BehaviorContractRequirement(
+        "REQ-total",
+        ["SRC-total"],
+        "Total retrieval",
+        "Calling total() returns the current value without changing it.",
+        "Call total() twice and verify the value remains constant.",
+    )
+    contract = BehaviorContract(
+        "contract-total",
+        "feature",
+        "RunningTotal",
+        "running total",
+        "RunningTotal exposes total().",
+        [clause],
+        [behavior],
+        [],
+        ["running_total.py"],
+        ["tests/test_running_total.py"],
+        ["RunningTotal.total"],
+    )
+    request = type("Request", (), {"contract": contract, "behavior": behavior})()
+    executor = type(
+        "Executor",
+        (),
+        {
+            "drafting": type(
+                "Drafting",
+                (),
+                {"adapter_catalog": LanguageAdapterCatalog((PythonPytestAdapter(),))},
+            )()
+        },
+    )()
+
+    annotations = _semantic_annotations(executor, request, "python", (clause,))
+
+    assert [item.to_dict() for item in annotations] == [
+        {
+            "symbol": "total",
+            "interaction": "invoke",
+            "source_expression": "total()",
+            "result": None,
+        }
+    ]
+
+
 def test_production_execution_requires_durable_run_composition(tmp_path):
     with pytest.raises(ValueError, match="durable run composition"):
         StrictTddFeatureCompositionFactory().build(StrictTddCompositionRequest(
@@ -156,6 +208,7 @@ def feature_contract():
     return BehaviorContract(
         "contract-feature", "feature", "Widget", "value", "Widget exposes value 1.",
         [clause], [behavior], [], ["widget.py"], ["tests/test_B_1.py"],
+        ["Widget.value"],
     )
 
 
