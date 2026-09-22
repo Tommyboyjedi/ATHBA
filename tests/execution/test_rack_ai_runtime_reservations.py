@@ -170,6 +170,70 @@ def workspace_payload(service='local-primary', requirements=None):
     ))
 
 
+def uncertain_workspace_timeout_work():
+    return {
+        'work_id': 'athba-work',
+        'reservation_id': 'R1',
+        'service': 'local-coder',
+        'state': 'uncertain',
+        'started': 1,
+        'invocation_id': 'inv-timeout',
+        'error': 'workspace_model_outcome_uncertain',
+        'late_result': {
+            'work_id': 'athba-work',
+            'change_id': 'change-timeout',
+            'status': 'failed',
+            'acceptance_verdict': 'rejected',
+            'packet_path': '/srv/rack-ai/state/changes/change-timeout/review-packet.json',
+        },
+    }
+
+
+def timeout_packet():
+    return {
+        'work_id': 'athba-work',
+        'change_id': 'change-timeout',
+        'status': 'failed',
+        'acceptance_verdict': 'rejected',
+        'last_error': 'jcode wall-clock timeout exceeded for worker local-coder after 300 seconds',
+    }
+
+
+def add_reconciled_timeout_evidence(client, work):
+    member = client.reservations['R1']['services'][work['service']]
+    member['recovery_reconciliation'] = {
+        'current_effect': 'proven_absent',
+        'checks': {
+            'reservation_inactive': True,
+            'active_invocations_absent': True,
+            'recorded_process_absent': True,
+            'systemd_activation_absent': True,
+            'gpu_allocation_absent': True,
+            'lifecycle_transition_absent': True,
+            'ownership_fence_intact': True,
+        },
+    }
+    member['workspace_recovery_analyses'] = {
+        work['invocation_id']: {
+            'invocation_id': work['invocation_id'],
+            'parent_error': 'workspace_model_outcome_uncertain',
+            'work_id': work['work_id'],
+            'packet_path': work['late_result']['packet_path'],
+            'packet_status': 'failed',
+            'packet_acceptance_verdict': 'rejected',
+            'packet_last_error': 'jcode wall-clock timeout exceeded for worker local-coder after 300 seconds',
+            'checks': {
+                'retained_terminal_packet': True,
+                'scoped_children_terminal': False,
+                'scoped_children_physically_recoverable': True,
+                'workspace_scope_closed_or_expired': True,
+                'packet_under_state_root': True,
+                'ownership_fence_intact': True,
+            },
+        },
+    }
+
+
 def test_reserved_service_limits_parse_published_input_and_output_metadata():
     limits = RackAiServiceLimits.from_reserved_service(
         'local-primary',
@@ -416,6 +480,34 @@ def test_workspace_reconciles_before_submit_and_cancels_remotely(tmp_path, monke
     assert len(operations(client,'submit_work')) == 2
     assert fresh.cancel('stable-submission')
     assert operations(client,'cancel_work')[0]['work_id'] == first['work_id']
+
+
+def test_unresolved_workspace_uncertainty_remains_resource_wait(tmp_path, monkeypatch):
+    reservation, client, _store = session(tmp_path)
+    reservation.ready('local-coder')
+    work = uncertain_workspace_timeout_work()
+    monkeypatch.setattr(
+        'core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read',
+        lambda *_: (_ for _ in ()).throw(AssertionError('unresolved uncertainty must not read terminal packet')),
+    )
+    with pytest.raises(RackAiResourceWait, match='workspace infrastructure state: uncertain'):
+        RackAiWorkspaceRuntime(reservation).result(work)
+
+
+def test_reconciled_terminal_jcode_timeout_returns_failed_workspace_packet(tmp_path, monkeypatch):
+    reservation, client, _store = session(tmp_path)
+    reservation.ready('local-coder')
+    work = uncertain_workspace_timeout_work()
+    add_reconciled_timeout_evidence(client, work)
+    monkeypatch.setattr(
+        'core.execution.rack_ai_workspace_runtime.WorkspacePacketReader.read',
+        lambda _, value: {**timeout_packet(), 'packet_path': value['packet_path']},
+    )
+    result = RackAiWorkspaceRuntime(reservation).result(work)
+    assert result['status'] == 'failed'
+    assert result['acceptance_verdict'] == 'rejected'
+    assert 'jcode wall-clock timeout exceeded' in result['last_error']
+    assert operations(client, 'inspect_reservation')[-1]['reservation_id'] == 'R1'
 
 
 def test_old_workspace_contract_is_not_an_active_path():

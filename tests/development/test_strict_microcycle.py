@@ -115,6 +115,21 @@ class Gateway:
         )
 
 
+class TimeoutGateway:
+    def __init__(self):
+        self.units = []
+
+    async def execute(self, unit, binding):
+        self.units.append((unit, binding))
+        return WorkUnitExecutionResult(
+            unit.id,
+            accepted=False,
+            status="rejected",
+            evidence_location=f"evidence/{unit.id}",
+            error="jcode wall-clock timeout exceeded for worker local-coder after 300 seconds",
+        )
+
+
 def initial_state():
     adapter = PythonPytestAdapter()
     draft = TestScenarioDraft(
@@ -240,6 +255,68 @@ async def test_developer_attempt_cap_is_durable_across_restarts(tmp_path):
     assert exhausted.status == "developer_attempts_exhausted"
     assert len(gateway.units) == 4
     assert exhausted.state.frontier_attempt_counts[-1].developer_attempts == 4
+
+
+@pytest.mark.asyncio
+async def test_reconciled_jcode_timeout_consumes_one_developer_attempt(tmp_path):
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": ""})
+    gateway = TimeoutGateway()
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+    )
+    value = request(tmp_path, initial_state())
+
+    first = await service.run(value)
+
+    state = store.load("generic-scenario")
+    assert first.status == "developer_candidate_rejected"
+    assert state.frontier_attempt_counts[-1].developer_attempts == 1
+    assert len(state.developer_attempts) == 1
+    assert "jcode wall-clock timeout exceeded" in state.developer_attempts[0].evidence_refs[-1]
+
+
+@pytest.mark.asyncio
+async def test_timeout_attempt_one_resubmits_attempt_two_for_same_frontier(tmp_path):
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": ""})
+    gateway = TimeoutGateway()
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+    )
+    value = request(tmp_path, initial_state())
+
+    await service.run(value)
+    second = await service.run(value)
+
+    assert second.status == "developer_candidate_rejected"
+    assert len(gateway.units) == 2
+    first_unit, second_unit = gateway.units[0][0], gateway.units[1][0]
+    assert first_unit.workspace_identity.work_id == second_unit.workspace_identity.work_id
+    assert first_unit.id.endswith("developer-1")
+    assert second_unit.id.endswith("developer-2")
+
+
+@pytest.mark.asyncio
+async def test_four_reconciled_timeouts_exhaust_without_fifth_attempt(tmp_path):
+    store = MemoryStore()
+    candidates = CandidateRepository(tmp_path, {"base": ""})
+    gateway = TimeoutGateway()
+    service = StrictMicrocycleService(
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+    )
+    value = request(tmp_path, initial_state())
+
+    for _ in range(4):
+        outcome = await service.run(value)
+        assert outcome.status == "developer_candidate_rejected"
+    exhausted = await service.run(value)
+
+    assert exhausted.status == "developer_attempts_exhausted"
+    assert len(gateway.units) == 4
+    assert all(not unit.id.endswith("developer-5") for unit, _binding in gateway.units)
+    assert [attempt.attempt_number for attempt in exhausted.state.developer_attempts] == [1, 2, 3, 4]
+    assert all("jcode wall-clock timeout exceeded" in attempt.evidence_refs[-1] for attempt in exhausted.state.developer_attempts)
 
 
 def test_git_materialiser_commits_only_the_complete_authorised_test_artifact(tmp_path):
