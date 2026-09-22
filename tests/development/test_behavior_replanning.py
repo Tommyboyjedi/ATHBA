@@ -113,6 +113,33 @@ def test_developer_exhaustion_reuses_replan_request_with_frontier_evidence():
     assert len(record.request.tester_failures.attempts) == 4
 
 
+def test_timeout_exhaustion_replan_request_preserves_all_four_attempts():
+    planned = contract("feature", 5)
+    parent = planned.observable_requirements[-1]
+    state = StrictTddFeatureState(
+        "feature", "hash", "running", planned.to_dict(),
+        current_scenario_id="feature--B-4",
+        completed_behaviors=(),
+        canonical_ref="refs/heads/main", canonical_development_base="trusted",
+    )
+    approved = replace(
+        exhausted(parent, statuses=["timed_out_no_candidate"] * 4),
+        status="approved",
+    )
+
+    result = require_replan(
+        state,
+        approved,
+        developer_exhaustion=True,
+        failure_evidence=tuple(f"developer:timeout-attempt-{index}" for index in range(1, 5)),
+    )
+
+    assert result is not None
+    record = result.behavior_replans[-1]
+    assert record.request.failure_evidence == tuple(f"developer:timeout-attempt-{index}" for index in range(1, 5))
+    assert [attempt.no_candidate_outcome for attempt in record.request.tester_failures.attempts] == ["timed_out_no_candidate"] * 4
+
+
 @pytest.mark.asyncio
 async def test_application_routes_developer_exhaustion_to_existing_replan(tmp_path):
     from core.development.strict_tdd_transitions import MicrocycleTransitionKind, ScenarioTransitionKind
