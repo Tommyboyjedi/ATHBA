@@ -133,16 +133,7 @@ class RackAiReservation:
         return ReservationAccessWait(self).ready(service)
 
     def service_limits(self, service: str) -> RackAiServiceLimits:
-        with self.lock:
-            if service not in self.services:
-                raise RackAiResourceWait("service was not requested by this campaign")
-            state = self._binding().load()
-            if state is None:
-                raise RackAiResourceWait(f"RackAI {service} did not publish max_input_tokens")
-            member = state.service_limits.get(service)
-            if member is None:
-                raise RackAiResourceWait(f"RackAI {service} did not publish max_input_tokens")
-            return RackAiServiceLimits.from_reserved_service(service, member)
+        return ReservationServiceLimits(self).read(service)
 
     def finish(self) -> None:
         self.closed = True
@@ -153,6 +144,26 @@ class RackAiReservation:
         if self.binding is None:
             raise RackAiResourceWait("RackAI requires a durable campaign binding before execution")
         return self.binding
+
+
+class ReservationServiceLimits:
+    """Read a campaign's frozen service limits under its reservation lock."""
+
+    def __init__(self, reservation: RackAiReservation):
+        self.reservation = reservation
+
+    def read(self, service: str) -> RackAiServiceLimits:
+        reservation = self.reservation
+        with reservation.lock:
+            if service not in reservation.services:
+                raise RackAiResourceWait("service was not requested by this campaign")
+            state = reservation._binding().load()
+            if state is None:
+                raise RackAiResourceWait(f"RackAI {service} did not publish max_input_tokens")
+            member = state.service_limits.get(service)
+            if member is None:
+                raise RackAiResourceWait(f"RackAI {service} did not publish max_input_tokens")
+            return RackAiServiceLimits.from_reserved_service(service, member)
 
 
 class ReservationAccessWait:
