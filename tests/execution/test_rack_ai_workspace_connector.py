@@ -21,6 +21,13 @@ from core.execution.workspace_execution_port import (
 )
 
 
+UNKNOWN_FAILED_VARIANT_DIAGNOSTIC = (
+    "unknown variant `failed`, expected one of `accepted`, `queued`, `running`, "
+    "`started`, `completed`, `cancelled`, `expired`, `uncertain` at "
+    "line 1 column 3199813"
+)
+
+
 class CapturingTransport:
     def __init__(self, response: dict[str, object] | None = None):
         self.payload: dict[str, object] | None = None
@@ -138,6 +145,41 @@ def test_connector_translates_generic_terminal_outcomes_without_athba_reinterpre
     result = RackAiWorkspaceConnector(CapturingTransport(response)).submit_workspace_change(request_for(AthbaModelWorkKind.FRONTIER_IMPLEMENTATION))
     assert result.status == expected
     assert result.generic_failure == "generic failure"
+
+
+def test_failed_packet_with_unknown_failed_variant_is_malformed_result():
+    response = {
+        "submission_id": "submission",
+        "status": "failed",
+        "acceptance_verdict": "rejected",
+        "last_error": UNKNOWN_FAILED_VARIANT_DIAGNOSTIC,
+        "packet_path": "/srv/rack-ai/state/changes/work-opaque/review-packet.json",
+        "selection_decision": {
+            "submission_id": "submission",
+            "selected_worker_id": "local-primary",
+        },
+        "worker_provenance": {
+            "worker_id": "local-primary",
+            "worker_role": "generic-reasoning-worker",
+            "worker_kind": "jcode",
+            "model_id": "gemma4-12b-local-primary",
+            "provider_profile": "local-primary",
+            "resource_id": "gpu-4060ti",
+            "backend": "jcode",
+        },
+    }
+
+    result = RackAiWorkspaceConnector(
+        CapturingTransport(response)
+    ).submit_workspace_change(
+        request_for(AthbaModelWorkKind.COMPLETE_SCENARIO_AUTHORING)
+    )
+
+    assert result.status == WorkspaceExecutionStatus.MALFORMED_RESULT
+    assert result.error == UNKNOWN_FAILED_VARIANT_DIAGNOSTIC
+    assert result.evidence_refs == (
+        "/srv/rack-ai/state/changes/work-opaque/review-packet.json",
+    )
 
 
 def test_connector_retains_evidence_and_validates_selection_provenance_match():

@@ -12,6 +12,11 @@ from core.execution.workspace_execution_port import (
 
 ONE_MODEL_INVOCATION = 1
 ACTIVE_WORK_STATES = frozenset({"queued", "running", "waiting", "preempting", "preempted"})
+FAILED_STATE_COMPATIBILITY_ERROR_MARKERS = (
+    "unknown variant `failed`",
+    "expected one of `accepted`, `queued`, `running`, `started`, `completed`, "
+    "`cancelled`, `expired`, `uncertain`",
+)
 
 
 class RackAiWorkspaceConnector:
@@ -133,10 +138,31 @@ def _status_for(payload: Mapping[str, object]) -> WorkspaceExecutionStatus:
     if raw_status in {"accepted", "checks_passed"} and verdict in {None, "approved"}:
         return WorkspaceExecutionStatus.ACCEPTED
     if raw_status in {"rejected", "checks_failed", "failed"}:
+        if (
+            raw_status == "failed"
+            and verdict == "rejected"
+            and _failed_state_compatibility_error(payload)
+        ):
+            return WorkspaceExecutionStatus.MALFORMED_RESULT
         return WorkspaceExecutionStatus.REJECTED
     if raw_status is None:
         raise ValueError("Rack AI status is malformed")
     return WorkspaceExecutionStatus(raw_status)
+
+
+def _failed_state_compatibility_error(payload: Mapping[str, object]) -> bool:
+    detail = _failed_state_compatibility_error_detail(payload)
+    return all(marker in detail for marker in FAILED_STATE_COMPATIBILITY_ERROR_MARKERS)
+
+
+def _failed_state_compatibility_error_detail(payload: Mapping[str, object]) -> str:
+    detail = (
+        _optional_text(payload.get("last_error"))
+        or _optional_text(payload.get("generic_failure"))
+        or _optional_text(payload.get("error"))
+        or ""
+    )
+    return detail.lower()
 
 
 def _mapping_or_none(value: object, label: str) -> dict[str, object] | None:

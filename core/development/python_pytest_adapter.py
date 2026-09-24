@@ -816,6 +816,12 @@ class PythonBoundaryClassifier:
         return False
 
 
+@dataclass(frozen=True)
+class _ApiExpressionContext:
+    source: str
+    result: str | None
+
+
 class PythonApiExpressionDescriber:
     """Deterministically describes explicit Python API expression syntax."""
 
@@ -831,11 +837,12 @@ class PythonApiExpressionDescriber:
     def describe(self, request: ApiExpressionDescriptionRequest) -> SemanticApiAnnotation:
         source = request.source_expression.strip()
         expression, result = self._split_result(source)
+        context = _ApiExpressionContext(source, result)
         try:
             node = ast.parse(expression, mode="eval").body
         except SyntaxError:
-            return self._describe_signature_text(source, expression, result)
-        return self._describe_ast(source, node, result)
+            return self._describe_signature_text(context, expression)
+        return self._describe_ast(context, node)
 
     def extract(self, text: str) -> tuple[str, ...]:
         expressions: list[str] = []
@@ -857,21 +864,19 @@ class PythonApiExpressionDescriber:
 
     def _describe_ast(
         self,
-        source: str,
+        context: _ApiExpressionContext,
         node: ast.expr,
-        result: str | None,
     ) -> SemanticApiAnnotation:
         if isinstance(node, ast.Call):
-            return self._call_annotation(source, node.func, result)
+            return self._call_annotation(context, node.func)
         if isinstance(node, ast.Attribute):
-            return SemanticApiAnnotation(node.attr, SemanticInteraction.READ.value, source, result)
-        return self._unknown(source, result)
+            return SemanticApiAnnotation(node.attr, SemanticInteraction.READ.value, context.source, context.result)
+        return self._unknown(context.source, context.result)
 
     def _describe_signature_text(
         self,
-        source: str,
+        context: _ApiExpressionContext,
         expression: str,
-        result: str | None,
     ) -> SemanticApiAnnotation:
         call = self._CALL_SIGNATURE.match(expression)
         if call is not None:
@@ -882,21 +887,20 @@ class PythonApiExpressionDescriber:
                 if "." not in target and symbol[:1].isupper()
                 else SemanticInteraction.INVOKE.value
             )
-            return SemanticApiAnnotation(symbol, interaction, source, result)
+            return SemanticApiAnnotation(symbol, interaction, context.source, context.result)
         if self._ATTRIBUTE_READ.match(expression):
             return SemanticApiAnnotation(
                 expression.rsplit(".", 1)[-1],
                 SemanticInteraction.READ.value,
-                source,
-                result,
+                context.source,
+                context.result,
             )
-        return self._unknown(source, result)
+        return self._unknown(context.source, context.result)
 
     def _call_annotation(
         self,
-        source: str,
+        context: _ApiExpressionContext,
         function: ast.expr,
-        result: str | None,
     ) -> SemanticApiAnnotation:
         if isinstance(function, ast.Name):
             interaction = (
@@ -904,10 +908,10 @@ class PythonApiExpressionDescriber:
                 if function.id[:1].isupper()
                 else SemanticInteraction.INVOKE.value
             )
-            return SemanticApiAnnotation(function.id, interaction, source, result)
+            return SemanticApiAnnotation(function.id, interaction, context.source, context.result)
         if isinstance(function, ast.Attribute):
-            return SemanticApiAnnotation(function.attr, SemanticInteraction.INVOKE.value, source, result)
-        return self._unknown(source, result)
+            return SemanticApiAnnotation(function.attr, SemanticInteraction.INVOKE.value, context.source, context.result)
+        return self._unknown(context.source, context.result)
 
     @staticmethod
     def _unknown(source: str, result: str | None) -> SemanticApiAnnotation:

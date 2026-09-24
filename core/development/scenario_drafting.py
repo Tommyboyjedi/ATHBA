@@ -71,6 +71,52 @@ class ScenarioCandidateSourceReader(Protocol):
     def resolve(self, ref: str) -> str: ...
 
 
+TECHNICAL_BLOCKER_STATUSES = frozenset({
+    "backend_unavailable",
+    "capability_unavailable",
+    "temporarily_unavailable",
+    "duplicate_submission",
+    "malformed_result",
+    "selection_execution_mismatch",
+    "cancelled",
+    "transport_failed",
+    "executor_failed",
+    "execution_failed",
+})
+MODEL_TIMEOUT_STATUSES = frozenset({"timeout"})
+MODEL_NO_CANDIDATE_STATUSES = frozenset({"no_candidate"})
+TECHNICAL_BLOCKER_DETAIL_MARKERS = (
+    "unknown variant `failed`",
+    "expected one of `accepted`, `queued`, `running`, `started`, `completed`, "
+    "`cancelled`, `expired`, `uncertain`",
+    "openai-compatible chat request failed",
+    "capacity_active_evidence",
+    "transport failure",
+    "transport failed",
+    "executor unavailable",
+    "deserialization",
+    "deserialize",
+)
+MODEL_TIMEOUT_DETAIL_MARKERS = (
+    "jcode wall-clock timeout exceeded",
+    "worker model timeout",
+    "model timeout",
+)
+MODEL_PROTOCOL_DETAIL_MARKERS = (
+    "model protocol",
+    "model output protocol",
+    "malformed model output",
+    "invalid model output",
+)
+MODEL_NO_CANDIDATE_DETAIL_MARKERS = (
+    "no candidate",
+    "completed without candidate",
+    "completed with no candidate",
+    "no change",
+)
+TOOL_FAILURE_DETAIL_MARKERS = ("not allowed", "unknown", "disallowed")
+
+
 @dataclass(frozen=True)
 class ScenarioDraftWorkUnitRequest:
     request: ScenarioDraftRequest
@@ -822,18 +868,45 @@ def _submission_outcome(
 ) -> ScenarioSubmissionOutcome:
     if accepted:
         return ScenarioSubmissionOutcome.CANDIDATE_SUBMITTED
-    detail = (result.error or result.status).lower()
-    if result.selected_worker_id is None or ("advertised" in detail and "denied" in detail):
+    status = result.status.lower()
+    detail = (result.error or "").lower()
+    if _is_technical_blocker(result, status, detail):
         return ScenarioSubmissionOutcome.EXTERNAL_BLOCKER
-    if "tool" in detail and ("not allowed" in detail or "unknown" in detail or "disallowed" in detail):
-        return ScenarioSubmissionOutcome.DISALLOWED_OR_UNKNOWN_TOOL_CALL
-    if "timeout" in detail:
+    if status in MODEL_NO_CANDIDATE_STATUSES:
+        return ScenarioSubmissionOutcome.MODEL_COMPLETED_WITHOUT_CANDIDATE
+    if status in MODEL_TIMEOUT_STATUSES or _has_marker(detail, MODEL_TIMEOUT_DETAIL_MARKERS):
         return ScenarioSubmissionOutcome.WORKER_MODEL_TIMEOUT
-    if "protocol" in detail:
+    if _is_model_tool_failure(detail):
+        return ScenarioSubmissionOutcome.DISALLOWED_OR_UNKNOWN_TOOL_CALL
+    if _has_marker(detail, MODEL_PROTOCOL_DETAIL_MARKERS):
         return ScenarioSubmissionOutcome.MODEL_PROTOCOL_FAILURE
-    if "no candidate" in detail or "completed" in detail or "no change" in detail:
+    if _has_marker(detail, MODEL_NO_CANDIDATE_DETAIL_MARKERS):
         return ScenarioSubmissionOutcome.MODEL_COMPLETED_WITHOUT_CANDIDATE
     return ScenarioSubmissionOutcome.EXTERNAL_BLOCKER
+
+
+def _is_technical_blocker(
+    result: WorkUnitExecutionResult,
+    status: str,
+    detail: str,
+) -> bool:
+    if result.selected_worker_id is None:
+        return True
+    if status in TECHNICAL_BLOCKER_STATUSES:
+        return True
+    if "advertised" in detail and "denied" in detail:
+        return True
+    return _has_marker(detail, TECHNICAL_BLOCKER_DETAIL_MARKERS)
+
+
+def _is_model_tool_failure(detail: str) -> bool:
+    return "tool" in detail and _has_marker(
+        detail, TOOL_FAILURE_DETAIL_MARKERS
+    )
+
+
+def _has_marker(detail: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in detail for marker in markers)
 
 
 def _no_candidate_feedback(
