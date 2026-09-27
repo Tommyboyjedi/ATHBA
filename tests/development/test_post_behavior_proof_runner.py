@@ -18,7 +18,7 @@ from core.development.post_behavior_domain import (
     PostBehaviorStatus, ValidationEvidence,
 )
 from core.development.post_behavior_evidence import PostBehaviorEvidenceStore
-from core.development.microcycle_domain import BoundaryDiagnostic
+from core.development.microcycle_domain import BoundaryDiagnostic, DiagnosticFact
 from core.development.python_pytest_preflight import PythonProbePreflightError
 from core.development.strict_tdd_run_controller import StrictTddReceiptDeliveryError
 import scripts.run_pr30_post_behavior_proof as proof_runner
@@ -211,12 +211,78 @@ def test_resume_requires_prior_predeclaration(tmp_path):
         predeclare(replace(proof_input(tmp_path), mode=StrictTddRunMode.RESUME), versions())
 
 
+def test_preflight_failure_preserves_structured_diagnostic_artifact(
+    tmp_path, monkeypatch, capsys,
+):
+    arguments = proof_input(tmp_path)
+    diagnostic = BoundaryDiagnostic(
+        "infrastructure", "Python/pytest target probe preflight failed",
+        ("tests/test_probe_readiness.py::test_probe_readiness",),
+        (
+            DiagnosticFact("collection_succeeded", "True"),
+            DiagnosticFact("requested_node_found", "True"),
+            DiagnosticFact("setup_outcome", "passed"),
+            DiagnosticFact("call_outcome", "failed"),
+            DiagnosticFact("teardown_outcome", "passed"),
+            DiagnosticFact("exception_type", "AssertionError"),
+            DiagnosticFact("source_line", "assert 'DJANGO_SETTINGS_MODULE' not in os.environ"),
+            DiagnosticFact("probe_command", '["python", "-m", "pytest"]'),
+            DiagnosticFact("probe_returncode", "1"),
+            DiagnosticFact("probe_stdout", "collected 1 item"),
+            DiagnosticFact("probe_stderr", "AssertionError: leaked environment"),
+            DiagnosticFact("preflight_diagnostic",
+                           '{"kind":"failed","message":"AssertionError: leaked environment"}'),
+        ),
+    )
+    error = PythonProbePreflightError(diagnostic)
+    invoked = []
+
+    async def unavailable(request):
+        invoked.append(request)
+        raise error
+
+    monkeypatch.setattr(proof_runner, "parse", lambda: arguments)
+    monkeypatch.setattr(proof_runner, "execute", unavailable)
+
+    assert proof_runner.main() == 2
+    assert invoked == [arguments]
+    expected = "PythonProbePreflightError: Python/pytest target probe preflight failed"
+    expected_diagnostic = json.loads(json.dumps(diagnostic.to_dict()))
+    displayed = json.loads(capsys.readouterr().out)
+    assert displayed["status"] == "blocked"
+    assert displayed["reason"] == expected
+    assert displayed["diagnostic"] == expected_diagnostic
+    diagnostic_path = Path(displayed["diagnostic_artifact"])
+    assert diagnostic_path.is_file()
+
+    artifacts = sorted(
+        (json.loads(path.read_text()) for path in arguments.proof_root.glob("*.json")),
+        key=lambda item: item["kind"],
+    )
+    assert {artifact["kind"] for artifact in artifacts} == {
+        "proof_blocker", "proof_blocker_diagnostic",
+    }
+    blocker = next(item for item in artifacts if item["kind"] == "proof_blocker")
+    diagnostic_artifact = next(item for item in artifacts if item["kind"] == "proof_blocker_diagnostic")
+    assert blocker["payload"]["status"] == "blocked"
+    assert blocker["payload"]["reason"] == expected
+    assert blocker["payload"]["diagnostic_artifact"] == str(diagnostic_path)
+    assert diagnostic_artifact["payload"]["summary"]["reason"] == expected
+    assert diagnostic_artifact["payload"]["exception_type"] == "PythonProbePreflightError"
+    assert diagnostic_artifact["payload"]["diagnostic"] == expected_diagnostic
+    facts = {item["name"]: item["value"] for item in diagnostic_artifact["payload"]["diagnostic"]["facts"]}
+    assert facts["call_outcome"] == "failed"
+    assert facts["probe_stderr"] == "AssertionError: leaked environment"
+    assert facts["preflight_diagnostic"] == '{"kind":"failed","message":"AssertionError: leaked environment"}'
+    assert "DJANGO_SETTINGS_MODULE" in facts["source_line"]
+    assert not arguments.state_root.exists()
+
+
 @pytest.mark.parametrize("error", [
-    PythonProbePreflightError(BoundaryDiagnostic("harness_unavailable", "exact pytest preflight blocker")),
     subprocess.SubprocessError("exact subprocess infrastructure blocker"),
     StrictTddReceiptDeliveryError("exact durable receipt delivery blocker"),
 ])
-def test_expected_infrastructure_failure_preserves_exact_durable_proof_blocker(
+def test_expected_non_preflight_failure_preserves_exact_durable_proof_blocker(
     tmp_path, monkeypatch, capsys, error,
 ):
     arguments = proof_input(tmp_path)
@@ -240,3 +306,31 @@ def test_expected_infrastructure_failure_preserves_exact_durable_proof_blocker(
     assert artifacts[0]["payload"]["status"] == "blocked"
     assert artifacts[0]["payload"]["reason"] == expected
     assert not arguments.state_root.exists()
+
+
+def test_successful_proof_report_output_is_unchanged(tmp_path, monkeypatch, capsys):
+    arguments = proof_input(tmp_path)
+    report = proof_runner.ProofReport(
+        ProofStatus.PASSED, "required positive chain observed with exact accepted revisions",
+        "a" * 40, "b" * 40, ("c" * 40,), ("d" * 40,),
+    )
+    invoked = []
+
+    async def succeeded(request):
+        invoked.append(request)
+        return report
+
+    monkeypatch.setattr(proof_runner, "parse", lambda: arguments)
+    monkeypatch.setattr(proof_runner, "execute", succeeded)
+
+    assert proof_runner.main() == 0
+    assert invoked == [arguments]
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "passed",
+        "reason": "required positive chain observed with exact accepted revisions",
+        "behavioral_baseline": "a" * 40,
+        "final_revision": "b" * 40,
+        "accepted_rename_revisions": ["c" * 40],
+        "accepted_refactor_revisions": ["d" * 40],
+    }
+    assert not arguments.proof_root.exists()

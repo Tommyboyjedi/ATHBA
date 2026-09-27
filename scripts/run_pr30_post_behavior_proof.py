@@ -236,13 +236,27 @@ def parse() -> ProofInput:
 
 def main() -> int:
     arguments = parse()
+    console_payload: dict[str, object] | None = None
     try:
         report = asyncio.run(execute(arguments))
-    except (ValueError, OSError, RuntimeError, PythonProbePreflightError,
+    except PythonProbePreflightError as error:
+        report = ProofReport(ProofStatus.BLOCKED, f"{type(error).__name__}: {error}")
+        store = PostBehaviorEvidenceStore(arguments.proof_root)
+        diagnostic = error.diagnostic.to_dict()
+        diagnostic_artifact = store.record("proof_blocker_diagnostic", {
+            "summary": asdict(report),
+            "exception_type": type(error).__name__,
+            "exception_message": str(error),
+            "diagnostic": diagnostic,
+        })
+        store.record("proof_blocker", {**asdict(report), "diagnostic_artifact": diagnostic_artifact})
+        console_payload = {**asdict(report), "diagnostic_artifact": diagnostic_artifact,
+                           "diagnostic": diagnostic}
+    except (ValueError, OSError, RuntimeError,
             SubprocessError, StrictTddReceiptDeliveryError) as error:
         report = ProofReport(ProofStatus.BLOCKED, f"{type(error).__name__}: {error}")
         PostBehaviorEvidenceStore(arguments.proof_root).record("proof_blocker", report)
-    print(json.dumps(asdict(report), sort_keys=True, indent=2))
+    print(json.dumps(console_payload or asdict(report), sort_keys=True, indent=2))
     return 0 if report.status == ProofStatus.PASSED else 2
 
 
