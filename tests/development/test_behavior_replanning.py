@@ -33,6 +33,15 @@ class ReplanGateway:
         return ReasoningResult(json.dumps(payload) if not isinstance(payload, str) else payload)
 
 
+NO_CANDIDATE_MODEL_FAILURES = frozenset({
+    "worker_model_timeout",
+    "model_completed_without_candidate",
+    "model_protocol_failure",
+    "disallowed_or_unknown_tool_call",
+    "timed_out_no_candidate",
+})
+
+
 def split_payload(parent):
     return {
         "disposition": "split", "rationale": "Separate two observable dimensions for independent tests.",
@@ -51,9 +60,9 @@ def exhausted(behavior, revision="trusted", scenario_id=None, statuses=None):
     statuses = statuses or ["insufficient_evidence", "timed_out_no_candidate", "insufficient_evidence", "insufficient_evidence"]
     attempts = tuple(ScenarioDraftAttempt(
         index, f"work-{behavior.ref}-{index}", None,
-        None if status == "timed_out_no_candidate" else f"candidate-{index}", f"evidence/{index}",
+        None if status in NO_CANDIDATE_MODEL_FAILURES else f"candidate-{index}", f"evidence/{index}",
         status, "Candidate does not independently prove the required outcome",
-        no_candidate_outcome=status if status == "timed_out_no_candidate" else None,
+        no_candidate_outcome=status if status in NO_CANDIDATE_MODEL_FAILURES else None,
     ) for index, status in enumerate(statuses, 1))
     return ScenarioDraftRunState(
         scenario_id or f"feature--{behavior.ref}", behavior.ref, tuple(behavior.source_refs), "python", "pytest",
@@ -138,6 +147,26 @@ def test_timeout_exhaustion_replan_request_preserves_all_four_attempts():
     record = result.behavior_replans[-1]
     assert record.request.failure_evidence == tuple(f"developer:timeout-attempt-{index}" for index in range(1, 5))
     assert [attempt.no_candidate_outcome for attempt in record.request.tester_failures.attempts] == ["timed_out_no_candidate"] * 4
+
+
+def test_tester_timeout_exhaustion_reaches_replan_without_candidate():
+    planned = contract("feature", 1)
+    parent = planned.observable_requirements[0]
+    state = StrictTddFeatureState(
+        "feature", "hash", "running", planned.to_dict(),
+        current_scenario_id="feature--B-0",
+        completed_behaviors=(),
+        canonical_ref="refs/heads/main", canonical_development_base="trusted",
+    )
+    draft = exhausted(parent, statuses=["worker_model_timeout"] * 4)
+
+    result = require_replan(state, draft)
+
+    assert result is not None
+    record = result.behavior_replans[-1]
+    assert record.phase == BehaviorReplanPhase.REQUIRED
+    assert [attempt.candidate_revision for attempt in record.request.tester_failures.attempts] == [None] * 4
+    assert [attempt.no_candidate_outcome for attempt in record.request.tester_failures.attempts] == ["worker_model_timeout"] * 4
 
 
 @pytest.mark.asyncio
@@ -285,13 +314,19 @@ async def test_started_without_response_blocks_on_resume_without_second_replan(t
 
 
 @pytest.mark.parametrize("statuses", [
-    ["timed_out_no_candidate"] * 4,
     ["intent_review_protocol_failure"] * 4,
     ["scenario_harness_failure"] * 4,
     ["insufficient_evidence", "intent_review_protocol_failure", "insufficient_evidence", "insufficient_evidence"],
 ])
 def test_infrastructure_exhaustion_is_not_decomposition(statuses):
     assert not replan_worthy(exhausted(contract("feature").observable_requirements[0], statuses=statuses))
+
+
+@pytest.mark.parametrize("status", sorted(NO_CANDIDATE_MODEL_FAILURES))
+def test_model_execution_exhaustion_is_decomposition_evidence_without_candidate(status):
+    draft = exhausted(contract("feature").observable_requirements[0], statuses=[status] * 4)
+
+    assert replan_worthy(draft)
 
 
 @pytest.mark.asyncio
@@ -420,7 +455,7 @@ def test_split_rewires_pending_dependencies_without_changing_completed_requireme
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["timed_out_no_candidate", "intent_review_protocol_failure"])
+@pytest.mark.parametrize("status", ["intent_review_protocol_failure"])
 async def test_feature_infrastructure_exhaustion_blocks_without_planner(tmp_path, status):
     app, _, _, scenarios, reconciler = service(tmp_path, contract("feature"))
     for _ in range(3):
@@ -439,6 +474,39 @@ async def test_feature_infrastructure_exhaustion_blocks_without_planner(tmp_path
     assert result.blocked_reason == "attempts_exhausted"
     assert gateway.requests == [] and reconciler.calls == []
     assert not app.states.load("feature").behavior_replans
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", sorted(NO_CANDIDATE_MODEL_FAILURES))
+async def test_feature_model_execution_exhaustion_reaches_planner_without_candidate(tmp_path, status):
+    app, _, _, scenarios, _reconciler = service(tmp_path, contract("feature"))
+    for _ in range(3):
+        await app.advance(request())
+    gateway = ReplanGateway()
+    app.contract_planner = BehaviorContractPlanner(gateway)
+    original = scenarios.execute
+
+    async def execute(value):
+        result = await original(value)
+        if value.behavior.ref == "B-0":
+            draft = exhausted(value.behavior, value.canonical_development_base, "feature--B-0", [status] * 4)
+            return replace(
+                result,
+                scenario_id=draft.scenario_id,
+                status="attempts_exhausted",
+                draft_state=draft,
+                canonical_development_base=value.canonical_development_base,
+            )
+        return result
+
+    scenarios.execute = execute
+    result = await app.run(request())
+
+    assert result.current_status == "completed"
+    assert len(gateway.requests) == 1
+    sent = json.loads(gateway.requests[0].prompt)["request"]
+    assert [attempt["candidate_revision"] for attempt in sent["tester_failures"]["attempts"]] == [None] * 4
+    assert [attempt["no_candidate_outcome"] for attempt in sent["tester_failures"]["attempts"]] == [status] * 4
 
 
 @pytest.mark.asyncio
