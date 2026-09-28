@@ -230,12 +230,14 @@ async def test_actual_executor_uses_fresh_persisted_budget_and_preserves_old_att
         assert fresh.behavior_ref == "REQ-006" and len(fresh.attempts) == index
         assert fresh.attempts[-1].attempt_number == index
         app = restart(app, tmp_path)
-    await app.advance(request())
+    after = app.states.load("feature")
     assert len(worker.calls) == 4
     assert len(gateway.requests) == 1
+    assert len(after.behavior_replans) == 1
+    assert after.behavior_replans[0].request.tester_failures.scenario_id == "feature--repair-1--REQ-006"
     assert store.load("feature--repair-1--REQ-006").status == "attempts_exhausted"
     assert (tmp_path / "drafts" / "feature--REQ-006.json").read_bytes() == old
-    assert app.states.load("feature").completed_behaviors == before.completed_behaviors
+    assert after.completed_behaviors == before.completed_behaviors
     assert all(binding.base_sha == before.canonical_development_base for _, binding in worker.calls)
 
 
