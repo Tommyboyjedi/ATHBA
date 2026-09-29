@@ -98,7 +98,7 @@ INVALID = [
     (COMPOUND, "The implementation should store everything in RAM."),
     ("Keep the implementation dependency-free. It stays in memory.", "Keep the implementation ... in memory."),
     ("Keep the implementation dependency-free; keep data in memory.", "Keep the implementation ... in memory."),
-    ("Keep the implementation dependency-free and the cache stays in memory.", "Keep the implementation ... in memory."),
+    ("Keep the implementation dependency-free and the cache stays on disk.", "Keep the implementation ... in memory."),
     (COMPOUND, "Keep the implementation ... ... in memory."),
 ]
 

@@ -432,7 +432,7 @@ async def test_historical_non_goal_and_duplicate_ref_pattern_repairs_the_complet
     assert initial_prompt["rules"] == repair_prompt["rules"]
     assert "every checklist item ref must be unique within the complete checklist" in repair_prompt["rules"]
     assert "never convert non_goal into forbidden merely to satisfy kind validation" in repair_prompt["rules"]
-    assert "source_quote must contain enough contiguous original wording to establish the declared modality" in repair_prompt["rules"]
+    assert "source_quote must cite supporting words copied from one original source passage; full exact source excerpts remain the simplest option" in repair_prompt["rules"]
     assert "source_quote need not be unique across checklist items" in repair_prompt["rules"]
     assert repair_prompt["repair_rules"] == [
         "correct every contract violation visible in the complete invalid draft, not only the single validation error reported",
@@ -454,7 +454,8 @@ async def test_shortened_non_goal_quote_repair_fails_closed():
         )
 
     assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
-    assert raised.value.attempts[1].validation_error == "non-goal requires explicit source wording"
+    assert raised.value.attempts[1].validation_error.startswith("non-goal requires explicit source wording")
+    assert "field modality" in raised.value.attempts[1].validation_error
 
 
 @pytest.mark.asyncio
@@ -470,7 +471,8 @@ async def test_forbidden_repair_of_not_required_source_fails_closed():
         )
 
     assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS
-    assert raised.value.attempts[1].validation_error == "specification modality contradicts original source wording"
+    assert raised.value.attempts[1].validation_error.startswith("specification modality contradicts original source wording")
+    assert "field modality" in raised.value.attempts[1].validation_error
 
 
 @pytest.mark.asyncio
@@ -532,7 +534,7 @@ async def test_malformed_repair_fails_closed_after_exactly_two_durable_attempts(
     failure = raised.value
     assert len(gateway.requests) == MAX_ATOMIZER_SUBMISSIONS == len(failure.attempts)
     assert failure.attempts[0].response == json.dumps(non_goal_checklist_payload(source, kind="non_goal", modality="required"))
-    assert failure.attempts[0].validation_error == "unsupported checklist item kind: non_goal"
+    assert failure.attempts[0].validation_error.startswith("unsupported checklist item kind: non_goal")
     assert failure.attempts[1].response == "{not json"
     assert failure.attempts[1].validation_error == "specification checklist response was not valid JSON"
     assert len(gateway.responses) == 1

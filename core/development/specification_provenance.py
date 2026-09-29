@@ -1,4 +1,4 @@
-"""Deterministic exact excerpts and bounded omissions from one source clause."""
+"""Deterministic exact excerpts and ordered citations from one source passage."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,32 +6,40 @@ import re
 
 OMISSION_MARKER = "..."
 PROVENANCE_ERROR = "specification checklist provenance is not grounded in original source"
-# Conservative boundaries: ambiguous punctuation is never crossed by an omission.
-CLAUSE_BOUNDARY = re.compile(
-    r"[.!?;:,\r\n\u2028\u2029\u2013\u2014]|"
-    r"\b(?:but|whereas|although|while|however|unless|otherwise)\b|"
-    r"\b(?:and|or|nor)\s+(?=(?:the|a|an|this|that|it|they|we|you|each|every|another|no)\b|"
-    r"[\w-]+(?:\s+[\w-]+)*\s+(?:must|shall|should|will|would|can|could|may|might|is|are|was|were|has|have|does|do)\b)",
-    re.IGNORECASE,
+PASSAGE_BOUNDARY = re.compile(r"[.!?](?=\s|$)|[;:\r\n\u2028\u2029\u2013\u2014]")
+TOKEN = re.compile(
+    r"-?\d+(?:\.\d+)?|[A-Za-z_]\w*|==|!=|<=|>=|->|\.\.\.|\u2026|\S",
 )
 
 
-COORDINATING_WORDS = frozenset({"and", "or", "nor"})
-PREDICATE_PREFIX = re.compile(
-    r"\b(?:must|shall|should|will|would|can|could|may|might|is|are|was|were|has|have|does|do)\b|"
-    r"^\s*\w+\s+(?:the|a|an|this|that|your|our|their|each|every)\b",
-    re.IGNORECASE,
-)
+@dataclass(frozen=True)
+class _SourcePassage:
+    text: str
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class _Token:
+    text: str
+    start: int
+    end: int
 
 
 @dataclass(frozen=True)
 class SourceQuoteProvenance:
     context: str
     quoted_segments: tuple[str, ...]
+    source_runs: tuple[str, ...] = ()
+    match_spans: tuple[tuple[int, int], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.source_runs:
+            object.__setattr__(self, "source_runs", self.quoted_segments)
 
     def grounds_subject(self, subject: str) -> bool:
         # Subjects may not bridge an omission or refer only to omitted words.
-        return any(subject.lower() in segment.lower() for segment in self.quoted_segments)
+        return any(subject.casefold() in segment.casefold() for segment in self.source_runs)
 
 
 def resolve_source_quote(source: str, quote: str) -> SourceQuoteProvenance:
@@ -39,52 +47,106 @@ def resolve_source_quote(source: str, quote: str) -> SourceQuoteProvenance:
         raise ValueError(PROVENANCE_ERROR)
     if quote in source:
         # Preserve the original exact-excerpt lookup and modality context unchanged.
-        return SourceQuoteProvenance(_exact_context(source, quote), (quote,))
-    segments = _omission_segments(quote)
-    for context in _source_clauses(source):
-        if _ordered_segments(context, segments):
-            return SourceQuoteProvenance(context, segments)
-    raise ValueError(PROVENANCE_ERROR)
+        return _exact_provenance(source, quote)
+
+    quote_tokens = _quote_tokens(quote)
+    matches = [
+        provenance
+        for passage in _source_passages(source)
+        if (provenance := _ordered_token_provenance(passage, quote, quote_tokens)) is not None
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise ValueError(f"{PROVENANCE_ERROR}: source_quote is ambiguous across source passages")
+    raise ValueError(f"{PROVENANCE_ERROR}: source_quote tokens are absent, reordered, or cross source passages")
 
 
-def _omission_segments(quote: str) -> tuple[str, ...]:
-    if OMISSION_MARKER not in quote or re.search(r"\.{4,}|\u2026", quote):
+def _quote_tokens(quote: str) -> tuple[str, ...]:
+    for marker in re.finditer(r"\.{2,}", quote):
+        if marker.group() != OMISSION_MARKER:
+            raise ValueError(f"{PROVENANCE_ERROR}: malformed omission marker")
+    omission = re.compile(r"\.\.\.|\u2026")
+    stripped = quote.strip()
+    markers = tuple(omission.finditer(stripped))
+    if markers and (markers[0].start() == 0 or markers[-1].end() == len(stripped)):
+        raise ValueError(f"{PROVENANCE_ERROR}: omission marker must separate retained words")
+    if re.search(r"(?:\.\.\.|\u2026)\s*(?:\.\.\.|\u2026)", quote):
+        raise ValueError(f"{PROVENANCE_ERROR}: omission marker must separate retained words")
+    for segment in omission.split(quote):
+        if segment.strip(" \t") and not any(re.search(r"\w", token.text) for token in _tokens(segment)):
+            raise ValueError(f"{PROVENANCE_ERROR}: retained citation segment has no source words")
+    tokens = tuple(token.text for token in _tokens(omission.sub(" ", quote)))
+    if not tokens:
         raise ValueError(PROVENANCE_ERROR)
-    # Only horizontal padding directly beside the marker is insignificant.
-    segments = tuple(part.strip(" \t") for part in quote.split(OMISSION_MARKER))
-    if any(not re.search(r"\w", segment) for segment in segments):
-        raise ValueError(PROVENANCE_ERROR)
-    return segments
+    return tokens
 
 
-def _source_clauses(source: str) -> tuple[str, ...]:
-    clauses = []
+def _source_passages(source: str) -> tuple[_SourcePassage, ...]:
+    passages = []
     start = 0
-    for boundary in CLAUSE_BOUNDARY.finditer(source):
-        coordinating = boundary.group().strip().lower() in COORDINATING_WORDS
-        if coordinating and not PREDICATE_PREFIX.search(source[start:boundary.start()]):
-            # A shared subject such as 'Caching and persistence are optional'
-            # has no independent predicate before the conjunction.
-            continue
-        # A final punctuation character may itself be quoted, never crossed.
-        end = boundary.end() if len(boundary.group()) == 1 else boundary.start()
-        clauses.append(source[start:end])
+    for boundary in PASSAGE_BOUNDARY.finditer(source):
+        end = boundary.end() if boundary.group() in ".!?" else boundary.start()
+        if source[start:end].strip():
+            passages.append(_SourcePassage(source[start:end], start, end))
         start = boundary.end()
-    clauses.append(source[start:])
-    return tuple(clauses)
+    if source[start:].strip():
+        passages.append(_SourcePassage(source[start:], start, len(source)))
+    return tuple(passages)
 
 
-def _ordered_segments(context: str, segments: tuple[str, ...]) -> bool:
+def _ordered_token_provenance(
+    passage: _SourcePassage,
+    quote: str,
+    quote_tokens: tuple[str, ...],
+) -> SourceQuoteProvenance | None:
+    source_tokens = _tokens(passage.text)
     cursor = 0
-    for segment in segments:
-        # Do not splice partial words into an apparent identifier or phrase.
-        left = r"(?<!\w)" if re.match(r"\w", segment[0]) else ""
-        right = r"(?!\w)" if re.match(r"\w", segment[-1]) else ""
-        match = re.compile(left + re.escape(segment) + right).search(context, cursor)
-        if match is None:
-            return False
-        cursor = match.end()
-    return True
+    spans: list[tuple[int, int]] = []
+    for expected in quote_tokens:
+        for index in range(cursor, len(source_tokens)):
+            token = source_tokens[index]
+            if token.text == expected:
+                spans.append((token.start, token.end))
+                cursor = index + 1
+                break
+        else:
+            return None
+    return SourceQuoteProvenance(
+        passage.text,
+        _citation_segments(quote),
+        tuple(_source_runs(passage.text, spans)),
+        tuple(spans),
+    )
+
+
+def _tokens(text: str) -> tuple[_Token, ...]:
+    return tuple(_Token(match.group(), match.start(), match.end()) for match in TOKEN.finditer(text))
+
+
+def _citation_segments(quote: str) -> tuple[str, ...]:
+    omission = re.compile(r"\.\.\.|\u2026")
+    if not omission.search(quote):
+        return (quote,)
+    return tuple(part.strip(" \t") for part in omission.split(quote) if part.strip(" \t"))
+
+
+def _source_runs(context: str, spans: list[tuple[int, int]]) -> list[str]:
+    runs: list[str] = []
+    run_start, run_end = spans[0]
+    for start, end in spans[1:]:
+        if _tokens(context[run_end:start]):
+            runs.append(context[run_start:run_end])
+            run_start = start
+        run_end = end
+    runs.append(context[run_start:run_end])
+    return runs
+
+
+def _exact_provenance(source: str, quote: str) -> SourceQuoteProvenance:
+    context = _exact_context(source, quote)
+    start = context.index(quote)
+    return SourceQuoteProvenance(context, (quote,), (quote,), ((start, start + len(quote)),))
 
 
 def _exact_context(source: str, quote: str) -> str:

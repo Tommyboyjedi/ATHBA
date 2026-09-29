@@ -149,7 +149,7 @@ def _atomization_repair_request(
     return ReasoningRequest(
         purpose="athba_specification_checklist_repair",
         prompt=json.dumps({
-            "instruction": "Repair the invalid ATHBA Specification Gatekeeper checklist. Return the complete corrected checklist as raw JSON only.",
+            "instruction": "Repair the invalid ATHBA Specification Deducer checklist for the Specification Gatekeeper. Return the complete corrected checklist as raw JSON only.",
             "project_id": request.project_id,
             "original_requirement": request.requirement_text,
             "invalid_checklist_draft": invalid_response,
@@ -177,7 +177,7 @@ def _atomization_repair_request(
 def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
     return json.dumps(
         {
-            "instruction": "Act as ATHBA's Specification Gatekeeper atomizer. Return raw JSON only.",
+            "instruction": "Act as ATHBA's Specification Deducer for the Specification Gatekeeper. Return raw JSON only.",
             "project_id": project_id,
             "requirement_text": requirement_text,
             "output_rules": [
@@ -205,13 +205,14 @@ def _atomization_rules() -> list[str]:
         "must not, do not implement, and must not exist mean modality=forbidden",
         "never convert non_goal into forbidden merely to satisfy kind validation",
         "non_goal must never be a kind",
-        "source_quote must contain enough contiguous original wording to establish the declared modality",
+        "text is the interpreted obligation and may use terminology different from the original source",
         "for modality=non_goal, source_quote must retain not required, optional, out of scope, or No ... are required wording",
         "for modality=forbidden, source_quote must retain must not, shall not, do not implement, forbidden, or prohibited wording",
-        "when one compound source sentence establishes modality for several atomic items, those items may reuse the same full source_quote while subject narrows each obligation",
+        "source_quote must cite supporting words copied from one original source passage; full exact source excerpts remain the simplest option",
+        "source_quote may omit intervening source words, with or without ... or …, but retained words must be complete tokens in source order within one passage",
         "source_quote need not be unique across checklist items",
-        "source_quote may use ... between non-empty verbatim segments in source order within one sentence/clause; never cross sentence or clause boundaries or splice words",
-        "an omission subject must occur entirely within one retained verbatim segment, never across or inside omitted text",
+        "multiple obligations may cite the same original passage when that passage supports each obligation",
+        "subject must occur entirely within one actual retained contiguous source run, never across or inside omitted text",
         "retain verbatim source_quote and subject; never strengthen wording",
         "split enumerated capabilities and compound quality requirements into separate items",
         "preserve happy paths",
@@ -234,8 +235,8 @@ def _checklist_output_schema() -> dict[str, object]:
             "text": "string",
             "kind": "behavior|validation|invariant|constraint|quality",
             "modality": "required|forbidden|non_goal",
-            "source_quote": "verbatim contiguous excerpt from requirement_text, or ordered verbatim segments separated by ... within one source clause",
-            "subject": "verbatim capability or quality phrase within source_quote",
+            "source_quote": "supporting words copied from one original source passage; full excerpt or ordered complete tokens with optional .../… omissions",
+            "subject": "source-backed capability or quality phrase contained in one retained source run",
         }]
     }
 
@@ -275,7 +276,12 @@ def _grounded_item(payload: dict[str, object], source: str) -> SpecificationChec
     for name in ("modality", "source_quote", "subject"):
         if not isinstance(payload.get(name), str) or not str(payload[name]).strip():
             raise ValueError(f"specification checklist requires explicit {name}")
-    item = SpecificationChecklistItem.from_dict(payload)
+    try:
+        item = SpecificationChecklistItem.from_dict(payload)
+    except ValueError as error:
+        ref = str(payload.get("ref", "<unknown>"))
+        field = "modality" if "modality" in str(error) or "non-goal" in str(error) else "item"
+        raise ValueError(f"{error}: item {ref} field {field}") from error
     item.source_context(source)
     return item
 
@@ -301,7 +307,7 @@ def _split_reasoning_request(request: ChecklistSplitRequest) -> ReasoningRequest
         project_id=request.project_id,
         requires_large_context=False,
         prompt=json.dumps({
-            "instruction": "Act as ATHBA's independent Specification Gatekeeper atomizer. Return raw JSON only.",
+            "instruction": "Act as ATHBA's independent Specification Deducer for the Specification Gatekeeper. Return raw JSON only.",
             "original_requirement": request.requirement_text,
             "parent": {"ref": request.parent_ref, "text": request.parent_text, "kind": request.parent_kind,
                        "modality": request.parent_modality, "source_quote": request.parent_source_quote,
@@ -311,7 +317,7 @@ def _split_reasoning_request(request: ChecklistSplitRequest) -> ReasoningRequest
             "question": "Split this unresolved checklist item into two or more smaller independent specification obligations that together preserve the parent.",
             "required_output": {"disposition": "split|unsplittable", "rationale": "string",
                 "children": [{"text": "string", "kind": "behavior|validation|invariant|constraint|quality",
-                "modality": "required|forbidden|non_goal", "source_quote": "verbatim source excerpt", "subject": "source phrase"}]},
+                "modality": "required|forbidden|non_goal", "source_quote": "supporting words from one source passage", "subject": "source-backed phrase in one retained run"}]},
             "rules": ["do not select tests", "do not inspect Behavior Planner output", "do not inspect production code",
                       "do not add obligations", "preserve modality", "return unsplittable if no grounded progress is possible"],
         }, sort_keys=True),
