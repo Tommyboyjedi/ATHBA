@@ -34,7 +34,11 @@ from core.execution.rack_ai_runtime import RackAiRuntimeConfiguration, RackAiRun
 from core.execution.rack_ai_reservation import RackAiReservation
 from core.execution.rack_ai_scoped_access import RackAiScopedAccess
 from core.execution.profiled_workspace_gateway import ProfiledWorkspaceExecutionGateway, ProfiledWorkspaceGatewayDependencies
-from core.execution.unsupported_workspace_execution import UnsupportedWorkspaceExecutionPort
+from core.execution.rack_ai_public_workspace import (
+    PUBLIC_WORK_CONTRACT_VERSION,
+    RackAiPublicWorkEvidenceStore,
+    RackAiPublicWorkspaceExecutionPort,
+)
 from core.development.athba_workspace_routing import AthbaExecutionProfileResolver
 
 
@@ -90,16 +94,28 @@ class StrictTddLiveRunCompositionFactory:
         if diagnostic.kind != "green":
             raise PythonProbePreflightError(diagnostic)
         reservation = None
+        client = None
         execution = request.execution_gateway
         reasoning = request.reasoning_gateway
+        if execution is None or reasoning is None:
+            client = RackAiRuntimeClient(RackAiRuntimeConfiguration.from_env())
+            services: set[str] = set()
+            if reasoning is None:
+                services.add(config.reasoning_model)
+            if execution is None:
+                services.update({config.reasoning_model, "local-coder"})
+            reservation = RackAiReservation(client, tuple(sorted(services)))
         if execution is None:
-            execution = ProfiledWorkspaceExecutionGateway(ProfiledWorkspaceGatewayDependencies(
-                UnsupportedWorkspaceExecutionPort(), AthbaExecutionProfileResolver()))
-        if reasoning is None:
-            reservation = RackAiReservation(
-                RackAiRuntimeClient(RackAiRuntimeConfiguration.from_env()),
-                tuple(sorted({config.reasoning_model})),
+            assert reservation is not None and client is not None
+            port = RackAiPublicWorkspaceExecutionPort(
+                client,
+                reservation,
+                RackAiPublicWorkEvidenceStore(config.evidence_root / "rack-ai-work"),
             )
+            execution = ProfiledWorkspaceExecutionGateway(ProfiledWorkspaceGatewayDependencies(
+                port, AthbaExecutionProfileResolver()))
+        if reasoning is None:
+            assert reservation is not None
             reasoning = self._live_reasoning(config, reservation)
         feature = StrictTddFeatureCompositionFactory().build(
             StrictTddCompositionRequest(
@@ -131,7 +147,7 @@ class StrictTddLiveRunCompositionFactory:
         return StrictTddLiveRunComposition(
             controller,
             config.athba_revision or self.versions.resolve(config.athba_repository_root),
-            config.rack_ai_revision or "rack-ai-runtime-revision-unavailable",
+            config.rack_ai_revision or f"rack-ai-contract-{PUBLIC_WORK_CONTRACT_VERSION}",
         )
 
     def _live_reasoning(self, config: StrictTddLiveRunConfiguration, reservation: RackAiReservation) -> ProviderReasoningGateway:

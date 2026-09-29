@@ -9,6 +9,7 @@ from core.development.progression import ExecutionAttemptRecord, ExecutionAttemp
 from core.development.tdd_progression import TddPhase, TddPhaseState
 from core.development.work_unit import DevelopmentWorkUnit
 from core.execution.rack_ai_contract import RepositoryBinding
+from core.execution.rack_ai_runtime import RackAiResourceWait
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway, WorkUnitExecutionResult
 
 RED_ALREADY_SATISFIED_FRAGMENT = "RED check failed: test unexpectedly passed"
@@ -39,6 +40,8 @@ class TddPhaseExecutor:
         base_sha = request.base_binding.base_sha
         try:
             result = await self.gateway.execute(request.work_unit, request.base_binding)
+        except RackAiResourceWait:
+            raise
         except Exception as error:
             attempt = ExecutionAttemptRecord.transport_failure(
                 TransportFailureRequest(

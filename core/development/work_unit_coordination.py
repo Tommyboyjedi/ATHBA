@@ -17,6 +17,7 @@ from core.development.progression import (
 )
 from core.development.work_unit import DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
+from core.execution.rack_ai_runtime import RackAiResourceWait
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway
 
 
@@ -116,6 +117,8 @@ async def _run_ready_unit(
     recorded_at = _utc_now()
     try:
         result = await deps.gateway.execute(ready, context.current_binding)
+    except RackAiResourceWait:
+        raise
     except Exception as error:
         attempt = ExecutionAttemptRecord.transport_failure(
             TransportFailureRequest(
