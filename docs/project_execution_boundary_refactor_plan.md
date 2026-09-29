@@ -1,3 +1,5 @@
+> Superseded boundary note: ATHBA no longer ships the RackAiWorkspaceConnector, private packet reader, CLI transport, or direct RackAI checkout/state inspection described below. Active production workspace mutation is intentionally unavailable until a public RackAI result contract is added; historical details remain for audit context.
+
 # Project Execution Boundary Refactor Plan
 
 Date: 2026-08-30

@@ -107,9 +107,9 @@ class ExecutionAttemptRecord:
             accepted_revision=request.result.accepted_revision,
             evidence_location=request.result.evidence_location,
             branch=request.result.branch,
-            worktree_path=request.result.worktree_path,
-            selected_worker_id=request.result.selected_worker_id,
-            placement=dict(request.result.placement) if request.result.placement is not None else None,
+            worktree_path=None,
+            selected_worker_id=None,
+            placement=None,
             error=request.result.error,
         )
 

@@ -98,7 +98,6 @@ TECHNICAL_BLOCKER_DETAIL_MARKERS = (
     "deserialize",
 )
 MODEL_TIMEOUT_DETAIL_MARKERS = (
-    "jcode wall-clock timeout exceeded",
     "worker model timeout",
     "model timeout",
 )
@@ -450,8 +449,8 @@ def _workspace_failure_evidence(
         _bounded_failure_text(unit.id, 256),
         _optional_bounded_failure_text(result.change_id, 256),
         _failure_evidence_refs(result.evidence_location),
-        _optional_bounded_failure_text(result.selected_worker_id, 256),
-        result.worker_provenance,
+        None,
+        None,
     )
 
 
@@ -467,8 +466,8 @@ def _freeze_failure_evidence(
         _bounded_failure_text(attempt.work_unit_id, 256),
         _optional_bounded_failure_text(attempt.change_id, 256),
         _failure_evidence_refs(attempt.evidence_location),
-        _optional_bounded_failure_text(attempt.selected_worker_id, 256),
-        attempt.worker_provenance,
+        None,
+        None,
     )
 
 
@@ -618,10 +617,10 @@ def _attempt(
         candidate_branch=result.branch,
         repair_parent_attempt=None if unit.id.endswith("-1") else int(unit.id.rsplit("-", 1)[1]) - 1,
         repair_mode="fresh_draft" if unit.id.endswith("-1") else "repair_previous_candidate",
-        selected_worker_id=result.selected_worker_id,
+        selected_worker_id=None,
         work_kind=unit.work_kind.value,
         timeout_seconds=unit.timeout_seconds,
-        worker_provenance=result.worker_provenance,
+        worker_provenance=None,
     )
 
 
@@ -870,8 +869,6 @@ def _submission_outcome(
         return ScenarioSubmissionOutcome.CANDIDATE_SUBMITTED
     status = result.status.lower()
     detail = (result.error or "").lower()
-    if _is_technical_blocker(result, status, detail):
-        return ScenarioSubmissionOutcome.EXTERNAL_BLOCKER
     if status in MODEL_NO_CANDIDATE_STATUSES:
         return ScenarioSubmissionOutcome.MODEL_COMPLETED_WITHOUT_CANDIDATE
     if status in MODEL_TIMEOUT_STATUSES or _has_marker(detail, MODEL_TIMEOUT_DETAIL_MARKERS):
@@ -882,6 +879,8 @@ def _submission_outcome(
         return ScenarioSubmissionOutcome.MODEL_PROTOCOL_FAILURE
     if _has_marker(detail, MODEL_NO_CANDIDATE_DETAIL_MARKERS):
         return ScenarioSubmissionOutcome.MODEL_COMPLETED_WITHOUT_CANDIDATE
+    if _is_technical_blocker(result, status, detail):
+        return ScenarioSubmissionOutcome.EXTERNAL_BLOCKER
     return ScenarioSubmissionOutcome.EXTERNAL_BLOCKER
 
 
@@ -890,8 +889,6 @@ def _is_technical_blocker(
     status: str,
     detail: str,
 ) -> bool:
-    if result.selected_worker_id is None:
-        return True
     if status in TECHNICAL_BLOCKER_STATUSES:
         return True
     if "advertised" in detail and "denied" in detail:
@@ -914,7 +911,7 @@ def _no_candidate_feedback(
 ) -> str:
     detail = result.error or result.status
     return (
-        f"Your previous Tester submission ran on {result.selected_worker_id} but produced no candidate test. "
+        "Your previous Tester submission produced no candidate test. "
         f"{detail} No candidate source or revision exists to repair. Submit a new complete scenario from "
         "the unchanged development base. Use only tools actually exposed by the execution harness."
     )

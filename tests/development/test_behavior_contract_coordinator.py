@@ -2570,7 +2570,7 @@ async def test_cannot_split_resource_limit_failure_accepts_fenced_json_response(
     parent = proposal(step_id="parent-step")
     execution = FakeExecutionGateway({
         "parent-step--red": accepted("parent-step--red", "b" * 40),
-        "parent-step--green": rejected("parent-step--green", error="jcode wall-clock timeout exceeded for worker local-coder after 900 seconds"),
+        "parent-step--green": rejected("parent-step--green", error="worker model timeout after 900 seconds"),
     })
     fenced_decision = "```json\n" + json.dumps(
         cannot_split_decision("The packet is already the smallest coherent semantic slice."),
@@ -3463,8 +3463,8 @@ async def test_transport_timeout_exception_blocks_executor_without_advancing_tru
 
         async def execute(self, work_unit, repository_binding):
             self.calls.append((work_unit.id, repository_binding.base_sha))
-            raise RackAiCliTransportError(
-                "Rack AI CLI subprocess exceeded ATHBA transport deadline of 1s for request timeout 1s"
+            raise RuntimeError(
+                "workspace transport exceeded ATHBA transport deadline of 1s for request timeout 1s"
             )
 
     gateway = TransportTimeoutGateway()

@@ -6,7 +6,6 @@ import pytest
 
 from core import atomic_json_file
 from core.execution import rack_ai_reservation as reservation_source
-from core.execution import rack_ai_workspace_runtime as workspace_source
 from core.execution.rack_ai_runtime import RackAiResourceWait
 from tests.execution.test_rack_ai_runtime_reservations import operations, session
 
@@ -84,11 +83,9 @@ def test_retry_after_is_honoured_and_clamped_to_deadline(tmp_path, reservation_p
 
 def test_controlled_deadline_does_not_replace_shared_time(reservation_poll_clock):
     assert reservation_source.time is reservation_poll_clock
-    assert workspace_source.time is real_time
     assert real_time.monotonic.__module__ == "time"
     assert real_time.sleep.__module__ == "time"
 
 
 def test_other_tests_keep_production_clock_after_fixture_teardown():
     assert reservation_source.time is real_time
-    assert workspace_source.time is real_time

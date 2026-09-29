@@ -30,7 +30,8 @@ Examples of focused validation surfaces used during the pre-PR17 remediation wor
 - `tests/development/test_test_evidence_reconciliation.py`
 - `tests/development/test_state_store_safety.py`
 - `tests/development/test_architecture_quarantine.py`
-- `tests/execution/test_rack_ai_cli_gateway.py`
+- `tests/execution/test_rack_ai_private_boundary.py`
+- `tests/execution/test_rack_ai_runtime_reservations.py`
 
 ## Warning policy
 
