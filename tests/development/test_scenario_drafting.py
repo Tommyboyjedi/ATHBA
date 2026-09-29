@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
-from core.development.athba_workspace_routing import AthbaExecutionProfileResolver
 from core.development.microcycle_domain import (
     FinalTestMaterialisationRequest,
     LanguageAdapterCatalog,
@@ -37,13 +36,7 @@ from core.development.behavior_contract_domain import (
 )
 from core.execution.rack_ai_contract import RepositoryBinding
 from core.development.specification_domain import SourceRequirementClause
-from core.development.work_unit import WorkerExecutionProvenance
-from core.execution.profiled_workspace_gateway import (
-    ProfiledWorkspaceExecutionGateway,
-    ProfiledWorkspaceGatewayDependencies,
-)
 from core.execution.reasoning_gateway import ReasoningResult
-from core.execution.rack_ai_workspace_connector import RackAiWorkspaceConnector
 from core.execution.work_unit_gateway import WorkUnitExecutionResult
 
 
@@ -90,21 +83,6 @@ class CandidateSourceReader:
     def resolve(self, ref):
         return ref
 
-
-class PacketTransport:
-    def __init__(self, packet):
-        self.packet = dict(packet)
-        self.payloads = []
-
-    def submit(self, payload):
-        self.payloads.append(payload)
-        return {**self.packet, "submission_id": payload["work_id"]}
-
-    def inspect(self, _work_id):
-        raise AssertionError("scenario drafting tests must submit directly")
-
-    def cancel(self, _work_id):
-        raise AssertionError("scenario drafting tests must not cancel")
 
 
 def ticket(kind):
@@ -282,48 +260,6 @@ UNKNOWN_FAILED_VARIANT_DIAGNOSTIC = (
     "line 1 column 3199813"
 )
 
-
-def worker_provenance():
-    return WorkerExecutionProvenance(
-        "local-primary",
-        "generic-reasoning-worker",
-        "jcode",
-        "gemma4-12b-local-primary",
-        "local-primary",
-        "gpu-4060ti",
-        "jcode",
-    )
-
-
-def worker_provenance_payload():
-    return {
-        "worker_id": "local-primary",
-        "worker_role": "generic-reasoning-worker",
-        "worker_kind": "jcode",
-        "model_id": "gemma4-12b-local-primary",
-        "provider_profile": "local-primary",
-        "resource_id": "gpu-4060ti",
-        "backend": "jcode",
-    }
-
-
-def failed_variant_packet():
-    return {
-        "status": "failed",
-        "acceptance_verdict": "rejected",
-        "last_error": UNKNOWN_FAILED_VARIANT_DIAGNOSTIC,
-        "packet_path": "/srv/rack-ai/state/changes/work-opaque/review-packet.json",
-        "selection_decision": {"selected_worker_id": "local-primary"},
-        "worker_provenance": worker_provenance_payload(),
-    }
-
-
-def profiled_gateway(transport):
-    return ProfiledWorkspaceExecutionGateway(
-        ProfiledWorkspaceGatewayDependencies(
-            RackAiWorkspaceConnector(transport), AthbaExecutionProfileResolver()
-        )
-    )
 
 
 
@@ -921,14 +857,6 @@ async def test_unchanged_repair_consumes_attempt_and_preserves_diagnostics():
     assert len(gateway.calls) == 2
 
 
-def test_scenario_attempt_persists_worker_provenance():
-    from core.development.scenario_drafting_domain import ScenarioDraftAttempt
-    from core.development.work_unit import WorkerExecutionProvenance
-
-    provenance = WorkerExecutionProvenance("local-coder", "implementer-tester", "jcode", "eqaq-v2-local-coder", "local-coder", "gpu-2060", "jcode", "direct")
-    attempt = ScenarioDraftAttempt(1, "draft-1", "change-1", "a" * 40, "evidence/1", "candidate_submitted", worker_provenance=provenance)
-    assert ScenarioDraftAttempt.from_dict(attempt.to_dict()).worker_provenance == provenance
-
 
 
 def test_contract_explicitly_prohibits_all_docstring_and_string_expression_forms():
@@ -990,63 +918,14 @@ async def test_unselected_timeout_is_an_external_blocker_without_consuming_submi
     assert len(gateway.calls) == 1
 
 @pytest.mark.asyncio
-async def test_failed_state_compatibility_error_blocks_through_workspace_adapter_without_semantic_attempt(tmp_path):
-    store = ScenarioDraftStateRepo(tmp_path)
-    transport = PacketTransport(failed_variant_packet())
-    dependencies = ScenarioDraftingDependencies(
-        profiled_gateway(transport),
-        ScenarioIntentReviewer(FakeReasoningGateway([])),
-        LanguageAdapterCatalog((PythonPytestAdapter(),)),
-        CandidateSourceReader({}),
-        store,
-    )
-    service = ScenarioDraftingService(dependencies)
-
-    outcome = await service.submit_candidate(request("catalog"), binding())
-
-    assert outcome.state.status == ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value
-    assert outcome.state.attempts == ()
-    assert len(transport.payloads) == 1
-    evidence = outcome.state.harness_failure_evidence
-    assert evidence is not None
-    assert evidence.failure_kind == ScenarioHarnessFailureKind.EXTERNAL_BLOCKER
-    assert evidence.backend_status == "malformed_result"
-    assert evidence.work_unit_id == "catalog-ticket--scenario-draft-1"
-    assert evidence.change_id == "scenario-catalog--scenario-draft-1"
-    assert evidence.evidence_refs == (
-        "/srv/rack-ai/state/changes/work-opaque/review-packet.json",
-    )
-    assert evidence.selected_worker_id == "local-primary"
-    assert evidence.worker_provenance == worker_provenance()
-    assert UNKNOWN_FAILED_VARIANT_DIAGNOSTIC in evidence.message
-
-    resume_transport = PacketTransport(failed_variant_packet())
-    resumed_dependencies = ScenarioDraftingDependencies(
-        profiled_gateway(resume_transport),
-        ScenarioIntentReviewer(FakeReasoningGateway([])),
-        LanguageAdapterCatalog((PythonPytestAdapter(),)),
-        CandidateSourceReader({}),
-        store,
-    )
-    resumed = await ScenarioDraftingService(resumed_dependencies).draft(
-        request("catalog"), binding()
-    )
-
-    assert resumed.state == outcome.state
-    assert resume_transport.payloads == []
-
-
-@pytest.mark.asyncio
 async def test_failed_state_compatibility_error_not_misread_as_completed_no_candidate():
     result = WorkUnitExecutionResult(
         work_unit_id="catalog-ticket--scenario-draft-1",
         accepted=False,
         status="rejected",
         change_id="draft-1",
-        selected_worker_id="local-primary",
         evidence_location="evidence/failed-variant.json",
         error=UNKNOWN_FAILED_VARIANT_DIAGNOSTIC,
-        worker_provenance=worker_provenance(),
     )
     service, gateway, _reasoning, _reader = components([result], [], {})
 
@@ -1059,7 +938,7 @@ async def test_failed_state_compatibility_error_not_misread_as_completed_no_cand
     assert evidence is not None
     assert evidence.failure_kind == ScenarioHarnessFailureKind.EXTERNAL_BLOCKER
     assert evidence.backend_status == "rejected"
-    assert evidence.worker_provenance == worker_provenance()
+    assert evidence.worker_provenance is None
 
 
 @pytest.mark.asyncio
@@ -1078,7 +957,7 @@ async def test_failed_state_compatibility_error_not_misread_as_completed_no_cand
         ),
         (
             "failed",
-            "jcode wall-clock timeout exceeded for worker local-primary",
+            "worker model timeout for local-primary",
             ScenarioSubmissionOutcome.WORKER_MODEL_TIMEOUT.value,
         ),
         (
@@ -1096,9 +975,7 @@ async def test_model_originated_scenario_failures_still_consume_bounded_attempt(
         accepted=False,
         status=status,
         change_id="draft-1",
-        selected_worker_id="local-primary",
         error=error,
-        worker_provenance=worker_provenance(),
     )
     service, gateway, _reasoning, _reader = components([result], [], {})
 
@@ -1126,9 +1003,7 @@ async def test_workspace_infrastructure_statuses_do_not_consume_tester_attempt(s
         accepted=False,
         status=status,
         change_id="draft-1",
-        selected_worker_id="local-primary",
         error=f"{status} during workspace execution",
-        worker_provenance=worker_provenance(),
     )
     service, gateway, _reasoning, _reader = components([result], [], {})
 
@@ -1211,7 +1086,7 @@ async def test_four_selected_no_candidate_submissions_are_consumed_from_canonica
     results = [
         WorkUnitExecutionResult(
             f"catalog-ticket--scenario-draft-{number}", False, "failed", f"draft-{number}",
-            selected_worker_id="local-coder", error="Tool 'grep' is not allowed",
+            error="Tool 'grep' is not allowed",
         )
         for number in range(1, 5)
     ]
@@ -1231,48 +1106,8 @@ async def test_four_selected_no_candidate_submissions_are_consumed_from_canonica
         "fresh_retry_after_no_candidate",
     ]
     assert all(item.no_candidate_outcome == "disallowed_or_unknown_tool_call" for item in state.attempts)
-    assert all(item.selected_worker_id == "local-coder" for item in state.attempts)
+    assert all(item.selected_worker_id is None for item in state.attempts)
     assert all(call[1].base_sha == "a" * 40 for call in gateway.calls)
-
-@pytest.mark.asyncio
-async def test_external_blocker_persists_bounded_diagnostics_without_a_model_attempt(tmp_path):
-    from core.development.work_unit import WorkerExecutionProvenance
-
-    store = ScenarioDraftStateRepo(tmp_path)
-    provenance = WorkerExecutionProvenance(
-        "local-primary", "implementer-tester", "jcode", "local-primary-model",
-        "local-primary", "gpu-4060ti", "jcode", "minimal",
-    )
-    result = WorkUnitExecutionResult(
-        work_unit_id="catalog-ticket--scenario-draft-1",
-        accepted=False,
-        status="transport_failed",
-        change_id="submission-1",
-        selected_worker_id="local-primary",
-        evidence_location="evidence/synthetic-transport.json",
-        error="synthetic workspace transport failure",
-        worker_provenance=provenance,
-    )
-    service, gateway, _reasoning, _reader = components([result], [], {}, store)
-
-    outcome = await service.submit_candidate(request("catalog"), binding())
-
-    assert outcome.state.status == ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value
-    assert outcome.state.attempts == ()
-    assert outcome.state.approved_microcycle is None
-    evidence = outcome.state.harness_failure_evidence
-    assert evidence is not None
-    assert evidence.failure_stage.value == "workspace_result"
-    assert evidence.failure_kind.value == "external_blocker"
-    assert evidence.message == "synthetic workspace transport failure"
-    assert evidence.backend_status == "transport_failed"
-    assert evidence.work_unit_id == "catalog-ticket--scenario-draft-1"
-    assert evidence.change_id == "submission-1"
-    assert evidence.evidence_refs == ("evidence/synthetic-transport.json",)
-    assert evidence.selected_worker_id == "local-primary"
-    assert evidence.worker_provenance == provenance
-    assert ScenarioDraftStateRepo(tmp_path).load(outcome.state.scenario_id) == outcome.state
-    assert len(gateway.calls) == 1
 
 
 def test_historical_scenario_state_without_harness_evidence_remains_readable():

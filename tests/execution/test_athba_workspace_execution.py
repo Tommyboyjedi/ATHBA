@@ -8,7 +8,7 @@ from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, 
 from core.execution.fake_workspace_execution_port import DeterministicFakeWorkspacePort, FakeWorkspaceOutcome
 from core.execution.profiled_workspace_gateway import ProfiledWorkspaceExecutionGateway, ProfiledWorkspaceGatewayDependencies
 from core.execution.rack_ai_request import RepositoryBinding
-from core.execution.rack_ai_workspace_connector import RackAiWorkspaceConnector
+from core.execution.unsupported_workspace_execution import UnsupportedWorkspaceExecutionPort, UNSUPPORTED_WORKSPACE_EXECUTION_ERROR
 from core.execution.workspace_execution_port import WorkspaceExecutionRequest, WorkspaceExecutionResult, WorkspaceExecutionStatus
 
 
@@ -96,37 +96,41 @@ async def test_profiled_gateway_migrates_frontier_work_to_generic_port():
 
 
 @pytest.mark.asyncio
-async def test_profiled_gateway_preserves_generic_branch_and_worker_provenance():
+async def test_profiled_gateway_does_not_persist_private_worker_or_worktree_details():
     class Port:
         def submit_workspace_change(self, submitted):
             return WorkspaceExecutionResult(
                 identity=submitted.identity,
                 status=WorkspaceExecutionStatus.ACCEPTED,
                 branch="rack/change/submission",
-                worktree_ref="/tmp/rack/submission",
+                worktree_ref="/srv/rack-ai/private/worktree",
                 changed_paths=("src/a.py",),
                 accepted_revision="d" * 40,
                 evidence_refs=("evidence/submission",),
-                execution_provenance={
-                    "worker_id": "local-coder",
-                    "worker_role": "implementer-tester",
-                    "worker_kind": "jcode",
-                    "model_id": "local-coder",
-                    "provider_profile": "local-coder",
-                    "resource_id": "gpu-2060",
-                    "backend": "jcode",
-                    "tool_profile": "minimal",
-                },
+                execution_provenance={"worker_id": "private-worker", "backend": "private-backend"},
+                selected_worker_id="private-worker",
             )
 
     result = await ProfiledWorkspaceExecutionGateway(ProfiledWorkspaceGatewayDependencies(Port(), resolver())).execute(unit(), binding())
     assert result.branch == "rack/change/submission"
-    assert result.worktree_path == "/tmp/rack/submission"
+    assert result.worktree_path is None
+    assert result.selected_worker_id is None
+    assert result.worker_provenance is None
     assert result.policy_evidence is not None
     assert result.policy_evidence.changed_paths == ["src/a.py"]
-    assert result.worker_provenance is not None
-    assert result.worker_provenance.worker_id == "local-coder"
-    assert result.worker_provenance.tool_profile == "minimal"
+
+
+@pytest.mark.asyncio
+async def test_default_unavailable_workspace_port_is_external_blocker_not_model_attempt():
+    result = await ProfiledWorkspaceExecutionGateway(
+        ProfiledWorkspaceGatewayDependencies(UnsupportedWorkspaceExecutionPort(), resolver())
+    ).execute(unit(), binding())
+    assert not result.accepted
+    assert result.status == WorkspaceExecutionStatus.CAPABILITY_UNAVAILABLE.value
+    assert result.error == UNSUPPORTED_WORKSPACE_EXECUTION_ERROR
+    assert result.worktree_path is None
+    assert result.worker_provenance is None
+
 
 def test_tier_policy_escalates_once_then_blocks_after_four_more_failures():
     policy = WorkspaceAttemptPolicy()
@@ -152,18 +156,3 @@ def test_tier_policy_does_not_consume_attempt_for_external_blocker_or_duplicate(
     assert unchanged == state
     assert once.tier_one_submissions == 1
     assert duplicate == once
-
-
-def test_connector_fails_closed_on_selection_execution_mismatch():
-    class Transport:
-        def submit(self, payload):
-            submission_id = payload["work_id"]
-            return {
-                "submission_id": submission_id,
-                "status": "checks_passed",
-                "acceptance_verdict": "approved",
-                "selection_decision": {"submission_id": submission_id, "selected_worker_id": "selected"},
-                "worker_provenance": {"worker_id": "other"},
-            }
-    result = RackAiWorkspaceConnector(Transport()).submit_workspace_change(request())
-    assert result.status == WorkspaceExecutionStatus.SELECTION_EXECUTION_MISMATCH

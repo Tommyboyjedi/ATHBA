@@ -13,16 +13,20 @@ gpurack origin is `http://127.0.0.1:8095`; its ATHBA credential file is
 `/srv/rack-ai/deployments/idle-runtime/secrets/athba`. No credential value is
 stored in ATHBA state.
 
-The durable strict-TDD composition supplies one shared RackAI reservation session
-to workspace execution and direct reasoning. Post-behavior continuation binds a
-session to its existing delivery record. Explicitly injected fixture ports remain
-available. Unbound production workspace composition fails closed.
+The durable strict-TDD and post-behavior compositions may still bind a RackAI
+reservation for public scoped reasoning. Workspace mutation is intentionally
+unavailable in the default production composition until a public RackAI workspace
+result contract is introduced. The default workspace port returns a structured
+capability-unavailable result; it does not read RackAI packets, worktrees,
+repository files, recovery analyses, process state, GPU state, or private logs.
+Explicitly injected fixture ports remain available for deterministic tests.
 
-The old `rack-ai/work-unit/v2` document, CLI subprocess transport, and in-memory
-result/cancel cache are not part of the active workspace route. Workspace calls use
-RackAI `submit_work`, `inspect_work`, and `cancel_work` with the existing profile
-resolver, repository binding, path/network controls, acceptance commands, revision
-handling, provenance checks, and confined evidence-packet reader.
+The old `rack-ai/work-unit/v2` document, CLI subprocess transport, private
+review-packet reader, confined evidence-packet reader, worker provenance mapper,
+and direct RackAI checkout/state inspection are not part of the active route.
+ATHBA keeps public authentication, reservation, scoped model access, discovery,
+service-limit persistence, cancellation/release, and reconciliation state for its
+own pending scoped calls.
 
 ## Campaign lifecycle
 
@@ -66,25 +70,16 @@ that uncertainty.
 
 ## Workspace work identity
 
-ATHBA keeps the stable semantic submission identity separate from RackAI execution
-identity. Generation 0 preserves the historical campaign/submission-derived
-RackAI work ID. Only a definitively queued, not-started invocation cancelled with
-`reservation_superseded_by_higher_priority` advances the persisted RackAI
-execution generation for that same semantic submission. The next retry can then
-execute under a new reservation and new RackAI work ID without consuming another
-Tester/Developer/Gatekeeper semantic attempt.
+Historical run records may contain RackAI workspace execution generations,
+`pending_workspace`, evidence locations, worktree paths, or worker provenance.
+ATHBA preserves those records for audit compatibility, but active production code
+no longer interprets or refreshes them through RackAI private storage.
 
-Transport uncertainty and RackAI `uncertain` never advance the generation and are
-never automatically replayed under a new work ID. Changed payload/reservation under
-an existing RackAI work ID still fails closed through RackAI identity conflict.
-Completed workspace packets still validate the public RackAI `work_id`, the
-RackAI-generated `change_id`, and the retained evidence packet identities.
-
-Workspace polling treats `queued`, `running`, `waiting`, `preempting`, and
-`preempted` as active/unresolved infrastructure states. Terminal `completed`,
-`cancelled`, `failed`, `expired`, and `uncertain` are reconciled according to their
-authoritative RackAI result/error; `accepted`, `started`, and `held` are not active
-control-flow states for the v1.2 client.
+New default workspace submissions stop at `capability_unavailable` with the
+message `rack_ai_workspace_execution_unavailable`. This is an integration
+unavailability result, not a successful candidate, not a model attempt, and not an
+endless resource wait. Part 3 must define a public RackAI workspace result
+contract before production workspace mutation is re-enabled.
 
 ## Semantic and validation boundary
 
@@ -96,11 +91,13 @@ output. Existing malformed-output, evidence, provenance, and accepted-revision
 checks remain.
 
 Focused fixture tests cover atomic unavailable, atomic readiness, preempting and
-preempted ownership, scoped request dispatch blocking, work reconciliation/cancel,
-preempted queued work generation, transport uncertainty, changed-payload conflict,
-resume, semantic budgets and release. These tests do not qualify live models or
-demonstrate deployment. No RackAI source/configuration, other application, live
-campaign, or service is changed.
+preempted ownership, scoped request dispatch blocking, scoped transport
+uncertainty, resume, semantic budgets, release, and private-boundary tripwires.
+The boundary tests assert that deleted private adapters are not importable, active
+composition does not inspect `/srv/rack-ai`, private paths are not read, and
+private worktree/provenance data from a port result is not persisted. These tests
+do not qualify live models or demonstrate deployment. No RackAI source/configuration,
+other application, live campaign, or service is changed.
 
 ## Scoped transport diagnostics
 

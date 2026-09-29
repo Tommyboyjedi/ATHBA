@@ -126,7 +126,7 @@ class TimeoutGateway:
             accepted=False,
             status="rejected",
             evidence_location=f"evidence/{unit.id}",
-            error="jcode wall-clock timeout exceeded for worker local-coder after 300 seconds",
+            error="worker model timeout after 300 seconds",
         )
 
 
@@ -273,7 +273,7 @@ async def test_reconciled_jcode_timeout_consumes_one_developer_attempt(tmp_path)
     assert first.status == "developer_candidate_rejected"
     assert state.frontier_attempt_counts[-1].developer_attempts == 1
     assert len(state.developer_attempts) == 1
-    assert "jcode wall-clock timeout exceeded" in state.developer_attempts[0].evidence_refs[-1]
+    assert "worker model timeout" in state.developer_attempts[0].evidence_refs[-1]
 
 
 @pytest.mark.asyncio
@@ -316,7 +316,7 @@ async def test_four_reconciled_timeouts_exhaust_without_fifth_attempt(tmp_path):
     assert len(gateway.units) == 4
     assert all(not unit.id.endswith("developer-5") for unit, _binding in gateway.units)
     assert [attempt.attempt_number for attempt in exhausted.state.developer_attempts] == [1, 2, 3, 4]
-    assert all("jcode wall-clock timeout exceeded" in attempt.evidence_refs[-1] for attempt in exhausted.state.developer_attempts)
+    assert all("worker model timeout" in attempt.evidence_refs[-1] for attempt in exhausted.state.developer_attempts)
 
 
 def test_git_materialiser_commits_only_the_complete_authorised_test_artifact(tmp_path):

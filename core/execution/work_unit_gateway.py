@@ -12,23 +12,6 @@ class ExecutionPolicyEvidence:
     changed_paths: list[str]
 
 @dataclass(frozen=True)
-class WorkerRoutingExpectation:
-    """Fail-closed evidence requirement for one live worker invocation."""
-    worker_id: str
-    worker_role: str
-    model_id: str
-    provider_profile: str
-    resource_id: str
-    def verify(self, result: WorkUnitExecutionResult) -> None:
-        provenance = result.worker_provenance
-        if provenance is None:
-            raise ValueError("model-routing proof requires worker provenance")
-        actual = (provenance.worker_id, provenance.worker_role, provenance.model_id, provenance.provider_profile, provenance.resource_id)
-        expected = (self.worker_id, self.worker_role, self.model_id, self.provider_profile, self.resource_id)
-        if actual != expected:
-            raise ValueError("model-routing proof worker provenance did not match")
-
-@dataclass(frozen=True)
 class WorkUnitExecutionResult:
     """Executor-neutral result returned to the ATHBA application layer."""
     work_unit_id: str

@@ -4,7 +4,6 @@ from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, 
 from core.execution.rack_ai_contract import (
     RepositoryBinding,
     find_forbidden_resource_selection_keys,
-    parse_rack_ai_result,
     to_rack_ai_request,
 )
 
@@ -147,98 +146,6 @@ def test_rack_ai_request_structurally_blocks_physical_resource_keys():
         "task.selected_worker_id",
         "task.placement.gpu_ids",
     ]
-
-
-def test_parse_rack_ai_result_accepts_current_change_packet_vocabulary():
-    attempt = parse_rack_ai_result(
-        {
-            "work_unit_id": "adaptos-001",
-            "change_id": "adaptos--adaptos-001",
-            "status": "checks_passed",
-            "acceptance_verdict": "approved",
-            "branch": "rack/change/adaptos--adaptos-001",
-            "worktree_path": "/srv/rack-ai/worktrees/adaptos",
-            "packet_path": "/srv/rack-ai/state/packet.json",
-            "head_sha": "b" * 40,
-        }
-    )
-    assert attempt.accepted is True
-    assert attempt.status == "checks_passed"
-    assert attempt.accepted_revision == "b" * 40
-    assert attempt.packet_path == "/srv/rack-ai/state/packet.json"
-
-
-def test_parse_rack_ai_result_preserves_structured_non_acceptance_outcomes():
-    rejected = parse_rack_ai_result(
-        {
-            "work_unit_id": "wu-2",
-            "change_id": "p1--wu-2",
-            "status": "checks_failed",
-            "acceptance_verdict": "rejected",
-            "last_error": "acceptance command failed",
-        }
-    )
-    blocked = parse_rack_ai_result(
-        {
-            "work_unit_id": "wu-3",
-            "change_id": "p1--wu-3",
-            "status": "blocked",
-            "acceptance_verdict": "rejected",
-        }
-    )
-    assert rejected.accepted is False
-    assert rejected.error == "acceptance command failed"
-    assert blocked.accepted is False
-    assert blocked.status == "blocked"
-
-
-def test_parse_rack_ai_result_tolerates_missing_optional_evidence_fields():
-    attempt = parse_rack_ai_result(
-        {
-            "work_unit_id": "wu-4",
-            "change_id": "p1--wu-4",
-            "status": "failed",
-            "acceptance_verdict": "rejected",
-        }
-    )
-    assert attempt.selected_worker_id is None
-    assert attempt.placement is None
-    assert attempt.branch is None
-    assert attempt.packet_path is None
-
-
-def test_parse_rack_ai_result_requires_identity_and_supported_verdict():
-    with pytest.raises(ValueError, match="missing required field: work_unit_id"):
-        parse_rack_ai_result(
-            {
-                "change_id": "p1--wu-1",
-                "status": "checks_passed",
-                "acceptance_verdict": "approved",
-            }
-        )
-    with pytest.raises(ValueError, match="unsupported Rack AI acceptance verdict"):
-        parse_rack_ai_result(
-            {
-                "work_unit_id": "wu-1",
-                "change_id": "p1--wu-1",
-                "status": "checks_passed",
-                "acceptance_verdict": "accepted",
-            }
-        )
-
-
-def test_parse_rack_ai_result_prefers_explicit_accepted_revision_when_present():
-    attempt = parse_rack_ai_result(
-        {
-            "work_unit_id": "wu-5",
-            "change_id": "p1--wu-5",
-            "status": "checks_passed",
-            "acceptance_verdict": "approved",
-            "accepted_head_sha": "c" * 40,
-            "head_sha": "b" * 40,
-        }
-    )
-    assert attempt.accepted_revision == "c" * 40
 
 
 def test_repository_binding_round_trip_preserves_optional_fields_and_resources():

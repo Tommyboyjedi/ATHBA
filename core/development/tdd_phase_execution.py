@@ -96,8 +96,8 @@ def phase_state_from_result(
         evidence_location=result.evidence_location,
         change_id=result.change_id,
         branch=result.branch,
-        worktree_path=result.worktree_path,
-        selected_worker_id=result.selected_worker_id,
+        worktree_path=None,
+        selected_worker_id=None,
         error=result.error,
         recorded_at=recorded_at,
     )

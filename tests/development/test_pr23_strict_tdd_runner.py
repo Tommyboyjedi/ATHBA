@@ -27,7 +27,6 @@ from core.execution.reasoning_gateway import ReasoningResult
 from core.execution.work_unit_gateway import ExecutionPolicyEvidence, WorkUnitExecutionResult
 from scripts.run_pr23_strict_tdd_feature import main, parse
 
-from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
 REQUIREMENT = "Build a small in-memory ToggleSwitch. It can be instantiated, begins in the off state, and calling toggle changes it to the on state."
 
 class Reasoning:
@@ -239,10 +238,6 @@ def prevent_live_boundaries(monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("deterministic runner proof must not contact a live boundary")
 
-    async def forbidden_execution(*_args, **_kwargs):
-        raise AssertionError("deterministic runner proof must not invoke Rack AI")
-
     monkeypatch.setattr(socket, "create_connection", forbidden)
     monkeypatch.setattr(socket.socket, "connect", forbidden)
-    monkeypatch.setattr(RackAiCliExecutionGateway, "execute", forbidden_execution)
 

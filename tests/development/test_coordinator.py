@@ -196,7 +196,8 @@ def test_state_repo_round_trips_snapshot(tmp_path):
     assert loaded is not None
     assert loaded.current_trusted_revision == "b" * 40
     assert loaded.attempts[0].change_id == "change-a"
-    assert loaded.attempts[0].placement == {"worker_ids": ["worker-a"]}
+    assert loaded.attempts[0].placement is None
+    assert loaded.attempts[0].selected_worker_id is None
     assert result.work_units["a"].status == WorkUnitStatus.ACCEPTED.value
 
 

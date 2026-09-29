@@ -2,7 +2,8 @@ from pathlib import Path
 
 
 MODERN_ROOTS = (Path("core/development"), Path("core/execution"))
-MODERN_ENTRYPOINTS = (
+MODERN_ENTRYPOINTS = ()
+REMOVED_PRIVATE_PROOF_SCRIPTS = (
     Path("scripts/run_pr17_independent_reservation_book.py"),
     Path("scripts/run_pr19_environment_proof.py"),
 )
@@ -36,3 +37,8 @@ def test_modern_development_and_execution_modules_do_not_import_legacy_control_p
 def test_pr17_and_pr19_entrypoints_do_not_depend_on_legacy_local_stack():
     for path in MODERN_ENTRYPOINTS:
         assert_modern_source_is_clean(path)
+
+
+def test_private_rackai_live_proof_scripts_are_removed():
+    for path in REMOVED_PRIVATE_PROOF_SCRIPTS:
+        assert not path.exists()

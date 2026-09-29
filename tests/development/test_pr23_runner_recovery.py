@@ -12,7 +12,6 @@ import pytest
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
 from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
 from core.development.microcycle_revision_store import MicrocycleRevisionRepository
-from core.execution.rack_ai_cli_gateway import RackAiCliExecutionGateway
 from core.development.strict_tdd_feature_domain import StrictTddFeatureResult
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
 from core.development.strict_tdd_lifecycle_evidence import StrictTddLifecycleEventKind, StrictTddLifecycleEventRepository, StrictTddLifecycleRunContext
@@ -106,12 +105,8 @@ def prevent_live_boundaries(monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("deterministic runner proof must not contact a live boundary")
 
-    async def forbidden_execution(*_args, **_kwargs):
-        raise AssertionError("deterministic runner proof must not invoke Rack AI")
-
     monkeypatch.setattr(socket, "create_connection", forbidden)
     monkeypatch.setattr(socket.socket, "connect", forbidden)
-    monkeypatch.setattr(RackAiCliExecutionGateway, "execute", forbidden_execution)
 
 
 def test_runner_script_has_only_typed_composition_dependencies():
