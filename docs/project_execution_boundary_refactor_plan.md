@@ -1,6 +1,8 @@
-> Superseded boundary note: ATHBA no longer ships the RackAiWorkspaceConnector, private packet reader, CLI transport, or direct RackAI checkout/state inspection described below. Active production workspace mutation is intentionally unavailable until a public RackAI result contract is added; historical details remain for audit context.
+> Superseded boundary note: ATHBA no longer ships the RackAiWorkspaceConnector, private packet reader, CLI transport, or direct RackAI checkout/state inspection described below. Active production workspace mutation now uses the RackAI public work-execution contract; historical details remain for audit context and are not supported integration instructions.
 
 # Project Execution Boundary Refactor Plan
+
+> Superseded integration note: active ATHBA workspace execution now uses the RackAI public work-execution contract. Legacy references in this planning record to RackAI `packet_path`, `worktree_path`, private packets, or worktrees are historical design notes, not supported integration instructions.
 
 Date: 2026-08-30
 Branch: `pr17-specification-gatekeeper`

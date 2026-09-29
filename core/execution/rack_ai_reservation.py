@@ -98,6 +98,7 @@ class RackAiReservation:
                     runtime_identity(binding.identity), uuid4().hex, self.services, "low",
                     self.client.configuration.ttl_seconds,
                     workspace_generations={} if state is None else dict(state.workspace_generations),
+                    workspace_submissions={} if state is None else dict(state.workspace_submissions),
                 )
                 binding.save(state)
             return self._reserve(state)
@@ -111,6 +112,12 @@ class RackAiReservation:
     def advance_workspace_generation(self, submission_id: str) -> None:
         with self.lock:
             _advance_workspace_generation(self._binding(), submission_id)
+
+    def workspace_submission(self, submission_id: str) -> dict[str, object] | None:
+        return _workspace_submission(self, submission_id)
+
+    def record_workspace_submission(self, submission_id: str, record: dict[str, object]) -> None:
+        _record_workspace_submission(self, submission_id, record)
 
     def _reserve(self, state: RackAiReservationState) -> dict:
         return _reserve_state(self.client, self._binding(), state)
@@ -144,6 +151,33 @@ class RackAiReservation:
         if self.binding is None:
             raise RackAiResourceWait("RackAI requires a durable campaign binding before execution")
         return self.binding
+
+
+def _workspace_submission(reservation: RackAiReservation, submission_id: str) -> dict[str, object] | None:
+    with reservation.lock:
+        state = reservation._binding().load()
+        if state is None:
+            return None
+        value = state.workspace_submissions.get(submission_id)
+        return None if value is None else dict(value)
+
+
+def _record_workspace_submission(
+    reservation: RackAiReservation,
+    submission_id: str,
+    record: dict[str, object],
+) -> None:
+    with reservation.lock:
+        binding = reservation._binding()
+        state = binding.load()
+        if state is None:
+            raise RackAiResourceWait("workspace submission has no durable reservation")
+        existing = state.workspace_submissions.get(submission_id)
+        if existing is not None and existing != record:
+            raise RackAiResourceWait("workspace submission identity changed before reconciliation")
+        submissions = dict(state.workspace_submissions)
+        submissions[submission_id] = dict(record)
+        binding.save(replace(state, workspace_submissions=submissions))
 
 
 class ReservationServiceLimits:

@@ -161,6 +161,50 @@ def test_live_composition_does_not_inspect_rackai_checkout(monkeypatch, tmp_path
     )
 
     assert result.athba_revision == "athba-sha"
-    assert result.rack_ai_revision == "rack-ai-runtime-revision-unavailable"
+    assert result.rack_ai_revision == "rack-ai-contract-1.4.0"
     assert calls == [("git", "-C", str(tmp_path / "athba-source"), "rev-parse", "HEAD")]
     assert captured
+
+
+def test_live_composition_defaults_to_public_workspace_adapter(monkeypatch, tmp_path):
+    from core.development import strict_tdd_live_run_composition as composition_module
+    from core.development.strict_tdd_live_run_composition import (
+        StrictTddLiveRunCompositionFactory,
+        StrictTddLiveRunCompositionRequest,
+        StrictTddLiveRunConfiguration,
+    )
+    from core.execution.rack_ai_public_workspace import RackAiPublicWorkspaceExecutionPort
+
+    captured = []
+
+    def build(_, request):
+        captured.append(request)
+        return SimpleNamespace(application=SimpleNamespace())
+
+    def guarded_run(args, **kwargs):
+        assert "/srv/rack-ai" not in args
+        return SimpleNamespace(stdout="athba-sha\n")
+
+    token = tmp_path / "credential"
+    token.write_text("fixture-token")
+    monkeypatch.setenv("ATHBA_RACK_AI_ORIGIN", "http://127.0.0.1:8095")
+    monkeypatch.setenv("ATHBA_RACK_AI_CREDENTIAL_FILE", str(token))
+    monkeypatch.setattr(composition_module, "run", guarded_run)
+    monkeypatch.setattr(composition_module.StrictTddFeatureCompositionFactory, "build", build)
+    preflight = SimpleNamespace(check=lambda _: SimpleNamespace(kind="green"))
+    config = StrictTddLiveRunConfiguration(
+        tmp_path / "state",
+        tmp_path / "evidence",
+        tmp_path / "repo",
+        "project",
+        athba_repository_root=tmp_path / "athba-source",
+    )
+
+    result = StrictTddLiveRunCompositionFactory(preflight=preflight).build(
+        StrictTddLiveRunCompositionRequest(config)
+    )
+
+    gateway = captured[0].execution_gateway
+    assert isinstance(gateway.port, RackAiPublicWorkspaceExecutionPort)
+    assert gateway.port.reservation.services == ("local-coder", "local-primary")
+    assert result.rack_ai_revision == "rack-ai-contract-1.4.0"

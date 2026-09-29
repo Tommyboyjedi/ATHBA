@@ -28,7 +28,10 @@ from core.execution.rack_ai_reservation_state import ReservationBinding
 from core.execution.rack_ai_scoped_access import RackAiScopedAccess
 from core.llm.providers.openai_provider import OpenAIProvider
 from core.execution.workspace_execution_port import AiWorkspaceExecutionPort
-from core.execution.unsupported_workspace_execution import UnsupportedWorkspaceExecutionPort
+from core.execution.rack_ai_public_workspace import (
+    RackAiPublicWorkEvidenceStore,
+    RackAiPublicWorkspaceExecutionPort,
+)
 
 
 @dataclass(frozen=True)
@@ -61,15 +64,20 @@ class PostBehaviorCompositionFactory:
         reservation = None
         execution = request.execution
         if execution is None:
+            client = RackAiRuntimeClient(RackAiRuntimeConfiguration.from_env())
             reservation = RackAiReservation(
-                RackAiRuntimeClient(RackAiRuntimeConfiguration.from_env()),
-                tuple(sorted({request.reasoning.model})),
+                client,
+                tuple(sorted({request.reasoning.model, "local-coder"})),
             )
             provider = request.reasoning.provider
             if type(provider) is not OpenAIProvider:
                 raise ValueError("managed post-behavior reasoning requires the local OpenAI provider")
             provider.runtime_access = RackAiScopedAccess(reservation, request.reasoning.model)
-            execution = UnsupportedWorkspaceExecutionPort()
+            execution = RackAiPublicWorkspaceExecutionPort(
+                client,
+                reservation,
+                RackAiPublicWorkEvidenceStore(repository.root / request.project_id / "evidence" / "rack-ai-work"),
+            )
         local = LocalOnlyPostBehaviorReasoning(request.reasoning, PostBehaviorReasoningRecorder(evidence))
         git = PostBehaviorGit(Path(delivery.project.repository_root))
         source = PostBehaviorSource(git)

@@ -15,7 +15,7 @@ from core.execution.rack_ai_reservation_state import ReservationBinding
 from core.execution.rack_ai_service_limits import RackAiServiceLimits
 from core.execution.rack_ai_runtime import RackAiRuntimeConfiguration, RackAiRuntimeError, RackAiResourceWait
 from core.execution.rack_ai_scoped_access import RackAiScopedAccess
-from core.execution.unsupported_workspace_execution import UnsupportedWorkspaceExecutionPort
+from core.execution.rack_ai_public_workspace import RackAiPublicWorkspaceExecutionPort
 from core.llm.contracts.provider import ProviderRequest
 from core.llm.providers.openai_provider import OpenAIProvider
 
@@ -363,7 +363,7 @@ def test_uncertain_scoped_inference_blocks_terminal_member_replacement(tmp_path,
     assert not operations(client, "release_reservation")
 
 
-def test_live_composition_uses_public_scoped_reasoning_and_unavailable_workspace_port(tmp_path, monkeypatch):
+def test_live_composition_uses_public_scoped_reasoning_and_public_workspace_port(tmp_path, monkeypatch):
     from core.development.strict_tdd_live_run_composition import (
         StrictTddLiveRunCompositionFactory,
         StrictTddLiveRunCompositionRequest,
@@ -390,7 +390,7 @@ def test_live_composition_uses_public_scoped_reasoning_and_unavailable_workspace
     )
     result = StrictTddLiveRunCompositionFactory(preflight=preflight).build(StrictTddLiveRunCompositionRequest(config))
     reservation = result.controller.reservation
-    assert set(reservation.services) == {"local-primary"}
+    assert set(reservation.services) == {"local-primary", "local-coder"}
     assert captured[0].reasoning_gateway.provider.runtime_access.reservation is reservation
-    assert isinstance(captured[0].execution_gateway.port, UnsupportedWorkspaceExecutionPort)
+    assert isinstance(captured[0].execution_gateway.port, RackAiPublicWorkspaceExecutionPort)
     assert reservation.binding is None

@@ -1,6 +1,6 @@
 # ATHBA reservation/work client
 
-The current client targets RackAI runtime contract **1.2.0** through the
+The current client targets RackAI runtime contract **1.4.0** through the
 authenticated `POST /runtime/v1` API, with read-only contract discovery available
 at `GET /runtime/v1/contract`. RackAI source/configuration remains RackAI-owned;
 ATHBA is only a durable client of the deployed reservation/work contract.
@@ -13,13 +13,13 @@ gpurack origin is `http://127.0.0.1:8095`; its ATHBA credential file is
 `/srv/rack-ai/deployments/idle-runtime/secrets/athba`. No credential value is
 stored in ATHBA state.
 
-The durable strict-TDD and post-behavior compositions may still bind a RackAI
-reservation for public scoped reasoning. Workspace mutation is intentionally
-unavailable in the default production composition until a public RackAI workspace
-result contract is introduced. The default workspace port returns a structured
-capability-unavailable result; it does not read RackAI packets, worktrees,
-repository files, recovery analyses, process state, GPU state, or private logs.
-Explicitly injected fixture ports remain available for deterministic tests.
+The durable strict-TDD and post-behavior compositions bind RackAI reservations
+for public scoped reasoning and public workspace work. Workspace mutation uses
+the RackAI public work-execution contract: submit work, inspect work execution,
+retrieve owner-checked opaque artifacts, and cancel work. ATHBA does not read
+RackAI packets, worktrees, repository files, recovery analyses, process state,
+GPU state, or private logs. Explicitly injected fixture ports remain available
+for deterministic tests.
 
 The old `rack-ai/work-unit/v2` document, CLI subprocess transport, private
 review-packet reader, confined evidence-packet reader, worker provenance mapper,
@@ -75,11 +75,15 @@ Historical run records may contain RackAI workspace execution generations,
 ATHBA preserves those records for audit compatibility, but active production code
 no longer interprets or refreshes them through RackAI private storage.
 
-New default workspace submissions stop at `capability_unavailable` with the
-message `rack_ai_workspace_execution_unavailable`. This is an integration
-unavailability result, not a successful candidate, not a model attempt, and not an
-endless resource wait. Part 3 must define a public RackAI workspace result
-contract before production workspace mutation is re-enabled.
+New default workspace submissions create stable public RackAI work identities
+under the active reservation and persist only ATHBA-owned submission, inspection,
+and artifact snapshots. The workspace payload contains generic requirements
+(`complexity` and `requires_large_context`) and public repository/acceptance
+data; it does not send token limits, model-specific limits, RackAI private paths,
+or JCode-specific controls. Pending public work remains a resource wait until
+RackAI publishes a safe authoritative outcome. Known safe execution timeouts
+become failed TDD attempts; transport uncertainty remains external infrastructure
+state rather than a model-originated failure.
 
 ## Semantic and validation boundary
 

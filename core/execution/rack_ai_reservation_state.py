@@ -21,6 +21,7 @@ class RackAiReservationState:
     ready_observed: bool = False
     service_limits: dict[str, dict[str, int]] = field(default_factory=dict)
     workspace_generations: dict[str, int] = field(default_factory=dict)
+    workspace_submissions: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.priority not in {"low", "medium"}:
@@ -30,6 +31,9 @@ class RackAiReservationState:
         for key, value in self.workspace_generations.items():
             if not isinstance(key, str) or not key.strip() or not isinstance(value, int) or value < 0:
                 raise ValueError("workspace execution generations must be non-negative by submission")
+        for key, value in self.workspace_submissions.items():
+            if not isinstance(key, str) or not key.strip() or not isinstance(value, dict):
+                raise ValueError("workspace submissions must be keyed object records")
         for service, limits in self.service_limits.items():
             if not isinstance(service, str) or not service.strip():
                 raise ValueError("service limit keys must be non-empty service names")
@@ -51,12 +55,16 @@ class RackAiReservationState:
         service_limits = value.get("service_limits", {})
         if not isinstance(service_limits, dict):
             raise ValueError("service limits must be a mapping")
+        submissions = value.get("workspace_submissions", {})
+        if not isinstance(submissions, dict):
+            raise ValueError("workspace submissions must be a mapping")
         return cls(**{
             **value,
             "services": tuple(value["services"]),
             "ready_observed": bool(value.get("ready_observed", False)),
             "service_limits": _service_limits_from_dict(service_limits),
             "workspace_generations": {str(key): int(item) for key, item in generations.items()},
+            "workspace_submissions": {str(key): dict(item) for key, item in submissions.items()},
         })
 
 
