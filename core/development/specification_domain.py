@@ -74,10 +74,25 @@ class SpecificationChecklistItem:
 
     def source_context(self, source: str) -> str:
         """Revalidate quoted facts wherever original source authority is available."""
-        provenance = resolve_source_quote(source, self.source_quote)
+        try:
+            provenance = resolve_source_quote(source, self.source_quote)
+        except ValueError as error:
+            message = str(error)
+            if message.startswith(PROVENANCE_ERROR):
+                cause = message.removeprefix(PROVENANCE_ERROR).lstrip(": ") or "quote could not be resolved"
+                raise ValueError(
+                    f"{PROVENANCE_ERROR}: item {self.ref} field source_quote: {cause}"
+                ) from error
+            raise
         if not self.subject.strip() or not provenance.grounds_subject(self.subject):
-            raise ValueError(PROVENANCE_ERROR)
-        grounded_modality(self.modality, provenance.context)
+            raise ValueError(
+                f"{PROVENANCE_ERROR}: item {self.ref} field subject: "
+                f"subject is not contained in a retained source run"
+            )
+        try:
+            grounded_modality(self.modality, provenance.context)
+        except ValueError as error:
+            raise ValueError(f"{error}: item {self.ref} field modality") from error
         return provenance.context
 
     def to_dict(self) -> dict[str, Any]:
