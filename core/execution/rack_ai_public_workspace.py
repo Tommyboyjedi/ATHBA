@@ -25,8 +25,23 @@ from core.filesystem_policy import resolve_identifier_path
 
 PUBLIC_WORK_CONTRACT_VERSION = "1.4.0"
 _REQUIRED_PUBLIC_WORK_OPERATIONS = frozenset({"inspect_work_execution", "get_work_artifact"})
+ATHBA_DYNAMIC_PROJECTS_ROOT = "/srv/ATHBA/state/projects"
+_ACCEPTED_REPLAY_SAFETY = frozenset({"closed_inspection_only"})
+
+
 class RackAiPublicWorkspaceContractError(Exception):
     """The public RackAI work-execution contract cannot be consumed safely."""
+
+
+@dataclass(frozen=True)
+class RackAiPublicWorkspaceClock:
+    """Clock seam for bounded public-work polling."""
+
+    def monotonic(self) -> float:
+        return time.monotonic()
+
+    def sleep(self, seconds: float) -> None:
+        time.sleep(seconds)
 
 
 @dataclass(frozen=True)
@@ -75,6 +90,7 @@ class RackAiPublicWorkspaceExecutionPort:
     reservation: RackAiReservation
     evidence: RackAiPublicWorkEvidenceStore
     selector: RackAiPublicWorkspaceServiceSelector = RackAiPublicWorkspaceServiceSelector()
+    clock: RackAiPublicWorkspaceClock = RackAiPublicWorkspaceClock()
     _contract_verified: bool = False
 
     def submit_workspace_change(self, request: WorkspaceExecutionRequest) -> WorkspaceExecutionResult:
@@ -84,7 +100,7 @@ class RackAiPublicWorkspaceExecutionPort:
         if isinstance(receipt_ref, WorkspaceExecutionResult):
             return receipt_ref
         return _wait_for_authoritative_result(
-            self.client, self.reservation, self.evidence, request, record, receipt_ref
+            self.client, self.reservation, self.evidence, request, record, receipt_ref, self.clock
         )
 
     def get_result(self, identity: AthbaWorkspaceIdentity) -> WorkspaceExecutionResult | None:
@@ -221,8 +237,9 @@ def _wait_for_authoritative_result(
     request: WorkspaceExecutionRequest,
     record: dict[str, object],
     receipt_ref: str | None,
+    clock: RackAiPublicWorkspaceClock,
 ) -> WorkspaceExecutionResult:
-    deadline = time.monotonic() + reservation.client.configuration.resource_wait_seconds
+    deadline = clock.monotonic() + reservation.client.configuration.resource_wait_seconds
     work_id = str(record["work_id"])
     refs = tuple(item for item in (receipt_ref,) if item)
     last_reason = "workspace outcome unavailable"
@@ -245,10 +262,10 @@ def _wait_for_authoritative_result(
         if isinstance(result, WorkspaceExecutionResult):
             return result
         last_reason = result
-        remaining = deadline - time.monotonic()
+        remaining = deadline - clock.monotonic()
         if remaining <= 0:
             raise RackAiResourceWait(f"RackAI workspace: {last_reason}; resource wait bound reached")
-        time.sleep(min(reservation.client.configuration.poll_seconds, remaining))
+        clock.sleep(min(reservation.client.configuration.poll_seconds, remaining))
 
 
 def _inspect(client: RackAiRuntimeClient, work_id: str) -> dict[str, object]:
@@ -388,12 +405,7 @@ def _submit_payload(
 ) -> dict[str, object]:
     if request.network_policy != "disabled":
         raise RackAiPublicWorkspaceContractError("RackAI public workspace contract only permits disabled network")
-    repository = {
-        "id": request.repository.repository_id,
-        "base_ref": request.repository.base_ref,
-        "base_sha": request.repository.base_sha,
-        "registered_root": request.repository.registered_root,
-    }
+    repository = _repository_payload(request)
     workspace: dict[str, object] = {
         "repository": repository,
         "objective": request.objective,
@@ -476,11 +488,32 @@ def _replay_safety_error(outcome: dict[str, object], closure: dict[str, object])
     if not bool(attempt.get("known")):
         return None
     replay_safety = str(closure.get("replay_safety", ""))
-    if replay_safety == "closed_inspection_only":
-        return "rack_ai_workspace_replay_not_permitted: closed_inspection_only"
+    if replay_safety in _ACCEPTED_REPLAY_SAFETY:
+        return None
     if "unsafe" in replay_safety.lower():
         return f"rack_ai_workspace_replay_not_permitted: {replay_safety}"
-    return None
+    return f"rack_ai_workspace_replay_safety_unknown: {replay_safety}"
+
+
+def _repository_payload(request: WorkspaceExecutionRequest) -> dict[str, object]:
+    repository: dict[str, object] = {
+        "id": request.repository.repository_id,
+        "base_ref": request.repository.base_ref,
+        "base_sha": request.repository.base_sha,
+    }
+    root = request.repository.registered_root
+    if _is_dynamic_repository_root(root):
+        repository["root"] = root
+    else:
+        repository["registered_root"] = root
+    return repository
+
+
+def _is_dynamic_repository_root(root: str | None) -> bool:
+    if root is None:
+        return False
+    dynamic = ATHBA_DYNAMIC_PROJECTS_ROOT.rstrip("/")
+    return root == dynamic or root.startswith(dynamic + "/")
 
 
 def _attempt_accepted(attempt: dict[str, object], outcome: dict[str, object], workspace: object) -> bool:

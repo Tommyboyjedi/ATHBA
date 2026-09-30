@@ -41,6 +41,8 @@ class Runtime:
         }
         self.inspect_hook = None
         self.fail_reserve = False
+        self.release_state = "released"
+        self.release_errors: list[RackAiRuntimeError] = []
 
     def operation(self, payload):
         self.calls.append(deepcopy(payload))
@@ -82,9 +84,11 @@ class Runtime:
         if op == "refresh_reservation":
             raise AssertionError("refresh_reservation is obsolete for active control flow")
         if op == "release_reservation":
-            self.reservations[payload["reservation_id"]]["state"] = "released"
+            self.reservations[payload["reservation_id"]]["state"] = self.release_state
             for member in self.reservations[payload["reservation_id"]]["services"].values():
-                member["state"] = "released"
+                member["state"] = self.release_state
+            if self.release_errors:
+                raise self.release_errors.pop(0)
             return deepcopy(self._reservation_view(self.reservations[payload["reservation_id"]]))
         raise AssertionError(op)
 
@@ -322,25 +326,58 @@ def test_scoped_reasoning_rejects_output_budget_above_reserved_ceiling(tmp_path,
     assert sent == []
 
 
-def test_release_cleanup_can_resume_after_uncertain_response(tmp_path, monkeypatch):
+def test_release_cleanup_can_resume_after_uncertain_response(tmp_path):
     reservation, client, store = session(tmp_path)
     reservation.ready("local-primary")
-    original = client.operation
-    def uncertain(payload):
-        result = original(payload)
-        if payload["operation"] == "release_reservation":
-            raise RackAiRuntimeError("lost_release_response")
-        return result
-    monkeypatch.setattr(client, "operation", uncertain)
-    with pytest.raises(RackAiRuntimeError):
-        reservation.finish()
-    assert store.load("campaign").rack_ai.release_requested
-    monkeypatch.setattr(client, "operation", original)
-    reservation.bind(ReservationBinding(store, "campaign"))
-    reservation.ready("local-primary")
-    assert store.load("campaign").rack_ai.reservation_id == "R2"
-    assert len(operations(client, "reserve")) == 2
+    client.release_errors.append(RackAiRuntimeError("lost_release_response"))
+
+    reservation.finish()
+
+    state = store.load("campaign").rack_ai
+    assert state.release_requested
+    assert state.released
+    assert state.reservation_id == "R1"
+    resumed = RackAiReservation(client, reservation.services)
+    resumed.bind(ReservationBinding(store, "campaign"))
+    assert len(operations(client, "reserve")) == 1
     assert len(operations(client, "release_reservation")) == 1
+
+
+def test_release_pending_blocks_reacquisition_until_public_completion(tmp_path):
+    reservation, client, store = session(tmp_path)
+    reservation.ready("local-primary")
+    client.release_state = "releasing"
+
+    reservation.finish()
+
+    state = store.load("campaign").rack_ai
+    assert state.release_requested
+    assert not state.released
+    resumed = RackAiReservation(client, reservation.services)
+    resumed.bind(ReservationBinding(store, "campaign"))
+    with pytest.raises(RackAiResourceWait, match="release is still pending"):
+        resumed.ready("local-primary")
+    assert store.load("campaign").rack_ai.reservation_id == "R1"
+    assert len(operations(client, "reserve")) == 1
+
+
+def test_stale_local_released_flag_is_corrected_from_public_reservation(tmp_path):
+    reservation, client, store = session(tmp_path)
+    reservation.ready("local-primary")
+    state = store.load("campaign").rack_ai
+    store.save_reservation("campaign", replace(state, release_requested=True, released=True))
+    client.release_state = "releasing"
+    client.reservations["R1"]["state"] = "releasing"
+    for member in client.reservations["R1"]["services"].values():
+        member["state"] = "releasing"
+
+    resumed = RackAiReservation(client, reservation.services)
+    resumed.bind(ReservationBinding(store, "campaign"))
+
+    assert not store.load("campaign").rack_ai.released
+    with pytest.raises(RackAiResourceWait, match="release is still pending"):
+        resumed.ready("local-primary")
+    assert len(operations(client, "reserve")) == 1
 
 
 def test_uncertain_scoped_inference_blocks_terminal_member_replacement(tmp_path, monkeypatch):
