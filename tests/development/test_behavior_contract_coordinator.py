@@ -22,6 +22,7 @@ from core.development.behavior_contract_coordinator import (
     RepairWorkUnitBuildRequest,
     RepositoryMaterialRequest,
     RequirementClausePlanner,
+    SourceClausePlanningFailure,
     ReviewMaterialRequest,
     SemanticReviewRequest,
     SeniorReviewer,
@@ -522,36 +523,103 @@ async def test_valid_source_requirement_clause_extraction_parses():
 
 
 @pytest.mark.asyncio
-async def test_malformed_source_requirement_clause_input_fails_closed():
-    planner = RequirementClausePlanner(FakeReasoningGateway(["not json"]))
+async def test_source_requirement_clause_evidence_kind_is_repaired():
+    invalid = {
+        "clauses": [
+            {
+                "ref": "SRC-1",
+                "text": "A resource can be added with a unique id.",
+                "kind": "invariant",
+                "evidence_kind": "invariant",
+            }
+        ]
+    }
+    repaired = {
+        "clauses": [
+            {
+                "ref": "SRC-1",
+                "text": "A resource can be added with a unique id.",
+                "kind": "invariant",
+                "evidence_kind": "test",
+            }
+        ]
+    }
+    gateway = FakeReasoningGateway([invalid, repaired])
+    planner = RequirementClausePlanner(gateway)
 
-    with pytest.raises(ValueError, match="source requirement clauses response was not valid JSON"):
+    result = await planner.plan_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+    assert [clause.evidence_kind for clause in result.clauses] == ["test"]
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_source_requirement_clauses",
+        "athba_source_requirement_clauses_repair",
+    ]
+    assert result.attempts[0].validation_error is not None
+    assert "unsupported checklist evidence kind: invariant" in result.attempts[0].validation_error
+    assert "clause SRC-1 field evidence_kind" in result.attempts[0].validation_error
+    repair_prompt = json.loads(gateway.requests[1].prompt)
+    assert repair_prompt["invalid_source_clause_draft"] == json.dumps(invalid)
+    assert repair_prompt["validation_error"] == result.attempts[0].validation_error
+    assert any("invariant is valid only as kind" in rule for rule in repair_prompt["repair_rules"])
+    assert result.attempts[1].validation_error is None
+
+
+@pytest.mark.asyncio
+async def test_repeated_invalid_source_requirement_clause_response_records_exhaustion():
+    invalid = {
+        "clauses": [
+            {
+                "ref": "SRC-1",
+                "text": "A resource can be added with a unique id.",
+                "kind": "invariant",
+                "evidence_kind": "invariant",
+            }
+        ]
+    }
+    planner = RequirementClausePlanner(FakeReasoningGateway([invalid, invalid]))
+
+    with pytest.raises(SourceClausePlanningFailure, match="bounded schema repair") as excinfo:
         await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+    assert len(excinfo.value.attempts) == 2
+    assert all(attempt.validation_error for attempt in excinfo.value.attempts)
+    assert "clause SRC-1 field evidence_kind" in excinfo.value.attempts[0].validation_error
+
+
+@pytest.mark.asyncio
+async def test_malformed_source_requirement_clause_input_fails_closed():
+    planner = RequirementClausePlanner(FakeReasoningGateway(["not json", "not json"]))
+
+    with pytest.raises(SourceClausePlanningFailure, match="bounded schema repair") as excinfo:
+        await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+    assert excinfo.value.attempts[0].validation_error == "source requirement clauses response was not valid JSON"
 
 
 @pytest.mark.asyncio
 async def test_empty_source_clauses_are_rejected():
-    planner = RequirementClausePlanner(FakeReasoningGateway([{"clauses": []}]))
+    planner = RequirementClausePlanner(FakeReasoningGateway([{"clauses": []}, {"clauses": []}]))
 
-    with pytest.raises(ValueError, match="source requirement clauses must not be empty"):
+    with pytest.raises(SourceClausePlanningFailure, match="bounded schema repair") as excinfo:
         await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+    assert excinfo.value.attempts[0].validation_error == "source requirement clauses must not be empty"
 
 
 @pytest.mark.asyncio
 async def test_duplicate_source_clause_refs_are_rejected():
-    planner = RequirementClausePlanner(
-        FakeReasoningGateway([
-            {
-                "clauses": [
-                    {"ref": "SRC-1", "text": "Add a resource.", "kind": "behavior"},
-                    {"ref": "SRC-1", "text": "Reject duplicate ids.", "kind": "validation"},
-                ]
-            }
-        ])
-    )
+    duplicate_response = {
+        "clauses": [
+            {"ref": "SRC-1", "text": "Add a resource.", "kind": "behavior"},
+            {"ref": "SRC-1", "text": "Reject duplicate ids.", "kind": "validation"},
+        ]
+    }
+    planner = RequirementClausePlanner(FakeReasoningGateway([duplicate_response, duplicate_response]))
 
-    with pytest.raises(ValueError, match="duplicate source clause refs"):
+    with pytest.raises(SourceClausePlanningFailure, match="bounded schema repair") as excinfo:
         await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
+
+    assert "duplicate source clause refs" in excinfo.value.attempts[0].validation_error
 
 
 @pytest.mark.asyncio

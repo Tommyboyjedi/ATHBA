@@ -262,31 +262,89 @@ async def test_invalid_omission_receives_item_specific_repair_feedback_and_same_
     assert "Specification Deducer" in prompts[1]["instruction"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("memory_quote,disposition", [
-    ("Keep ... in memory.", "split"),
-    ("in memory ... Keep the implementation", "unsplittable"),
-])
-async def test_existing_split_path_uses_the_same_bounded_provenance_rule(memory_quote, disposition):
+def split_request():
     from core.development.specification_atomization import ChecklistSplitRequest
-    children = [item("Keep the implementation dependency-free", "dependency-free"),
-                item(memory_quote)]
-    children[0]["text"] = "Remain dependency-free."
-    gateway = RecordedGateway([json.dumps({
-        "disposition": "split", "rationale": "Two independent constraints.", "children": children,
-    })])
-    result = await SpecificationChecklistPlanner(gateway).split_item(ChecklistSplitRequest(
+
+    return ChecklistSplitRequest(
         project_id="p", requirement_text=COMPOUND, parent_ref="REQ", parent_text=COMPOUND,
         parent_kind="constraint", parent_modality="required", parent_source_quote=COMPOUND,
         parent_subject="implementation", individual_no_results=(), final_revision="a" * 40,
-    ))
-    assert result.disposition == disposition
+    )
+
+
+def split_payload(memory_quote: str) -> str:
+    children = [item("Keep the implementation dependency-free", "dependency-free"),
+                item(memory_quote)]
+    children[0]["text"] = "Remain dependency-free."
+    return json.dumps({
+        "disposition": "split", "rationale": "Two independent constraints.", "children": children,
+    })
+
+
+@pytest.mark.asyncio
+async def test_valid_split_path_uses_ordered_source_provenance_rule():
+    gateway = RecordedGateway([split_payload("Keep ... in memory.")])
+
+    result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
+
+    assert result.disposition == "split"
     assert len(gateway.requests) == 1
-    if disposition == "split":
-        assert [child.ref for child in result.children] == ["REQ-S001", "REQ-S002"]
-        assert [child.subject for child in result.children] == ["dependency-free", "in memory"]
-    else:
-        assert result.rejection_reason == "invalid_split_response"
+    assert result.rejection_reason is None
+    assert [child.ref for child in result.children] == ["REQ-S001", "REQ-S002"]
+    assert [child.subject for child in result.children] == ["dependency-free", "in memory"]
+    assert len(result.attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_split_response_is_repaired_with_precise_feedback():
+    invalid = split_payload("in memory ... Keep the implementation")
+    repaired = split_payload("Keep ... in memory.")
+    gateway = RecordedGateway([invalid, repaired])
+
+    result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
+
+    assert result.disposition == "split"
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_specification_checklist_split",
+        "athba_specification_checklist_split_repair",
+    ]
+    assert len(result.attempts) == 2
+    assert result.attempts[0].response == invalid
+    assert "field source_quote" in result.attempts[0].validation_error
+    assert result.attempts[1].response == repaired
+    assert result.attempts[1].validation_error is None
+    prompts = [json.loads(request.prompt) for request in gateway.requests]
+    assert prompts[0]["rules"] == prompts[1]["rules"]
+    assert prompts[1]["validation_error"] == result.attempts[0].validation_error
+
+
+@pytest.mark.asyncio
+async def test_repeated_invalid_split_response_is_distinct_from_genuine_unsplittable():
+    invalid = split_payload("in memory ... Keep the implementation")
+    gateway = RecordedGateway([invalid, invalid])
+
+    result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
+
+    assert result.disposition == "unsplittable"
+    assert result.rejection_reason == "invalid_split_response_exhausted"
+    assert "bounded schema repair" in result.rationale
+    assert len(result.attempts) == 2
+    assert all(attempt.validation_error for attempt in result.attempts)
+
+
+@pytest.mark.asyncio
+async def test_genuine_unsplittable_split_response_remains_terminal_without_repair():
+    gateway = RecordedGateway([json.dumps({
+        "disposition": "unsplittable",
+        "rationale": "The parent is already a single grounded obligation.",
+    })])
+
+    result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
+
+    assert result.disposition == "unsplittable"
+    assert result.rejection_reason is None
+    assert len(gateway.requests) == 1
+    assert len(result.attempts) == 1
 
 
 def test_shared_adjectives_remain_in_one_source_passage():

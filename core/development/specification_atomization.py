@@ -4,7 +4,7 @@ import json
 import re
 
 from core.development.checklist_split_progress import ChecklistSplitAncestry, rejected_split
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Sequence
 
 from core.development.tdd_progression import SpecificationChecklist, SpecificationChecklistItem
@@ -19,6 +19,7 @@ class ChecklistAtomizationRequest:
 
 
 MAX_ATOMIZER_SUBMISSIONS = 2
+MAX_SPLIT_SUBMISSIONS = 2
 
 
 class ChecklistAtomizationFailure(Exception):
@@ -57,6 +58,7 @@ class ChecklistSplitResponse:
     children: tuple[SpecificationChecklistItem, ...] = ()
     attempted_response: str = ""
     rejection_reason: str | None = None
+    attempts: tuple[ChecklistAtomizationAttempt, ...] = ()
 
     def __post_init__(self) -> None:
         if self.disposition not in {"split", "unsplittable"}:
@@ -103,9 +105,26 @@ class SpecificationChecklistPlanner:
         try:
             split = _decode_split(request, result.text)
         except (ValueError, KeyError, TypeError) as error:
-            return ChecklistSplitResponse("unsplittable", str(error), attempted_response=result.text,
-                                          rejection_reason="invalid_split_response")
-        return split
+            initial_attempt = ChecklistAtomizationAttempt(result.text, str(error))
+            repaired = await self.gateway.reason(_split_repair_request(request, result.text, str(error)))
+            try:
+                split = _decode_split(request, repaired.text)
+            except (ValueError, KeyError, TypeError) as repair_error:
+                return ChecklistSplitResponse(
+                    "unsplittable",
+                    f"checklist split validation failed after bounded schema repair: {repair_error}",
+                    attempted_response=repaired.text,
+                    rejection_reason="invalid_split_response_exhausted",
+                    attempts=(
+                        initial_attempt,
+                        ChecklistAtomizationAttempt(repaired.text, str(repair_error)),
+                    ),
+                )
+            return replace(
+                split,
+                attempts=(initial_attempt, ChecklistAtomizationAttempt(repaired.text)),
+            )
+        return replace(split, attempts=(ChecklistAtomizationAttempt(result.text),))
 
 
 def _decode_split(request: ChecklistSplitRequest, response: str) -> ChecklistSplitResponse:
@@ -315,10 +334,88 @@ def _split_reasoning_request(request: ChecklistSplitRequest) -> ReasoningRequest
             "individual_test_no_results": list(request.individual_no_results),
             "final_trusted_revision": request.final_revision,
             "question": "Split this unresolved checklist item into two or more smaller independent specification obligations that together preserve the parent.",
-            "required_output": {"disposition": "split|unsplittable", "rationale": "string",
-                "children": [{"text": "string", "kind": "behavior|validation|invariant|constraint|quality",
-                "modality": "required|forbidden|non_goal", "source_quote": "supporting words from one source passage", "subject": "source-backed phrase in one retained run"}]},
-            "rules": ["do not select tests", "do not inspect Behavior Planner output", "do not inspect production code",
-                      "do not add obligations", "preserve modality", "return unsplittable if no grounded progress is possible"],
+            "required_output": _split_output_schema(),
+            "rules": _split_rules(),
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+            ],
         }, sort_keys=True),
     )
+
+
+def _split_repair_request(
+    request: ChecklistSplitRequest,
+    invalid_response: str,
+    validation_error: str,
+) -> ReasoningRequest:
+    return ReasoningRequest(
+        purpose="athba_specification_checklist_split_repair",
+        project_id=request.project_id,
+        requires_large_context=False,
+        prompt=json.dumps({
+            "instruction": "Repair the invalid ATHBA Specification Deducer split response for the Specification Gatekeeper. Return the complete corrected split response as raw JSON only.",
+            "original_requirement": request.requirement_text,
+            "parent": {"ref": request.parent_ref, "text": request.parent_text, "kind": request.parent_kind,
+                       "modality": request.parent_modality, "source_quote": request.parent_source_quote,
+                       "subject": request.parent_subject},
+            "individual_test_no_results": list(request.individual_no_results),
+            "final_trusted_revision": request.final_revision,
+            "invalid_split_draft": invalid_response,
+            "validation_error": validation_error,
+            "required_output": _split_output_schema(),
+            "rules": _split_rules(),
+            "repair_rules": [
+                "correct every contract violation visible in the invalid draft, not only the single validation error reported",
+                "if no valid grounded split is possible, return disposition=unsplittable with a precise rationale",
+                "do not weaken provenance, ordered-source citation, kind, or modality rules to make a split pass",
+            ],
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+                "return the complete corrected split response",
+            ],
+        }, indent=2, sort_keys=True),
+    )
+
+
+def _split_output_schema() -> dict[str, object]:
+    return {
+        "disposition": "split|unsplittable",
+        "rationale": "string",
+        "children": [{
+            "text": "string",
+            "kind": "behavior|validation|invariant|constraint|quality",
+            "modality": "required|forbidden|non_goal",
+            "source_quote": "supporting words copied from one original source passage; full excerpt or ordered complete tokens with optional .../… omissions",
+            "subject": "source-backed capability or quality phrase contained in one retained source run",
+        }],
+    }
+
+
+def _split_rules() -> list[str]:
+    return [
+        "do not select tests",
+        "do not inspect Behavior Planner output",
+        "do not inspect production code",
+        "do not add obligations",
+        "preserve modality unless the parent was itself invalid",
+        "return unsplittable if no grounded progress is possible",
+        "each split child must be one semantic obligation from the parent item",
+        "split children together must preserve the parent item without adding new requirements",
+        "text is the interpreted obligation and may use terminology different from the original source",
+        "for modality=non_goal, source_quote must retain not required, optional, out of scope, or No ... are required wording",
+        "for modality=forbidden, source_quote must retain must not, shall not, do not implement, forbidden, or prohibited wording",
+        "source_quote must cite supporting words copied from one original source passage; full exact source excerpts remain the simplest option",
+        "source_quote may omit intervening source words, with or without ... or …, but retained words must be complete tokens in source order within one passage",
+        "source_quote need not be unique across checklist items",
+        "multiple obligations may cite the same original passage when that passage supports each obligation",
+        "subject must occur entirely within one actual retained contiguous source run, never across or inside omitted text",
+        "retain verbatim source_quote and subject; never strengthen wording",
+        "kind must be one of behavior, validation, invariant, constraint, quality",
+        "modality must be one of required, forbidden, non_goal",
+    ]

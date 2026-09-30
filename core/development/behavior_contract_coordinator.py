@@ -322,6 +322,29 @@ class GitTesterRepositoryMaterialProvider:
         return result.stdout
 
 
+MAX_SOURCE_CLAUSE_SUBMISSIONS = 2
+
+
+@dataclass(frozen=True)
+class SourceClausePlanningAttempt:
+    response: str
+    validation_error: str | None = None
+
+
+@dataclass(frozen=True)
+class SourceClausePlanningResult:
+    clauses: list[SourceRequirementClause]
+    attempts: tuple[SourceClausePlanningAttempt, ...]
+
+
+class SourceClausePlanningFailure(Exception):
+    def __init__(self, attempts: tuple[SourceClausePlanningAttempt, ...]):
+        if len(attempts) != MAX_SOURCE_CLAUSE_SUBMISSIONS:
+            raise ValueError("source clause planning failure requires both bounded attempts")
+        self.attempts = attempts
+        super().__init__("source requirement clause planning failed after bounded schema repair")
+
+
 class RequirementClausePlanner:
     """Turn one component requirement into machine-checkable source clauses."""
 
@@ -329,6 +352,9 @@ class RequirementClausePlanner:
         self.gateway = gateway
 
     async def create_clauses(self, *, project_id: str, requirement_text: str) -> list[SourceRequirementClause]:
+        return (await self.plan_clauses(project_id=project_id, requirement_text=requirement_text)).clauses
+
+    async def plan_clauses(self, *, project_id: str, requirement_text: str) -> SourceClausePlanningResult:
         reasoning_request = ReasoningRequest(
             purpose="athba_source_requirement_clauses",
             prompt=_source_clause_prompt(project_id=project_id, requirement_text=requirement_text),
@@ -336,18 +362,34 @@ class RequirementClausePlanner:
             requires_large_context=False,
         )
         result = await self.gateway.reason(reasoning_request)
-        payload = _json_object(result.text, label="source requirement clauses")
-        raw_clauses = payload.get("clauses")
-        if not isinstance(raw_clauses, list):
-            raise ValueError("source requirement clauses response must include a clauses list")
-        clauses = [SourceRequirementClause.from_dict(dict(item)) for item in raw_clauses]
-        if not clauses:
-            raise ValueError("source requirement clauses must not be empty")
-        refs = [clause.ref for clause in clauses]
-        duplicates = sorted({ref for ref in refs if refs.count(ref) > 1})
-        if duplicates:
-            raise ValueError(f"duplicate source clause refs are not allowed: {duplicates}")
-        return clauses
+        try:
+            clauses = _decode_source_clauses(result.text)
+        except (ValueError, KeyError, TypeError) as error:
+            initial_attempt = SourceClausePlanningAttempt(result.text, str(error))
+            repair_request = ReasoningRequest(
+                purpose="athba_source_requirement_clauses_repair",
+                prompt=_source_clause_repair_prompt(
+                    project_id=project_id,
+                    requirement_text=requirement_text,
+                    invalid_response=result.text,
+                    validation_error=str(error),
+                ),
+                project_id=project_id,
+                requires_large_context=False,
+            )
+            repaired = await self.gateway.reason(repair_request)
+            try:
+                clauses = _decode_source_clauses(repaired.text)
+            except (ValueError, KeyError, TypeError) as repair_error:
+                raise SourceClausePlanningFailure((
+                    initial_attempt,
+                    SourceClausePlanningAttempt(repaired.text, str(repair_error)),
+                )) from repair_error
+            return SourceClausePlanningResult(
+                clauses,
+                (initial_attempt, SourceClausePlanningAttempt(repaired.text)),
+            )
+        return SourceClausePlanningResult(clauses, (SourceClausePlanningAttempt(result.text),))
 
 
 class BehaviorContractPlanner:
@@ -1785,50 +1827,125 @@ def _json_object(text: str, *, label: str) -> dict[str, object]:
     return payload
 
 
+def _decode_source_clauses(response: str) -> list[SourceRequirementClause]:
+    payload = _json_object(response, label="source requirement clauses")
+    raw_clauses = payload.get("clauses")
+    if not isinstance(raw_clauses, list):
+        raise ValueError("source requirement clauses response must include a clauses list")
+    clauses: list[SourceRequirementClause] = []
+    for raw_clause in raw_clauses:
+        if not isinstance(raw_clause, dict):
+            raise ValueError("source requirement clauses must be objects")
+        payload_clause = dict(raw_clause)
+        try:
+            clauses.append(SourceRequirementClause.from_dict(payload_clause))
+        except ValueError as error:
+            ref = str(payload_clause.get("ref", "<unknown>"))
+            field = _source_clause_error_field(str(error))
+            raise ValueError(f"{error}: clause {ref} field {field}") from error
+    if not clauses:
+        raise ValueError("source requirement clauses must not be empty")
+    refs = [clause.ref for clause in clauses]
+    duplicates = sorted({ref for ref in refs if refs.count(ref) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate source clause refs are not allowed: {duplicates}")
+    return clauses
+
+
+def _source_clause_error_field(error: str) -> str:
+    if "evidence kind" in error:
+        return "evidence_kind"
+    if "kind" in error:
+        return "kind"
+    return "item"
+
+
 def _source_clause_prompt(*, project_id: str, requirement_text: str) -> str:
     return json.dumps(
         {
             "instruction": "Produce ATHBA PR16 source requirement clauses as raw JSON only.",
-            "output_rules": [
-                "return raw JSON only",
-                "do not wrap the JSON in Markdown",
-                "do not use code fences",
-                "do not add commentary before or after the JSON",
-                "include one top-level clauses array",
-                "do not add extra fields outside the required schema",
-            ],
+            "output_rules": _source_clause_output_rules(),
             "project_id": project_id,
             "requirement_text": requirement_text,
-            "required_json_schema": {
-                "clauses": [
-                    {
-                        "ref": "string",
-                        "text": "string",
-                        "kind": "behavior|validation|invariant|constraint|quality",
-                        "evidence_kind": "test|mechanical|review",
-                    }
-                ]
-            },
-            "rules": [
-                "one source obligation per clause",
-                "do not bundle unrelated behaviors into one clause",
-                "preserve happy-path, failure, query, and state-preservation obligations",
-                "preserve constraint and quality obligations from the source text",
-                "kind must be one of behavior, validation, invariant, constraint, quality",
-                "evidence_kind must be one of test, mechanical, review",
-                "use test for executable behavior and validation obligations by default",
-                "use review for readability and unnecessary-abstraction obligations",
-                "for quality clauses, evidence_kind must be review and must never be quality",
-                "use mechanical for deterministic environment or dependency constraints",
-                "do not include implementation details",
-                "do not invent requirements beyond reasonable decomposition of the supplied text",
-                "keep the clause set complete enough that every meaningful behavioral obligation from the source text is represented",
-                "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
+            "required_json_schema": _source_clause_schema(),
+            "rules": _source_clause_rules(),
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _source_clause_repair_prompt(
+    *,
+    project_id: str,
+    requirement_text: str,
+    invalid_response: str,
+    validation_error: str,
+) -> str:
+    return json.dumps(
+        {
+            "instruction": "Repair the invalid ATHBA PR16 source requirement clauses. Return the complete corrected clauses as raw JSON only.",
+            "output_rules": _source_clause_output_rules() + ["return the complete corrected clauses"],
+            "project_id": project_id,
+            "requirement_text": requirement_text,
+            "invalid_source_clause_draft": invalid_response,
+            "validation_error": validation_error,
+            "required_json_schema": _source_clause_schema(),
+            "rules": _source_clause_rules(),
+            "repair_rules": [
+                "correct every contract violation visible in the invalid draft, not only the single validation error reported",
+                "keep kind separate from evidence_kind",
+                "invariant is valid only as kind and must never be used as evidence_kind",
+                "do not broaden enums, coerce invalid values, or invent requirements to satisfy validation",
             ],
         },
         indent=2,
         sort_keys=True,
     )
+
+
+def _source_clause_output_rules() -> list[str]:
+    return [
+        "return raw JSON only",
+        "do not wrap the JSON in Markdown",
+        "do not use code fences",
+        "do not add commentary before or after the JSON",
+        "include one top-level clauses array",
+        "do not add extra fields outside the required schema",
+    ]
+
+
+def _source_clause_schema() -> dict[str, object]:
+    return {
+        "clauses": [
+            {
+                "ref": "string",
+                "text": "string",
+                "kind": "behavior|validation|invariant|constraint|quality",
+                "evidence_kind": "test|mechanical|review",
+            }
+        ]
+    }
+
+
+def _source_clause_rules() -> list[str]:
+    return [
+        "one source obligation per clause",
+        "do not bundle unrelated behaviors into one clause",
+        "preserve happy-path, failure, query, and state-preservation obligations",
+        "preserve constraint and quality obligations from the source text",
+        "kind must be one of behavior, validation, invariant, constraint, quality",
+        "evidence_kind must be one of test, mechanical, review",
+        "invariant is a requirement kind and is not an evidence_kind",
+        "use test for executable behavior and validation obligations by default",
+        "use review for readability and unnecessary-abstraction obligations",
+        "for quality clauses, evidence_kind must be review and must never be quality",
+        "use mechanical for deterministic environment or dependency constraints",
+        "do not include implementation details",
+        "do not invent requirements beyond reasonable decomposition of the supplied text",
+        "keep the clause set complete enough that every meaningful behavioral obligation from the source text is represented",
+        "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
+    ]
 
 
 def _contract_prompt(
