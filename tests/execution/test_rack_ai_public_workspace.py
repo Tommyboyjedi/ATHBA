@@ -15,6 +15,7 @@ from core.development.athba_workspace_routing import (
 )
 from core.development.strict_tdd_run_domain import StrictTddRunState, StrictTddRunStatus
 from core.development.strict_tdd_run_store import StrictTddRunStateRepository
+from core.execution import rack_ai_public_workspace as public_workspace
 from core.execution.rack_ai_public_workspace import (
     RackAiPublicWorkEvidenceStore,
     RackAiPublicWorkspaceExecutionPort,
@@ -24,6 +25,19 @@ from core.execution.rack_ai_reservation import RackAiReservation
 from core.execution.rack_ai_reservation_state import ReservationBinding
 from core.execution.rack_ai_runtime import RackAiResourceWait, RackAiRuntimeConfiguration, RackAiRuntimeError
 from core.execution.workspace_execution_port import WorkspaceExecutionRequest, WorkspaceExecutionStatus
+
+
+class StepClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
 
 
 class PublicRuntime:
@@ -133,16 +147,26 @@ def _request(root: Path, revision: str, *, capabilities=frozenset({GenericModelC
     )
 
 
-def _port(tmp_path: Path, runtime: PublicRuntime) -> RackAiPublicWorkspaceExecutionPort:
+def _port(
+    tmp_path: Path,
+    runtime: PublicRuntime,
+    *,
+    clock: StepClock | None = None,
+) -> RackAiPublicWorkspaceExecutionPort:
     store = StrictTddRunStateRepository(tmp_path / "runs")
     store.save(StrictTddRunState("run", "project", "identity", StrictTddRunStatus.READY))
     reservation = RackAiReservation(runtime, ("local-primary", "local-coder"))
     reservation.bind(ReservationBinding(store, "run"))
-    return RackAiPublicWorkspaceExecutionPort(runtime, reservation, RackAiPublicWorkEvidenceStore(tmp_path / "evidence"))
+    return RackAiPublicWorkspaceExecutionPort(
+        runtime,
+        reservation,
+        RackAiPublicWorkEvidenceStore(tmp_path / "evidence"),
+        clock=clock or public_workspace.RackAiPublicWorkspaceClock(),
+    )
 
 
 def _snapshot(work_id: str, revision: str | None, *, known=True, category="accepted", failure_category=None,
-              active=False, safe=True, replay="safe_to_replay", historical_state="completed",
+              active=False, safe=True, replay="closed_inspection_only", historical_state="completed",
               reservation_id="R1", service="local-coder", artifact_id=None, artifact_bytes=0):
     workspace = {
         "status": category,
@@ -251,7 +275,29 @@ def test_successful_public_workspace_result_reaches_validation_and_uses_public_p
     assert "context_window" not in workspace["requirements"]
     assert "max_input_tokens" not in workspace["requirements"]
     assert "max_output_tokens" not in workspace["requirements"]
+    assert workspace["repository"]["registered_root"] == str(root)
+    assert "root" not in workspace["repository"]
     assert submit["request"]["service"] == "local-coder"
+
+
+def test_dynamic_athba_project_repository_is_submitted_as_root(tmp_path, monkeypatch):
+    root, revision = _git_repo(tmp_path)
+    monkeypatch.setattr(public_workspace, "ATHBA_DYNAMIC_PROJECTS_ROOT", str(tmp_path))
+    runtime = PublicRuntime(tmp_path)
+    port = _port(tmp_path, runtime)
+    work_id = _work_id(port)
+    runtime.pending_work[work_id] = [_snapshot(work_id, revision)]
+
+    result = port.submit_workspace_change(_request(root, revision))
+
+    assert result.status is WorkspaceExecutionStatus.ACCEPTED
+    submit = [call for call in runtime.calls if call["operation"] == "submit_work"][0]
+    repository = submit["request"]["payload"]["workspace"]["repository"]
+    assert repository["root"] == str(root)
+    assert "registered_root" not in repository
+    assert repository["id"] == "repo"
+    assert repository["base_ref"] == "main"
+    assert repository["base_sha"] == revision
 
 
 def test_reasoning_and_coding_profile_selects_primary_service(tmp_path):
@@ -285,7 +331,8 @@ def test_known_timeout_with_no_candidate_counts_once_after_safe_closure(tmp_path
 def test_known_timeout_waits_until_public_safe_closure(tmp_path):
     root, revision = _git_repo(tmp_path)
     runtime = PublicRuntime(tmp_path)
-    port = _port(tmp_path, runtime)
+    clock = StepClock()
+    port = _port(tmp_path, runtime, clock=clock)
     work_id = _work_id(port)
     runtime.pending_work[work_id] = [
         _snapshot(work_id, None, category="failed", failure_category="execution_timeout", historical_state="uncertain", safe=False),
@@ -295,18 +342,35 @@ def test_known_timeout_waits_until_public_safe_closure(tmp_path):
     result = port.submit_workspace_change(_request(root, revision))
 
     assert result.status is WorkspaceExecutionStatus.TIMEOUT
+    assert clock.sleeps
     assert len([call for call in runtime.calls if call["operation"] == "inspect_work_execution"]) >= 3
 
 
 def test_known_timeout_with_never_safe_closure_remains_resource_wait(tmp_path):
     root, revision = _git_repo(tmp_path)
     runtime = PublicRuntime(tmp_path)
-    port = _port(tmp_path, runtime)
+    clock = StepClock()
+    port = _port(tmp_path, runtime, clock=clock)
     work_id = _work_id(port)
     runtime.pending_work[work_id] = [_snapshot(work_id, None, category="failed", failure_category="execution_timeout", safe=False)]
 
     with pytest.raises(RackAiResourceWait, match="closure is not yet safe|resource wait bound"):
         port.submit_workspace_change(_request(root, revision))
+    assert clock.sleeps
+    assert len([call for call in runtime.calls if call["operation"] == "submit_work"]) == 1
+
+
+def test_unknown_replay_safety_fails_closed(tmp_path):
+    root, revision = _git_repo(tmp_path)
+    runtime = PublicRuntime(tmp_path)
+    port = _port(tmp_path, runtime)
+    work_id = _work_id(port)
+    runtime.pending_work[work_id] = [_snapshot(work_id, revision, replay="safe_to_replay")]
+
+    result = port.submit_workspace_change(_request(root, revision))
+
+    assert result.status is WorkspaceExecutionStatus.MALFORMED_RESULT
+    assert "replay_safety_unknown" in result.error
 
 
 def test_lost_submit_response_reconciles_original_work_without_duplicate(tmp_path):

@@ -50,9 +50,8 @@ class RackAiReservation:
                         raise
                 else:
                     state = self._remember_ready(state, view)
-                    if state.release_requested and view["state"] in TERMINAL_RESERVATIONS:
-                        state = replace(state, released=True)
-                        binding.save(state)
+                    if state.release_requested:
+                        state = _sync_release_confirmation(binding, state, view)
             if state is not None and state.release_requested and not state.released:
                 self.finish()
         except RackAiRuntimeError as error:
@@ -60,8 +59,7 @@ class RackAiReservation:
         self.closed = False
 
     def transition(self, identity: str) -> None:
-        self.transition_identity = identity
-        self.call_sequence = 0
+        self.transition_identity, self.call_sequence = identity, 0
 
     def call_identity(self, payload: str) -> str:
         self.call_sequence += 1
@@ -87,6 +85,8 @@ class RackAiReservation:
                         raise RackAiResourceWait(f"reservation inspect: {error.code}") from error
                 else:
                     state = self._remember_ready(state, view)
+                    if state.release_requested:
+                        state = _sync_release_confirmation(binding, state, view)
                     if view["state"] not in TERMINAL_RESERVATIONS:
                         if state.release_requested:
                             raise RackAiResourceWait("reservation release is still pending")
@@ -263,14 +263,60 @@ class ReservationAccessWait:
 
 def _finish_reservation(client: RackAiRuntimeClient, binding: ReservationBinding) -> None:
     state = binding.load()
-    if state is None or state.released:
+    if state is None:
         return
-    binding.save(replace(state, release_requested=True))
+    state = replace(state, release_requested=True)
+    binding.save(state)
     if state.reservation_id is None:
-        binding.save(replace(state, release_requested=True, released=True))
+        binding.save(replace(state, released=True))
         return
-    client.operation({"operation": "release_reservation", "reservation_id": state.reservation_id})
-    binding.save(replace(state, release_requested=True, released=True))
+    if state.released:
+        try:
+            view = _inspect_reservation(client, state.reservation_id)
+        except RackAiRuntimeError:
+            return
+        state = _sync_release_confirmation(binding, state, view)
+        if state.released:
+            return
+    try:
+        client.operation({"operation": "release_reservation", "reservation_id": state.reservation_id})
+    except RackAiRuntimeError as error:
+        if error.status not in {0, 429, 502, 503, 504}:
+            raise
+    view = _inspect_reservation(client, state.reservation_id)
+    _sync_release_confirmation(binding, state, view)
+
+
+def _inspect_reservation(client: RackAiRuntimeClient, reservation_id: str) -> dict:
+    view = client.operation({"operation": "inspect_reservation", "reservation_id": reservation_id})
+    if not isinstance(view, dict):
+        raise RackAiRuntimeError("reservation_inspection_malformed")
+    return view
+
+
+def _sync_release_confirmation(
+    binding: ReservationBinding,
+    state: RackAiReservationState,
+    view: dict,
+) -> RackAiReservationState:
+    confirmed = _reservation_release_confirmed(view)
+    if state.released == confirmed:
+        return state
+    updated = replace(state, released=confirmed)
+    binding.save(updated)
+    return updated
+
+
+def _reservation_release_confirmed(view: dict) -> bool:
+    if view.get("state") not in TERMINAL_RESERVATIONS:
+        return False
+    members = view.get("services")
+    if not isinstance(members, dict):
+        return True
+    for member in members.values():
+        if isinstance(member, dict) and member.get("state") not in TERMINAL_RESERVATIONS:
+            return False
+    return True
 
 
 def _remember_ready_state(binding: ReservationBinding, state: RackAiReservationState, view: dict) -> RackAiReservationState:
