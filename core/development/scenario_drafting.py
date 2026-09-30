@@ -494,7 +494,7 @@ def _record_submission(
     state = record.state
     unit = record.unit
     result = record.result
-    accepted = result.accepted and result.accepted_revision is not None and result.branch is not None
+    accepted = result.accepted and result.accepted_revision is not None
     outcome = _submission_outcome(result, accepted)
     if outcome is ScenarioSubmissionOutcome.EXTERNAL_BLOCKER:
 
@@ -833,7 +833,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
     if repair is not None:
         payload["previous_candidate"] = {
             "attempt": repair.attempt_number,
-            "ref": repair.candidate_branch,
+            "ref": _candidate_git_operand(repair),
             "sha": repair.candidate_revision,
             "source": repair.candidate_source,
             "assessment": None if repair.candidate_assessment is None else repair.candidate_assessment.to_dict(),
@@ -918,10 +918,14 @@ def _no_candidate_feedback(
 
 def _has_repair_lineage(repair: ScenarioDraftAttempt) -> bool:
     return (
-        repair.candidate_branch is not None
-        and repair.candidate_revision is not None
+        repair.candidate_revision is not None
         and repair.candidate_source is not None
     )
+
+
+def _candidate_git_operand(repair: ScenarioDraftAttempt) -> str | None:
+    return repair.candidate_branch or repair.candidate_revision
+
 
 def _repair_binding(
     binding: RepositoryBinding,
@@ -931,12 +935,13 @@ def _repair_binding(
 ) -> RepositoryBinding:
     if repair is None:
         return binding.with_base_sha(request.development_base_revision)
-    if repair.candidate_branch is None or repair.candidate_revision is None or repair.candidate_source is None:
+    candidate_ref = _candidate_git_operand(repair)
+    if candidate_ref is None or repair.candidate_revision is None or repair.candidate_source is None:
         raise ValueError("repair candidate lineage is unavailable")
-    if reader.resolve(repair.candidate_branch) != repair.candidate_revision:
+    if reader.resolve(candidate_ref) != repair.candidate_revision:
         raise ValueError("repair candidate ref does not resolve to its persisted SHA")
     return RepositoryBinding(
-        binding.repository_id, repair.candidate_branch, repair.candidate_revision,
+        binding.repository_id, candidate_ref, repair.candidate_revision,
         binding.registered_root, binding.environment_resources,
     )
 

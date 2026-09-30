@@ -269,6 +269,7 @@ def test_successful_public_workspace_result_reaches_validation_and_uses_public_p
 
     assert result.status is WorkspaceExecutionStatus.ACCEPTED
     assert result.accepted_revision == revision
+    assert result.branch is None
     submit = [call for call in runtime.calls if call["operation"] == "submit_work"][0]
     workspace = submit["request"]["payload"]["workspace"]
     assert workspace["requirements"] == {"complexity": "small", "requires_large_context": False}
@@ -502,3 +503,25 @@ def test_accepted_revision_validation_refuses_rackai_owned_root_without_shelling
     assert result.status is WorkspaceExecutionStatus.MALFORMED_RESULT
     assert "RackAI-owned" in result.error
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("accepted_revision", "expected_error"),
+    [
+        (None, "omitted accepted_revision"),
+        ("f" * 40, "not present in ATHBA repository"),
+    ],
+)
+def test_accepted_revision_must_be_public_and_present_in_athba_repo(
+    tmp_path, accepted_revision, expected_error
+):
+    root, revision = _git_repo(tmp_path)
+    runtime = PublicRuntime(tmp_path)
+    port = _port(tmp_path, runtime)
+    work_id = _work_id(port)
+    runtime.pending_work[work_id] = [_snapshot(work_id, accepted_revision, category="accepted")]
+
+    result = port.submit_workspace_change(_request(root, revision))
+
+    assert result.status is WorkspaceExecutionStatus.MALFORMED_RESULT
+    assert expected_error in result.error
