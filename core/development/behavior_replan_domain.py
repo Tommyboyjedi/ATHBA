@@ -19,6 +19,7 @@ class BehaviorReplanPhase(str, Enum):
     REQUIRED = "behavior_replan_required"
     STARTED = "behavior_replan_started"
     RECEIVED = "behavior_split_received"
+    CORRECTION_STARTED = "behavior_replan_correction_started"
     SUPERSEDED = "behavior_split"
     UNSPLITTABLE = "behavior_unsplittable"
     FAILED = "behavior_replan_failed"
@@ -98,6 +99,17 @@ class BehaviorReplanRequest:
 
 
 @dataclass(frozen=True)
+class BehaviorReplanCorrectionRequest:
+    request: BehaviorReplanRequest
+    rejected_response: str
+    validation_error: str
+
+    def __post_init__(self) -> None:
+        if not self.rejected_response.strip() or not self.validation_error.strip():
+            raise ValueError("replan correction requires rejected response and validation error")
+
+
+@dataclass(frozen=True)
 class BehaviorReplanResponse:
     disposition: BehaviorReplanDisposition
     rationale: str
@@ -143,6 +155,9 @@ class BehaviorReplanRecord:
     detail: str | None = None
     rejected_response: str | None = None
     structure_digest: str | None = None
+    correction_attempted: bool = False
+    validation_errors: tuple[str, ...] = ()
+    rejected_responses: tuple[str, ...] = ()
 
     @property
     def child_refs(self) -> tuple[str, ...]:
@@ -159,6 +174,9 @@ class BehaviorReplanRecord:
             "blocker": None if self.blocker is None else self.blocker.value,
             "detail": self.detail, "rejected_response": self.rejected_response,
             "structure_digest": self.structure_digest,
+            "correction_attempted": self.correction_attempted,
+            "validation_errors": list(self.validation_errors),
+            "rejected_responses": list(self.rejected_responses),
             "parent_behavior_ref": self.request.parent.ref,
             "child_behavior_refs": list(self.child_refs), "split_depth": self.split_depth,
         }
@@ -170,6 +188,9 @@ class BehaviorReplanRecord:
             None if value["response"] is None else BehaviorReplanResponse.from_dict(value["response"]),
             None if value["blocker"] is None else BehaviorReplanBlocker(value["blocker"]),
             value["detail"], value["rejected_response"], value["structure_digest"],
+            bool(value.get("correction_attempted", False)),
+            tuple(str(item) for item in value.get("validation_errors", ())),
+            tuple(str(item) for item in value.get("rejected_responses", ())),
         )
         if (value["parent_behavior_ref"] != record.request.parent.ref
                 or tuple(value["child_behavior_refs"]) != record.child_refs

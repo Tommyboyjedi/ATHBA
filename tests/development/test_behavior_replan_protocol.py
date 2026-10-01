@@ -118,6 +118,7 @@ async def test_fence_normalization_does_not_bypass_split_validation(tmp_path, in
     count = len(scenarios.requests)
     result = await app.run(request())
     assert result.current_status == "blocked"
-    assert len(gateway.requests) == 1
+    expected_requests = 2 if invalid in {"same_parent", "source"} else 1
+    assert len(gateway.requests) == expected_requests
     assert len(scenarios.requests) == count
     assert reconciler.calls == []

@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 from core.development.behavior_contract_domain import BehaviorContractRequirement
 from core.development.behavior_replan_domain import (
-    BehaviorReplanBlocker, BehaviorReplanDisposition, BehaviorReplanRequest, BehaviorReplanResponse,
+    BehaviorReplanBlocker, BehaviorReplanCorrectionRequest, BehaviorReplanDisposition,
+    BehaviorReplanRequest, BehaviorReplanResponse,
 )
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 
@@ -17,6 +18,13 @@ class BehaviorReplanFailure(Exception):
     kind: BehaviorReplanBlocker
     detail: str
     raw_response: str | None = None
+
+
+@dataclass(frozen=True)
+class _PlannerSubmission:
+    purpose: str
+    prompt: str
+    request: BehaviorReplanRequest
 
 
 CHILD_FIELDS = frozenset({
@@ -38,9 +46,21 @@ class BehaviorRequirementReplanner:
         self.gateway = gateway
 
     async def replan(self, request: BehaviorReplanRequest) -> BehaviorReplanResponse:
+        return await self._submit(_PlannerSubmission(
+            "athba_behavior_requirement_replan", _prompt(request), request
+        ))
+
+    async def correct(self, correction: BehaviorReplanCorrectionRequest) -> BehaviorReplanResponse:
+        return await self._submit(_PlannerSubmission(
+            "athba_behavior_requirement_replan_correction",
+            _correction_prompt(correction),
+            correction.request,
+        ))
+
+    async def _submit(self, submission: _PlannerSubmission) -> BehaviorReplanResponse:
         try:
             result = await self.gateway.reason(ReasoningRequest(
-                "athba_behavior_requirement_replan", _prompt(request), request.project_id,
+                submission.purpose, submission.prompt, submission.request.project_id
             ))
         except RackAiResourceWait:
             raise
@@ -50,7 +70,7 @@ class BehaviorRequirementReplanner:
                 BehaviorReplanBlocker.PROVIDER_FAILURE, f"Reasoning gateway failed: {type(error).__name__}",
             ) from error
         try:
-            return _parse(result.text, request)
+            return _parse(result.text, submission.request)
         except (ValueError, TypeError, KeyError) as error:
             raise BehaviorReplanFailure(
                 BehaviorReplanBlocker.PROTOCOL_FAILURE, str(error), result.text,
@@ -87,6 +107,49 @@ def _parse(raw: str, request: BehaviorReplanRequest) -> BehaviorReplanResponse:
     return BehaviorReplanResponse(
         disposition, value["rationale"], tuple(children), tuple(rationales), value["coverage_rationale"], raw,
     )
+
+
+def _correction_prompt(correction: BehaviorReplanCorrectionRequest) -> str:
+    request = correction.request
+    return json.dumps({
+        "instruction": (
+            "Act as ATHBA's Behavior Planner. The previous split proposal was rejected by ATHBA validation. "
+            "Return exactly one corrected response using the same authority, source clauses and output schema. "
+            "Do not repeat the rejected non-progressing structure. Do not declare unsplittable unless valid decomposition "
+            "is genuinely impossible without changing the parent requirement."
+        ),
+        "request": request.to_dict(),
+        "rejected_response": correction.rejected_response,
+        "validation_error": correction.validation_error,
+        "output_rules": [
+            "return raw JSON only",
+            "return exactly one JSON object",
+            "do not wrap JSON in Markdown; no Markdown",
+            "do not use code fences; no code fences",
+            "do not add commentary before or after the JSON; no commentary",
+            "top-level keys must be exactly: disposition, rationale, children, coverage_rationale",
+            "do not echo the prompt",
+            "do not return role",
+            "do not return request",
+            "do not return response_contract",
+            "do not return unsplittable_children",
+            "required_output_schema describes the only permitted output; do not return its label",
+        ],
+        "required_output_schema": {
+            "disposition": "split | unsplittable",
+            "rationale": "non-empty explanation",
+            "coverage_rationale": "collective coverage and no new requirements (empty for unsplittable)",
+            "children": [{
+                "source_refs": ["parent source ref"],
+                "summary": "text",
+                "observable_outcome": "text",
+                "test_hint": "text",
+                "error_expectation": None,
+                "preserves_state_on_failure": True,
+                "narrowing_rationale": "why strictly narrower and grounded in source clauses",
+            }],
+        },
+    }, sort_keys=True)
 
 
 def _normalize_outer_json_fence(raw: str) -> str:

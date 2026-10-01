@@ -52,10 +52,15 @@ def naming_input():
 
 
 def reasoner(provider, monkeypatch, response):
+    return sequenced_reasoner(provider, monkeypatch, (response, response))
+
+
+def sequenced_reasoner(provider, monkeypatch, responses):
     requests = []
+    answers = iter(responses)
     def invoke(request):
         requests.append(request)
-        return NormalizedResult(response, {}, {})
+        return NormalizedResult(next(answers), {}, {})
     monkeypatch.setattr(provider, "invoke", invoke)
     return LocalOnlyPostBehaviorReasoning(ProviderReasoningGateway(provider, "configured-local")), requests
 
@@ -66,7 +71,7 @@ async def test_naming_boundary_transmits_exact_focused_material_only(local_provi
     result = await NamingAssessor(gateway).reason(naming_input())
     assert result == NamingDecision(IdentifierRename("old_name", "exact_name"))
     assert len(calls) == 1
-    context = json.loads(calls[0].prompt.split("\n", 1)[1])
+    context = json.loads(calls[0].prompt.rsplit("\n", 1)[1])
     assert context == {
         "explicit_behavior_naming": {"text": REQUIRED, "required_identifiers": ["exact_name"]},
         "production": [{"path": "subject.py", "source": SOURCE}],
@@ -81,7 +86,7 @@ async def test_refactor_boundary_contains_production_only(local_provider, monkey
     gateway, calls = reasoner(local_provider, monkeypatch, "NO")
     assert await RefactorAssessor(gateway).reason(production()) == RefactorDecision()
     assert len(calls) == 1
-    assert json.loads(calls[0].prompt.split("\n", 1)[1]) == {
+    assert json.loads(calls[0].prompt.rsplit("\n", 1)[1]) == {
         "production": [{"path": "subject.py", "source": SOURCE}],
     }
     assert REQUIRED not in calls[0].prompt
@@ -178,11 +183,77 @@ async def test_raw_assessor_evidence_is_retained_before_parse_failure(local_prov
     gateway = LocalOnlyPostBehaviorReasoning(gateway.gateway, Evidence())
     with pytest.raises(ValueError):
         await RefactorAssessor(gateway).reason(production())
-    assert len(calls) == 1
-    assert [record.completed for record in records] == [False, True]
+    assert len(calls) == 2
+    assert [record.completed for record in records] == [False, True, False, True]
     assert records[0].invocation_id == records[1].invocation_id
+    assert records[2].invocation_id == records[3].invocation_id
     assert records[1].result.text == "YES\nmalformed: retain this response"
-    assert records[0].request == records[1].request
+    assert records[3].result.text == "YES\nmalformed: retain this response"
+    correction = json.loads(calls[1].prompt.rsplit("\n", 1)[1])
+    assert correction["rejected_answer"] == "YES\nmalformed: retain this response"
+    assert correction["validation_error"] == "refactor assessment must return NO or one objective and brief reason"
+
+
+@pytest.mark.asyncio
+async def test_refactor_assessor_malformed_response_gets_one_format_correction(local_provider, monkeypatch):
+    first = (
+        "objective: Simplify the reset logic\n"
+        "reason: The operation can be simpler.\n"
+        "YES"
+    )
+    gateway, calls = sequenced_reasoner(local_provider, monkeypatch, (
+        first,
+        "YES\nobjective: Simplify reset.\nreason: Avoid redundant assignment.",
+    ))
+
+    result = await RefactorAssessor(gateway).reason(production())
+
+    assert result == RefactorDecision(RefactorOpportunity(
+        "Simplify reset.", "Avoid redundant assignment."
+    ))
+    assert len(calls) == 2
+    correction = json.loads(calls[1].prompt.rsplit("\n", 1)[1])
+    assert correction["original_context"] == {
+        "production": [{"path": "subject.py", "source": SOURCE}],
+    }
+    assert correction["rejected_answer"] == first
+    assert correction["validation_error"] == "refactor assessment must return NO or one objective and brief reason"
+    assert "NO\nor:\nYES\nobjective:" in correction["required_output_format"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_malformed_refactor_assessment_records_exhaustion(local_provider, monkeypatch):
+    gateway, calls = sequenced_reasoner(local_provider, monkeypatch, (
+        "YES\nmalformed: first",
+        "YES\nmalformed: second",
+    ))
+
+    with pytest.raises(ValueError, match="refactor assessment response validation exhausted"):
+        await RefactorAssessor(gateway).reason(production())
+
+    assert len(calls) == 2
+    correction = json.loads(calls[1].prompt.rsplit("\n", 1)[1])
+    assert correction["rejected_answer"] == "YES\nmalformed: first"
+    assert correction["validation_error"] == "refactor assessment must return NO or one objective and brief reason"
+
+
+@pytest.mark.asyncio
+async def test_naming_assessor_malformed_response_gets_same_bounded_correction(local_provider, monkeypatch):
+    gateway, calls = sequenced_reasoner(local_provider, monkeypatch, (
+        "required_name: exact_name\ncurrent_name: old_name\nYES",
+        "YES\ncurrent_name: old_name\nrequired_name: exact_name",
+    ))
+
+    assert await NamingAssessor(gateway).reason(naming_input()) == (
+        NamingDecision(IdentifierRename("old_name", "exact_name"))
+    )
+    assert len(calls) == 2
+    correction = json.loads(calls[1].prompt.rsplit("\n", 1)[1])
+    assert correction["original_context"]["explicit_behavior_naming"] == {
+        "text": REQUIRED,
+        "required_identifiers": ["exact_name"],
+    }
+    assert correction["validation_error"] == "naming assessment must return NO or exactly one mapping"
 
 
 def workspace_input():
@@ -438,7 +509,7 @@ async def test_naming_prompt_limits_mismatch_to_missing_required_identifier(loca
     ))
     assert await NamingAssessor(gateway).reason(request) == NamingDecision()
     assert len(calls) == 1
-    instruction = calls[0].prompt.split("\n", 1)[0]
+    instruction = calls[0].prompt.rsplit("\n", 1)[0]
     assert "A naming mismatch exists only when an explicitly required identifier is absent" in instruction
     assert "and the same public/product concept is implemented under a different identifier" in instruction
     assert "If the required identifier already exists in production, answer NO." in instruction
@@ -450,11 +521,14 @@ async def test_naming_prompt_limits_mismatch_to_missing_required_identifier(loca
 async def test_naming_prompt_output_identifiers_have_no_trailing_punctuation(local_provider, monkeypatch):
     gateway, calls = reasoner(local_provider, monkeypatch, "NO")
     await NamingAssessor(gateway).reason(naming_input())
-    instruction = calls[0].prompt.split("\n", 1)[0]
-    output = instruction.split("Return exactly either: ", 1)[1].split(" Do not add", 1)[0]
+    instruction = calls[0].prompt.rsplit("\n", 1)[0]
+    output = instruction.split("Return exactly either:\n", 1)[1].split("\nDo not add", 1)[0]
     assert output == (
-        "NO or: YES\\ncurrent_name: <exact existing identifier>"
-        "\\nrequired_name: <exact required identifier>"
+        "NO\n"
+        "or:\n"
+        "YES\n"
+        "current_name: <exact existing identifier>\n"
+        "required_name: <exact required identifier>"
     )
     assert "Do not add punctuation, explanation, markdown, or any other text." in instruction
 

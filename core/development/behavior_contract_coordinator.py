@@ -11,7 +11,9 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Protocol, cast
 
-from core.development.behavior_replan_domain import BehaviorReplanRequest, BehaviorReplanResponse
+from core.development.behavior_replan_domain import (
+    BehaviorReplanCorrectionRequest, BehaviorReplanRequest, BehaviorReplanResponse,
+)
 from core.development.behavior_replanning import BehaviorRequirementReplanner
 from core.development.behavior_requirement_repair import BehaviorRequirementRepairPlanner
 from core.development.behavior_requirement_repair_domain import BehaviorRepairRequest
@@ -404,6 +406,12 @@ class BehaviorContractPlanner:
 
     async def replan_requirement(self, request: BehaviorReplanRequest) -> BehaviorReplanResponse:
         return await BehaviorRequirementReplanner(self.gateway).replan(request)
+
+    async def correct_replan_requirement(
+        self,
+        correction: BehaviorReplanCorrectionRequest,
+    ) -> BehaviorReplanResponse:
+        return await BehaviorRequirementReplanner(self.gateway).correct(correction)
 
     async def create_contract(self, request: ContractPlanningRequest | None = None, **legacy) -> BehaviorContract:
         request = request or ContractPlanningRequest(

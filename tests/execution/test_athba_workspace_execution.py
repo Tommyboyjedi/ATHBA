@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from core.development.athba_workspace_routing import AthbaExecutionProfile, AthbaExecutionProfileResolver, AthbaProfileResolutionRequest, AthbaModelWorkKind, AthbaOutboundPriority, AthbaWorkspaceIdentity, GenericModelCapability, WorkspaceComplexity
@@ -93,6 +95,26 @@ async def test_profiled_gateway_migrates_frontier_work_to_generic_port():
     assert port.submitted[0].profile.required_capabilities == {GenericModelCapability.CODING}
     assert port.submitted[0].identity.work_id == "work"
     assert port.submitted[0].identity.submission_id == "submission"
+
+
+@pytest.mark.asyncio
+async def test_profiled_gateway_submits_without_background_executor_thread():
+    caller_thread = threading.get_ident()
+
+    class Port:
+        def submit_workspace_change(self, submitted):
+            assert threading.get_ident() == caller_thread
+            return WorkspaceExecutionResult(
+                identity=submitted.identity,
+                status=WorkspaceExecutionStatus.ACCEPTED,
+                accepted_revision="d" * 40,
+            )
+
+    result = await ProfiledWorkspaceExecutionGateway(
+        ProfiledWorkspaceGatewayDependencies(Port(), resolver())
+    ).execute(unit(), binding())
+
+    assert result.accepted
 
 
 @pytest.mark.asyncio
