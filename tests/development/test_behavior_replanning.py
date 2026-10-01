@@ -24,10 +24,15 @@ class ReplanGateway:
         self.payload = payload
 
     async def reason(self, request):
-        assert request.purpose == "athba_behavior_requirement_replan"
+        assert request.purpose in {
+            "athba_behavior_requirement_replan",
+            "athba_behavior_requirement_replan_correction",
+        }
         self.requests.append(request)
         parent = json.loads(request.prompt)["request"]["parent"]
         payload = self.payload if self.payload is not None else split_payload(parent)
+        if isinstance(payload, list):
+            payload = payload.pop(0)
         if isinstance(payload, Exception):
             raise payload
         return ReasoningResult(json.dumps(payload) if not isinstance(payload, str) else payload)
@@ -272,7 +277,7 @@ async def test_unsplittable_durably_blocks_without_more_tester_work(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("invalid", ["same_parent", "duplicate", "source", "coverage", "id", "dependency", "empty", "prose", "provider"])
-async def test_nonprogress_protocol_and_provider_fail_closed_once(tmp_path, invalid):
+async def test_nonprogress_protocol_and_provider_fail_closed_with_bounded_correction(tmp_path, invalid):
     parent = contract("feature").observable_requirements[0].to_dict()
     payload = split_payload(parent)
     if invalid == "same_parent":
@@ -297,9 +302,60 @@ async def test_nonprogress_protocol_and_provider_fail_closed_once(tmp_path, inva
     count = len(scenarios.requests)
     result = await app.run(request())
     assert result.current_status == "blocked"
-    assert len(gateway.requests) == 1 and len(scenarios.requests) == count
+    expected_requests = 2 if invalid in {"same_parent", "duplicate", "source"} else 1
+    assert len(gateway.requests) == expected_requests and len(scenarios.requests) == count
     assert reconciler.calls == []
     assert app.states.load("feature").behavior_replans[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_invalid_split_proposal_gets_one_correction_then_commits_valid_split(tmp_path):
+    parent = contract("feature").observable_requirements[0].to_dict()
+    invalid = split_payload(parent)
+    invalid["children"][0]["observable_outcome"] = parent["observable_outcome"]
+    valid = split_payload(parent)
+    app, gateway, _, scenarios, reconciler, _ = await pending_application(tmp_path, [invalid, valid])
+
+    result = await app.run(request())
+
+    assert result.current_status == "completed"
+    record = app.states.load("feature").behavior_replans[-1]
+    assert record.phase == BehaviorReplanPhase.SUPERSEDED
+    assert record.correction_attempted is True
+    assert record.validation_errors == (
+        "non-progressing split: unchanged parent, ancestor, existing behavior or duplicate children",
+    )
+    assert len(record.rejected_responses) == 1
+    assert len(gateway.requests) == 2
+    correction_prompt = json.loads(gateway.requests[1].prompt)
+    assert correction_prompt["validation_error"] == record.validation_errors[0]
+    assert correction_prompt["rejected_response"] == record.rejected_responses[0]
+    assert len(scenarios.requests) > 1 and reconciler.calls
+
+
+@pytest.mark.asyncio
+async def test_repeated_invalid_split_proposal_records_correction_exhaustion(tmp_path):
+    parent = contract("feature").observable_requirements[0].to_dict()
+    invalid = split_payload(parent)
+    invalid["children"][0]["observable_outcome"] = parent["observable_outcome"]
+    app, gateway, _, scenarios, reconciler, _ = await pending_application(tmp_path, [invalid, dict(invalid)])
+    count = len(scenarios.requests)
+
+    result = await app.run(request())
+
+    assert result.current_status == "blocked"
+    assert result.blocked_reason == BehaviorReplanBlocker.INVALID_SPLIT.value
+    record = app.states.load("feature").behavior_replans[-1]
+    assert record.phase == BehaviorReplanPhase.FAILED
+    assert record.correction_attempted is True
+    assert record.detail.startswith("proposal correction exhausted: non-progressing split")
+    assert record.validation_errors == (
+        "non-progressing split: unchanged parent, ancestor, existing behavior or duplicate children",
+        "non-progressing split: unchanged parent, ancestor, existing behavior or duplicate children",
+    )
+    assert len(record.rejected_responses) == 2
+    assert len(gateway.requests) == 2
+    assert len(scenarios.requests) == count and reconciler.calls == []
 
 
 @pytest.mark.asyncio

@@ -95,8 +95,10 @@ class RackAiPublicWorkspaceExecutionPort:
 
     def submit_workspace_change(self, request: WorkspaceExecutionRequest) -> WorkspaceExecutionResult:
         self._verify_contract()
-        record = _record_or_recover_submission(self.reservation, self.selector, request)
-        receipt_ref = _submit_or_reconcile(self.client, self.evidence, request, record)
+        record = _record_or_recover_submission(
+            self.reservation, self.selector, self.evidence, request, self.clock
+        )
+        receipt_ref = _submit_or_reconcile(self.client, self.evidence, request, record, self.clock)
         if isinstance(receipt_ref, WorkspaceExecutionResult):
             return receipt_ref
         return _wait_for_authoritative_result(
@@ -138,6 +140,41 @@ def _record_evidence(evidence: RackAiPublicWorkEvidenceStore, work_id: str, kind
     return evidence.record(RackAiPublicWorkEvidenceRecord(work_id, kind, payload))
 
 
+def _record_phase(
+    evidence: RackAiPublicWorkEvidenceStore,
+    work_id: str,
+    phase: str,
+    request: WorkspaceExecutionRequest,
+    clock: RackAiPublicWorkspaceClock,
+    record: dict[str, object] | None = None,
+    *,
+    deadline_monotonic: float | None = None,
+    elapsed_seconds: float | None = None,
+    detail: str | None = None,
+) -> str:
+    record = record or {}
+    payload: dict[str, object] = {
+        "schema": "athba/rack-ai-public-work-phase/v1",
+        "phase": phase,
+        "monotonic": clock.monotonic(),
+        "submission_id": request.identity.submission_id,
+        "identity_work_id": request.identity.work_id,
+        "idempotency_key": request.identity.idempotency_key,
+        "work_id": work_id,
+    }
+    for key in ("reservation_id", "service"):
+        value = record.get(key)
+        if value is not None:
+            payload[key] = str(value)
+    if deadline_monotonic is not None:
+        payload["deadline_monotonic"] = deadline_monotonic
+    if elapsed_seconds is not None:
+        payload["elapsed_seconds"] = elapsed_seconds
+    if detail is not None:
+        payload["detail"] = detail
+    return _record_evidence(evidence, work_id, f"phase-{phase}", payload)
+
+
 def _verify_contract(client: RackAiRuntimeClient) -> None:
     discovery = client.operation({"operation": "discover"})
     contract = discovery.get("work_execution_contract")
@@ -156,15 +193,23 @@ def _verify_contract(client: RackAiRuntimeClient) -> None:
 def _record_or_recover_submission(
     reservation: RackAiReservation,
     selector: RackAiPublicWorkspaceServiceSelector,
+    evidence: RackAiPublicWorkEvidenceStore,
     request: WorkspaceExecutionRequest,
+    clock: RackAiPublicWorkspaceClock,
 ) -> dict[str, object]:
     existing = reservation.workspace_submission(request.identity.submission_id)
     if existing is not None:
-        return _validate_existing_submission(request, existing)
+        record = _validate_existing_submission(request, existing)
+        _record_phase(evidence, str(record["work_id"]), "submission_record_recovered", request, clock, record)
+        return record
     service = selector.select(request)
+    work_id = reservation.workspace_execution_identity(request.identity.submission_id)
+    _record_phase(evidence, work_id, "reservation_ready_enter", request, clock, {
+        "work_id": work_id,
+        "service": service,
+    })
     member = reservation.ready(service)
     reservation_id = str(member["reservation_id"])
-    work_id = reservation.workspace_execution_identity(request.identity.submission_id)
     payload = _submit_payload(request, reservation_id, service, work_id)
     record = {
         "submission_id": request.identity.submission_id,
@@ -177,8 +222,10 @@ def _record_or_recover_submission(
         "request_digest": _digest(payload),
         "contract_version": PUBLIC_WORK_CONTRACT_VERSION,
     }
+    _record_phase(evidence, work_id, "reservation_ready_exit", request, clock, record)
     reservation.record_workspace_submission(request.identity.submission_id, record)
     reservation.mark_workspace(request.identity.submission_id)
+    _record_phase(evidence, work_id, "submission_record_recorded", request, clock, record)
     return record
 
 
@@ -187,14 +234,19 @@ def _submit_or_reconcile(
     evidence: RackAiPublicWorkEvidenceStore,
     request: WorkspaceExecutionRequest,
     record: dict[str, object],
+    clock: RackAiPublicWorkspaceClock,
 ) -> str | WorkspaceExecutionResult | None:
     work_id = str(record["work_id"])
+    _record_phase(evidence, work_id, "submission_reconcile_inspect_enter", request, clock, record)
     try:
         _inspect(client, work_id)
+        _record_phase(evidence, work_id, "submission_reconcile_existing_work", request, clock, record)
         return None
     except RackAiRuntimeError as error:
         if error.code != "not_found":
+            _record_phase(evidence, work_id, "submission_reconcile_inspect_error", request, clock, record, detail=error.code)
             raise RackAiResourceWait(f"RackAI workspace inspect: {error.code}") from error
+        _record_phase(evidence, work_id, "submission_reconcile_not_found", request, clock, record)
     payload = _submit_payload(request, str(record["reservation_id"]), str(record["service"]), work_id)
     if _digest(payload) != record.get("request_digest"):
         ref = _record_evidence(evidence, work_id, "submission-conflict", {
@@ -207,14 +259,17 @@ def _submit_or_reconcile(
             "rack_ai_workspace_submission_payload_changed",
             (ref,),
         )
+    _record_phase(evidence, work_id, "submit_work_enter", request, clock, record)
     try:
         receipt = client.operation({"operation": "submit_work", "request": payload})
     except RackAiRuntimeError as error:
+        _record_phase(evidence, work_id, "submit_work_error", request, clock, record, detail=error.code)
         if error.status in {0, 429, 502, 503, 504}:
             try:
                 _inspect(client, work_id)
             except RackAiRuntimeError:
                 raise RackAiResourceWait(f"RackAI workspace submit: {error.code}") from error
+            _record_phase(evidence, work_id, "submit_work_uncertain_existing_work", request, clock, record, detail=error.code)
             return None
         ref = _record_evidence(evidence, work_id, "submit-error", {
             "operation": "submit_work",
@@ -227,7 +282,9 @@ def _submit_or_reconcile(
             f"submit_work failed: {error.code}",
             (ref,),
         )
-    return _record_evidence(evidence, work_id, "submit-receipt", receipt)
+    receipt_ref = _record_evidence(evidence, work_id, "submit-receipt", receipt)
+    _record_phase(evidence, work_id, "submit_work_receipt", request, clock, record)
+    return receipt_ref
 
 
 def _wait_for_authoritative_result(
@@ -239,8 +296,11 @@ def _wait_for_authoritative_result(
     receipt_ref: str | None,
     clock: RackAiPublicWorkspaceClock,
 ) -> WorkspaceExecutionResult:
-    deadline = clock.monotonic() + reservation.client.configuration.resource_wait_seconds
+    start = clock.monotonic()
+    deadline = start + reservation.client.configuration.resource_wait_seconds
     work_id = str(record["work_id"])
+    _record_phase(evidence, work_id, "wait_for_result_enter", request, clock, record,
+                  deadline_monotonic=deadline, elapsed_seconds=0.0)
     refs = tuple(item for item in (receipt_ref,) if item)
     last_reason = "workspace outcome unavailable"
     while True:
@@ -260,10 +320,16 @@ def _wait_for_authoritative_result(
             )
         result = _result_from_snapshot(request.identity, record, snapshot, (*refs, snapshot_ref, *artifact_refs))
         if isinstance(result, WorkspaceExecutionResult):
+            _record_phase(evidence, work_id, "wait_for_result_exit", request, clock, record,
+                          deadline_monotonic=deadline, elapsed_seconds=clock.monotonic() - start,
+                          detail=result.status.value)
             return result
         last_reason = result
         remaining = deadline - clock.monotonic()
         if remaining <= 0:
+            _record_phase(evidence, work_id, "wait_for_result_deadline", request, clock, record,
+                          deadline_monotonic=deadline, elapsed_seconds=clock.monotonic() - start,
+                          detail=last_reason)
             raise RackAiResourceWait(f"RackAI workspace: {last_reason}; resource wait bound reached")
         clock.sleep(min(reservation.client.configuration.poll_seconds, remaining))
 

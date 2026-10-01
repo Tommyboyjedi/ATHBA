@@ -1,7 +1,6 @@
 """Translate trusted lifecycle state into intentionally tiny model requests."""
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -140,7 +139,7 @@ class PostBehaviorMutation:
                 raise ValueError("NO has no mutation authority")
             request = factory.refactor(inputs, decision.opportunity)
         request_ref = deps.evidence.record("workspace_request", request)
-        result = await asyncio.to_thread(deps.port.submit_workspace_change, request)
+        result = deps.port.submit_workspace_change(request)
         result_ref = deps.evidence.record("workspace_result", result)
         if result.identity != request.identity:
             raise ValueError("workspace result identity differs from submission")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import subprocess
 from pathlib import Path
 
@@ -258,10 +259,18 @@ def _work_id(port: RackAiPublicWorkspaceExecutionPort, submission="submission") 
     return port.reservation.workspace_execution_identity(submission)
 
 
+def _phase_names(root: Path, work_id: str) -> list[str]:
+    names: list[str] = []
+    for path in sorted((root / "evidence" / work_id).glob("*phase-*.json")):
+        names.append(json.loads(path.read_text())["phase"])
+    return names
+
+
 def test_successful_public_workspace_result_reaches_validation_and_uses_public_payload(tmp_path):
     root, revision = _git_repo(tmp_path)
     runtime = PublicRuntime(tmp_path)
-    port = _port(tmp_path, runtime)
+    clock = StepClock()
+    port = _port(tmp_path, runtime, clock=clock)
     work_id = _work_id(port)
     runtime.pending_work[work_id] = [_snapshot(work_id, revision)]
 
@@ -279,6 +288,26 @@ def test_successful_public_workspace_result_reaches_validation_and_uses_public_p
     assert workspace["repository"]["registered_root"] == str(root)
     assert "root" not in workspace["repository"]
     assert submit["request"]["service"] == "local-coder"
+
+
+    phases = _phase_names(tmp_path, work_id)
+    assert phases[:6] == [
+        "reservation_ready_enter",
+        "reservation_ready_exit",
+        "submission_record_recorded",
+        "submission_reconcile_inspect_enter",
+        "submission_reconcile_not_found",
+        "submit_work_enter",
+    ]
+    assert "submit_work_receipt" in phases
+    assert "wait_for_result_enter" in phases
+    assert "wait_for_result_exit" in phases
+    wait_enter = next(
+        json.loads(path.read_text())
+        for path in sorted((tmp_path / "evidence" / work_id).glob("*phase-wait_for_result_enter.json"))
+    )
+    assert wait_enter["deadline_monotonic"] == 0.004
+    assert wait_enter["elapsed_seconds"] == 0.0
 
 
 def test_dynamic_athba_project_repository_is_submitted_as_root(tmp_path, monkeypatch):
