@@ -600,6 +600,9 @@ def _validate_resume(state: ScenarioDraftRunState, request: ScenarioDraftRequest
     )
     if any(left != right for left, right in immutable):
         raise ValueError("stale scenario draft state must not be reused after ticket, source, or base changes")
+    if (state.approved_microcycle is not None
+            and state.approved_microcycle.scenario_draft.required_signatures != request.required_signatures):
+        raise ValueError("approved scenario signature authority differs from the source contract")
 
 
 def _attempt(
