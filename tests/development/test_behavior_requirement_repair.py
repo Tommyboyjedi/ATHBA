@@ -76,7 +76,7 @@ class RepairGateway:
 
     async def reason(self, request):
         self.requests.append(request)
-        assert request.purpose == "athba_behavior_requirement_repair"
+        assert request.purpose in {"athba_behavior_requirement_repair", "athba_behavior_requirement_repair_correction"}
         if isinstance(self.payload, BaseException):
             raise self.payload
         return ReasoningResult(self.payload if isinstance(self.payload, str) else json.dumps(self.payload))
@@ -258,14 +258,14 @@ async def test_second_semantic_exhaustion_reaches_existing_replan_without_repeat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("invalid,blocker", [
-    ("not json", BehaviorRepairBlocker.PROTOCOL_FAILURE),
-    ("fenced", BehaviorRepairBlocker.PROTOCOL_FAILURE),
-    ("identity", BehaviorRepairBlocker.PROTOCOL_FAILURE),
-    ("missing", BehaviorRepairBlocker.PROTOCOL_FAILURE),
-    ("empty", BehaviorRepairBlocker.PROTOCOL_FAILURE),
-    ("error", BehaviorRepairBlocker.PROTOCOL_FAILURE),
-    ("boolean", BehaviorRepairBlocker.PROTOCOL_FAILURE),
-    ("duplicate", BehaviorRepairBlocker.PROTOCOL_FAILURE),
+    ("not json", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
+    ("fenced", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
+    ("identity", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
+    ("missing", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
+    ("empty", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
+    ("error", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
+    ("boolean", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
+    ("duplicate", BehaviorRepairBlocker.PROTOCOL_EXHAUSTED),
     ("same", BehaviorRepairBlocker.NO_PROGRESS),
     ("provider", BehaviorRepairBlocker.PROVIDER_FAILURE),
 ])
@@ -302,8 +302,10 @@ async def test_invalid_repairs_fail_closed_with_durable_raw_evidence(tmp_path, i
     assert app.states.load("feature").contract_payload == before.contract_payload
     if invalid != "provider":
         assert record.raw_response == (payload if isinstance(payload, str) else json.dumps(payload))
+    if blocker == BehaviorRepairBlocker.PROTOCOL_EXHAUSTED:
+        assert record.corrected_response == record.raw_response and record.validation_error
     assert (await restart(app, tmp_path).run(request())) == result
-    assert len(gateway.requests) == 1
+    assert len(gateway.requests) == (2 if blocker == BehaviorRepairBlocker.PROTOCOL_EXHAUSTED else 1)
 
 
 @pytest.mark.asyncio
@@ -480,3 +482,84 @@ async def test_resource_wait_preserves_requirement_repair_budget(tmp_path):
     with pytest.raises(RackAiResourceWait):
         await app.advance(request())
     assert app.states.load("feature") == before
+
+class CorrectingGateway:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.requests = []
+
+    async def reason(self, request):
+        self.requests.append(request)
+        return ReasoningResult(next(self.responses))
+
+
+@pytest.mark.asyncio
+async def test_four_exhausted_attempts_planner_format_correction_retained_across_restart(tmp_path):
+    app, _, store, before = await setup(tmp_path)
+    fence = chr(96) * 3
+    invalid = fence + "json\n" + json.dumps({"behavior": repair_payload()}) + "\n" + fence
+    gateway = CorrectingGateway([invalid, json.dumps(repair_payload())])
+    app.contract_planner = BehaviorContractPlanner(gateway)
+    assert (await app.advance(request())).kind == FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED
+    assert len(store.load(before.current_scenario_id).attempts) == 4
+    await app.advance(request())
+    app = restart(app, tmp_path)
+    await app.advance(request())
+    app = restart(app, tmp_path)
+    await app.advance(request())
+    app = restart(app, tmp_path)
+    assert (await app.advance(request())).kind == FeatureTransitionKind.BEHAVIOR_REPAIR_APPLIED
+    record = app.states.load("feature").behavior_repairs[0]
+    assert record.raw_response == invalid
+    assert record.corrected_response == json.dumps(repair_payload())
+    assert record.validation_error
+    assert len(gateway.requests) == 2
+    packet = json.loads(gateway.requests[1].prompt)
+    assert packet["invalid_response"] == invalid
+    assert packet["validation_error"] == record.validation_error
+    assert packet["response_schema"]
+    assert len(store.load(before.current_scenario_id).attempts) == 4
+    assert record.request.original.ref == "REQ-006"
+    assert app.states.load("feature").canonical_development_base == before.canonical_development_base
+
+
+@pytest.mark.asyncio
+async def test_two_malformed_planner_responses_are_protocol_exhaustion_not_unsplittable(tmp_path):
+    app, _, _, before = await setup(tmp_path)
+    gateway = CorrectingGateway(["nested", "{}"])
+    app.contract_planner = BehaviorContractPlanner(gateway)
+    result = await app.run(request())
+    assert result.blocked_reason == "behavior_repair_protocol_exhausted"
+    record = app.states.load("feature").behavior_repairs[0]
+    assert record.raw_response == "nested" and record.corrected_response == "{}"
+    assert record.repaired is None
+    assert app.states.load("feature").contract_payload == before.contract_payload
+    assert len(gateway.requests) == 2
+    assert not app.states.load("feature").behavior_replans
+    assert (await restart(app, tmp_path).run(request())) == result
+    assert len(gateway.requests) == 2
+
+@pytest.mark.asyncio
+async def test_interrupted_correction_is_not_resubmitted(tmp_path):
+    class Death(BaseException):
+        pass
+    class Gateway:
+        def __init__(self):
+            self.requests = []
+        async def reason(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                return ReasoningResult("not JSON")
+            raise Death()
+    app, _, _, before = await setup(tmp_path)
+    gateway = Gateway()
+    app.contract_planner = BehaviorContractPlanner(gateway)
+    for _ in range(3):
+        await app.advance(request())
+    with pytest.raises(Death):
+        await app.advance(request())
+    assert app.states.load("feature").behavior_repairs[0].phase == BehaviorRepairPhase.CORRECTION_STARTED
+    result = await restart(app, tmp_path).run(request())
+    assert result.blocked_reason == BehaviorRepairBlocker.INTERRUPTED.value
+    assert len(gateway.requests) == 2
+    assert app.states.load("feature").behavior_repairs[0].raw_response == "not JSON"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from core.development.mechanical_checklist_split import validate_mechanical_children
+
 import json
 import re
 
@@ -140,6 +142,7 @@ def _decode_split(request: ChecklistSplitRequest, response: str) -> ChecklistSpl
     parent = SpecificationChecklistItem(request.parent_ref, request.parent_text,
         request.parent_kind, request.parent_modality, request.parent_source_quote, request.parent_subject)
     children = tuple(_validated_children(parent, request.requirement_text, raw_children))
+    validate_mechanical_children(parent, children)
     reason = rejected_split(parent, children, request.ancestry)
     if reason is not None:
         return ChecklistSplitResponse("unsplittable", rationale, attempted_response=response,
@@ -407,6 +410,7 @@ def _split_rules() -> list[str]:
         "return unsplittable if no grounded progress is possible",
         "each split child must be one semantic obligation from the parent item",
         "split children together must preserve the parent item without adding new requirements",
+        "for a compound mechanical constraint, partition every conjunct exactly once; keep kind, modality, and the same complete parent source_quote; each child needs an independent bounded policy",
         "text is the interpreted obligation and may use terminology different from the original source",
         "for modality=non_goal, source_quote must retain not required, optional, out of scope, or No ... are required wording",
         "for modality=forbidden, source_quote must retain must not, shall not, do not implement, forbidden, or prohibited wording",

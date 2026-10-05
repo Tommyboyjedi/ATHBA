@@ -55,6 +55,7 @@ def require_repair(state: StrictTddFeatureState, draft: ScenarioDraftRunState) -
 def repair_pending(state: StrictTddFeatureState) -> bool:
     return bool(state.behavior_repairs and state.behavior_repairs[-1].phase in {
         BehaviorRepairPhase.REQUIRED, BehaviorRepairPhase.STARTED, BehaviorRepairPhase.RECEIVED,
+        BehaviorRepairPhase.CORRECTION_REQUIRED, BehaviorRepairPhase.CORRECTION_STARTED, BehaviorRepairPhase.CORRECTION_RECEIVED,
     })
 
 
@@ -72,7 +73,7 @@ async def advance_repair(service, context: FeatureReplanContext):
     record = state.behavior_repairs[-1]
     invoked = False
     try:
-        if record.phase == BehaviorRepairPhase.STARTED:
+        if record.phase in {BehaviorRepairPhase.STARTED, BehaviorRepairPhase.CORRECTION_STARTED}:
             raise BehaviorRepairFailure(BehaviorRepairBlocker.INTERRUPTED,
                                        "Repair submission has no durable response; no resubmission.")
         _validate_identity(state, record)
@@ -85,8 +86,28 @@ async def advance_repair(service, context: FeatureReplanContext):
             record = replace(record, phase=BehaviorRepairPhase.RECEIVED, raw_response=raw)
             updated = _with_record(state, record)
             kind = FeatureTransitionKind.BEHAVIOR_REPAIR_RECEIVED
+        elif record.phase == BehaviorRepairPhase.CORRECTION_REQUIRED:
+            await wait_for_reasoning(service.contract_planner.gateway)
+            record = replace(record, phase=BehaviorRepairPhase.CORRECTION_STARTED)
+            service.states.save(_with_record(state, record))
+            invoked = True
+            raw = await service.contract_planner.correct_requirement(record)
+            record = replace(record, phase=BehaviorRepairPhase.CORRECTION_RECEIVED, corrected_response=raw)
+            updated = _with_record(state, record)
+            kind = FeatureTransitionKind.BEHAVIOR_REPAIR_CORRECTION_RECEIVED
         else:
-            record = validate_response(record)
+            try:
+                record = validate_response(record)
+            except BehaviorRepairFailure as error:
+                if error.kind != BehaviorRepairBlocker.PROTOCOL_FAILURE:
+                    raise
+                if record.corrected_response is not None:
+                    raise BehaviorRepairFailure(BehaviorRepairBlocker.PROTOCOL_EXHAUSTED, error.detail) from error
+                record = replace(record, phase=BehaviorRepairPhase.CORRECTION_REQUIRED, validation_error=error.detail)
+                updated = _with_record(state, record)
+                service.states.save(updated)
+                return _result_for(FeatureTransitionKind.BEHAVIOR_REPAIR_CORRECTION_REQUIRED, updated, project,
+                                   None, record.request.original.ref)
             contract = BehaviorContract.from_dict(dict(state.contract_payload or {}))
             requirements = [record.repaired if item.ref == record.request.original.ref else item
                             for item in contract.observable_requirements]

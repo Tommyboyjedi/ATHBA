@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.development.required_public_signature import RequiredPublicSignature, required_signatures
 from core.development.specification_domain import SourceRequirementClause
 from core.development.tdd_progression_validation import (
     enum_value,
@@ -116,6 +117,10 @@ class BehaviorContract:
         validate_list_of_strings(self.completion_criteria, "completion criteria")
         object.__setattr__(self, "status", enum_value(self.status, ContractPoolStatus, "contract status"))
 
+    @property
+    def required_signatures(self) -> tuple[RequiredPublicSignature, ...]:
+        return required_signatures(self.requirement_source)
+
     def source_clause_refs(self) -> list[str]:
         return [clause.ref for clause in self.source_clauses]
 
@@ -151,6 +156,7 @@ class BehaviorContract:
             "production_paths": list(self.production_paths),
             "test_paths": list(self.test_paths),
             "public_api": list(self.public_api),
+            "required_signatures": [item.to_dict() for item in self.required_signatures],
             "error_semantics": list(self.error_semantics),
             "non_goals": list(self.non_goals),
             "completion_criteria": list(self.completion_criteria),
@@ -186,6 +192,9 @@ class BehaviorContract:
             completion_criteria=list_of_strings(payload.get("completion_criteria", []), "completion criteria"),
             status=str(payload.get("status", ContractPoolStatus.TDD_READY.value)),
         )
+        supplied = payload.get("required_signatures")
+        if supplied is not None and tuple(RequiredPublicSignature.from_dict(item) for item in supplied) != contract.required_signatures:
+            raise ValueError("required signatures differ from authoritative source")
         options = load_options or BehaviorContractLoadOptions()
         validate_allowed_path_subset(contract.production_paths, options.allowed_production_paths, "production paths")
         validate_allowed_path_subset(contract.test_paths, options.allowed_test_paths, "test paths")

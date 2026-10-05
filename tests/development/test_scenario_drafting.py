@@ -1447,3 +1447,17 @@ async def test_context_limit_failure_does_not_consume_tester_attempt(monkeypatch
         await service.submit_candidate(request("catalog"), binding())
     state = store.load("scenario-catalog")
     assert state is None or state.attempts == ()
+
+def test_identical_repair_source_context_is_sent_once():
+    from core.development.scenario_drafting import _tester_objective
+    from dataclasses import replace
+    from core.development.scenario_drafting_domain import ScenarioDraftAttempt
+    candidate = "def test_value():\n    assert True\n" * 100
+    value = request("catalog")
+    value = replace(value, repository_facts=replace(value.repository_facts, test_excerpt=candidate))
+    attempt = ScenarioDraftAttempt(1, "work", "change", "candidate", "evidence", "candidate_submitted",
+                                   candidate_source=candidate)
+    packet = json.loads(_tester_objective(value, "repair feedback", attempt))
+    assert packet["previous_candidate"]["source"] == candidate
+    assert packet["repository_facts"]["test_excerpt"] == "Same source retained in previous_candidate.source"
+    assert json.dumps(packet).count("def test_value") == 100

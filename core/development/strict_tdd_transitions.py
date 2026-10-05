@@ -55,6 +55,8 @@ class ScenarioTransitionKind(str, Enum):
 class FeatureTransitionKind(str, Enum):
     BEHAVIOR_REPAIR_REQUIRED = "behavior_repair_required"
     BEHAVIOR_REPAIR_RECEIVED = "behavior_repair_received"
+    BEHAVIOR_REPAIR_CORRECTION_REQUIRED = "behavior_repair_correction_required"
+    BEHAVIOR_REPAIR_CORRECTION_RECEIVED = "behavior_repair_correction_received"
     BEHAVIOR_REPAIR_APPLIED = "behavior_repair_applied"
     PROJECT_LOADED = "project_loaded"
     CONTRACT_PERSISTED = "contract_persisted"

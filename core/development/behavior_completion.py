@@ -1,6 +1,8 @@
 """One behavior-level Senior Review after a strict scenario is fully green."""
 from __future__ import annotations
 
+from core.development.required_public_signature import RequiredPublicSignature
+
 from dataclasses import dataclass, replace
 from typing import Callable, Protocol
 
@@ -26,6 +28,7 @@ class BehaviorReviewRequest:
     production_diff: str
     microcycle_evidence: tuple[str, ...]
     regression_evidence: tuple[str, ...]
+    required_signatures: tuple[RequiredPublicSignature, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -172,4 +175,5 @@ class BehaviorCompletionService:
             command.production_diff,
             evidence,
             state.regression.evidence_refs,
+            state.scenario_draft.required_signatures,
         )

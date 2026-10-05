@@ -6,6 +6,8 @@ from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 
 from core.development.microcycle_domain import LanguageAdapterDescriptor
+from core.development.required_public_signature import SignatureInspection, RequiredPublicSignature
+from core.development.python_public_signature import production_signature_findings, scenario_signature_findings
 from core.development.python_specification_dependencies import dependency_findings
 from core.development.python_specification_storage import DECORATOR_ASSURANCE, decorator_warnings, storage_findings
 from core.development.python_specification_surface import capability_matches, inspect_surface, known_capability
@@ -19,6 +21,18 @@ FOREIGN_SOURCE_SUFFIXES = frozenset({".rs", ".js", ".ts", ".c", ".cpp", ".so", "
 @dataclass(frozen=True)
 class PythonSpecificationEvidenceAdapter:
     descriptor = LanguageAdapterDescriptor("python-specification", "1", "python")
+
+    def verify_public_signatures(self, request: SignatureInspection) -> tuple[str, ...]:
+        return production_signature_findings(request.source, request.signatures, request.complete)
+
+    def verify_scenario_signatures(self, request: SignatureInspection) -> tuple[str, ...]:
+        return scenario_signature_findings(request.source, request.signatures)
+
+    def verify_signature_snapshot(self, snapshot: SpecificationSnapshot, signatures: tuple[RequiredPublicSignature, ...]) -> tuple[str, ...]:
+        if not snapshot.complete or any(PurePosixPath(file.path).suffix in FOREIGN_SOURCE_SUFFIXES for file in snapshot.files):
+            return ("required public signature has incomplete/unsupported source boundary",)
+        source = "\n".join(file.source for file in snapshot.files if production_python(file))
+        return self.verify_public_signatures(SignatureInspection(source, signatures, complete=True))
 
     def verify(self, decision: EvidenceDecision, snapshot: SpecificationSnapshot) -> EvidenceResult:
         try:

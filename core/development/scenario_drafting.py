@@ -1,6 +1,9 @@
 """Session 4 bounded scenario drafting; it deliberately does not run microcycles."""
 from __future__ import annotations
 
+from core.development.required_public_signature import RequiredPublicSignature, SignatureInspection
+from core.development.public_signature_validation import scenario_signature_findings
+
 import json
 from hashlib import sha256
 import subprocess
@@ -230,6 +233,7 @@ class ScenarioIntentReviewRequest:
     static_fragment_kinds: tuple[str, ...]
     canonical_test_identity: str
     static_analysis: ScenarioStaticAnalysis
+    required_signatures: tuple[RequiredPublicSignature, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -703,6 +707,9 @@ def _prepare_candidate(
     if not callable(assessor):
         raise ValueError("language adapter does not implement scenario candidate assessment")
     assessment = assessor(ScenarioCandidateAssessmentRequest(provisional, request.ticket.production_path, _authoring_contract(request)))
+    signature_issues = tuple(ScenarioCandidateIssue("required_public_signature_mismatch", finding)
+                             for finding in scenario_signature_findings(SignatureInspection(source, request.required_signatures), request.language_id)) if assessment.syntax_valid else ()
+    assessment = replace(assessment, issues=(*assessment.issues, *signature_issues))
     if not assessment.accepted:
         return ScenarioCandidatePreparation(provisional, assessment, None, None)
     analysis = adapter.analyse_candidate(provisional, request.ticket.production_path)
@@ -711,7 +718,7 @@ def _prepare_candidate(
     draft = TestScenarioDraft(
         request.scenario_id, request.ticket.step_id, request.language_id,
         canonical.source, request.ticket.test_name, request.allowed_test_path,
-        "awaiting independent scenario intent review", request.source_requirement_refs,
+        "awaiting independent scenario intent review", request.source_requirement_refs, request.required_signatures,
     )
     return ScenarioCandidatePreparation(candidate, assessment, analysis, draft)
 
@@ -736,6 +743,7 @@ def _review_request(
         static_fragment_kinds=tuple(item.kind for item in fragments),
         canonical_test_identity=draft.canonical_test_identity,
         static_analysis=static_analysis,
+        required_signatures=request.required_signatures,
     )
 
 
@@ -805,6 +813,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
         },
         "source_requirement_refs": list(request.source_requirement_refs),
         "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
+        "required_signatures": [item.to_dict() for item in request.required_signatures],
         "language": request.language_id,
         "test_framework": request.test_framework,
         "allowed_test_path": request.allowed_test_path,
@@ -826,6 +835,15 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "do not materialise a frontier or start implementation",
         ],
     }
+    if repair is not None and request.repository_facts.test_excerpt == repair.candidate_source:
+        facts: dict[str, object] = {
+            "trusted_revision": request.repository_facts.trusted_revision,
+            "visible_paths": list(request.repository_facts.visible_paths),
+            "production_excerpt": request.repository_facts.production_excerpt,
+            "test_excerpt": request.repository_facts.test_excerpt,
+        }
+        facts["test_excerpt"] = "Same source retained in previous_candidate.source"
+        payload["repository_facts"] = facts
     if request.semantic_annotations:
         payload["semantic_annotations"] = [
             item.to_dict() for item in request.semantic_annotations
@@ -837,7 +855,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "sha": repair.candidate_revision,
             "source": repair.candidate_source,
             "assessment": None if repair.candidate_assessment is None else repair.candidate_assessment.to_dict(),
-            "deterministic_feedback": repair.feedback,
+            "deterministic_feedback": ("Same feedback retained in repair_feedback" if repair.feedback == feedback else repair.feedback),
             "intent_feedback": None if repair.intent is None else repair.intent.rationale,
         }
     return json.dumps(payload, sort_keys=True)
@@ -956,6 +974,7 @@ def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:
         },
         "source_requirement_refs": list(request.source_requirement_refs),
         "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
+        "required_signatures": [item.to_dict() for item in request.required_signatures],
         "complete_scenario_source": request.complete_scenario_source,
         "static_scenario_facts": {
             "canonical_test_identity": request.canonical_test_identity,

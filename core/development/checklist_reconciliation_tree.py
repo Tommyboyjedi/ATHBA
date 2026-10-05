@@ -1,5 +1,6 @@
 """Restartable recursive checklist evaluation using feature-owned checkpoints."""
 from __future__ import annotations
+from core.development.mechanical_checklist_split import mechanical_compound
 from core.execution.rack_ai_runtime import RackAiResourceWait
 from core.execution.provider_reasoning_gateway import wait_for_reasoning
 
@@ -92,7 +93,7 @@ class ChecklistReconciliationTree:
                 checkpoint.attempts, checkpoint.before_test))
             checkpoint.result(record)
         record = dict(checkpoint.state.result or {})
-        if (decision.policy != EvidencePolicy.BEHAVIORAL
+        if ((decision.policy != EvidencePolicy.BEHAVIORAL and not mechanical_compound(context.item))
                 or record.get("answer") != "NO"):
             return [record]
         if checkpoint.state.split is None:

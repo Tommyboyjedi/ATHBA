@@ -150,6 +150,7 @@ def _scenario_draft_request(
         request.canonical_development_base,
         source_evidence,
         _semantic_annotations(executor, request, language_id, source_evidence),
+        request.contract.required_signatures,
     )
 
 

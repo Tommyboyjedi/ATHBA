@@ -1,6 +1,9 @@
 """Reuse independent checklist reconciliation after exact accepted-test preservation."""
 from __future__ import annotations
 
+from core.development.feature_signature_evidence import signature_evidence
+from core.development.specification_revision_snapshot import GitSpecificationSnapshot
+
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -75,6 +78,9 @@ class PostBehaviorGatekeeper:
                 keeper.checklist.requirement_text, accepted, deps.delivery.project.runtime.kind,
                 required_source_subjects(keeper.checklist), revision, item)
             results.extend(await tree.reconcile(context))
+        functional_api = signature_evidence(keeper.checklist.requirement_text, GitSpecificationSnapshot(root).read(revision), deps.delivery.project.runtime.kind)
+        if functional_api is not None:
+            results.append(functional_api)
         ref = deps.evidence.record("specification_reconciliation", {
             "revision": revision, "behavioral_baseline": baseline,
             "authority_digest": state.entry.behavioral_authority_digest, "results": results,

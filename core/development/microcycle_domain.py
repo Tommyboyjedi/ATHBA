@@ -1,6 +1,8 @@
 """Language-neutral, persistent domain records for PR23 strict TDD microcycles."""
 from __future__ import annotations
 
+from core.development.required_public_signature import RequiredPublicSignature
+
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Protocol
@@ -93,6 +95,7 @@ class TestScenarioDraft:
     test_path: str
     scenario_rationale: str = "not yet supplied"
     source_requirement_refs: tuple[str, ...] = ()
+    required_signatures: tuple[RequiredPublicSignature, ...] = ()
 
     def __post_init__(self) -> None:
         _texts((self.scenario_id, self.behavior_ref, self.language_id, self.source, self.canonical_test_identity, self.test_path, self.scenario_rationale), "draft fields")
@@ -112,6 +115,7 @@ class TestScenarioDraft:
             test_path=str(value["test_path"]),
             scenario_rationale=str(value.get("scenario_rationale", "not yet supplied")),
             source_requirement_refs=tuple(str(item) for item in value.get("source_requirement_refs", ())),
+            required_signatures=tuple(RequiredPublicSignature.from_dict(item) for item in value.get("required_signatures", ())),
         )
 
 

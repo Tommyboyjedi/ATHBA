@@ -1,6 +1,8 @@
 """Persistent records for bounded Tester scenario drafting."""
 from __future__ import annotations
 
+from core.development.required_public_signature import RequiredPublicSignature
+
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any
@@ -280,6 +282,7 @@ class ScenarioDraftRequest:
     development_base_revision: str
     source_requirement_evidence: tuple[SourceRequirementClause, ...] = ()
     semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
+    required_signatures: tuple[RequiredPublicSignature, ...] = ()
 
     def __post_init__(self) -> None:
         values = (
