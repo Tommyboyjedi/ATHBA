@@ -157,3 +157,42 @@ def test_generic_contract_module_has_no_target_language_parser():
 def test_dynamic_api_replacement_cannot_bypass_declared_signature(source):
     signatures = required_signatures(FIXTURE["contract"]["requirement_source"])
     assert production_signature_findings(source, signatures)
+
+
+@pytest.mark.parametrize("source", [
+    "Optional operation preview(value).",
+    "The operation preview(value) is not required.",
+    "Do not implement operation delete(name).",
+    "The function delete(name) must not be implemented.",
+    "Calling preview(value) is out of scope.",
+    "Optional API: Calling preview(value).",
+    "Calling Widget.preview(value) is not required.",
+])
+def test_non_required_source_declaration_cannot_invent_required_operation(source):
+    assert required_signatures(source) == ()
+
+
+def test_repeated_declaration_uses_its_own_source_modality():
+    signatures = required_signatures("Calling preview(value, scale) is optional. Calling preview(value) must return the supplied value.")
+    assert len(signatures) == 1
+    assert signatures[0].parameters == ("value",)
+
+
+def test_approved_resume_cannot_omit_or_replace_source_signature_authority():
+    from dataclasses import replace
+    from core.development.scenario_drafting import _validate_resume
+    from core.development.scenario_drafting_domain import ScenarioDraftRunState
+    from tests.development.test_scenario_drafting import request
+    from tests.development.test_strict_microcycle import initial_state
+    requested = replace(request("catalog"), required_signatures=required_signatures("Provide a Widget class. Calling grow() changes the count."))
+    approved = initial_state()
+    state = ScenarioDraftRunState(requested.scenario_id, requested.ticket.step_id,
+        requested.source_requirement_refs, requested.language_id, requested.test_framework,
+        requested.allowed_test_path, requested.development_base_revision,
+        approved_microcycle=approved, status="approved", semantic_annotations=requested.semantic_annotations)
+    restored = ScenarioDraftRunState.from_dict(state.to_dict())
+    with pytest.raises(ValueError, match="signature authority"):
+        _validate_resume(restored, requested)
+    authoritative = replace(approved, scenario_draft=replace(approved.scenario_draft, required_signatures=requested.required_signatures))
+    _validate_resume(replace(restored, approved_microcycle=authoritative), requested)
+    assert restored.attempts == state.attempts
