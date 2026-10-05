@@ -14,6 +14,9 @@ class BehaviorRepairPhase(str, Enum):
     REQUIRED = "behavior_repair_required"
     STARTED = "behavior_repair_started"
     RECEIVED = "behavior_repair_received"
+    CORRECTION_REQUIRED = "behavior_repair_correction_required"
+    CORRECTION_STARTED = "behavior_repair_correction_started"
+    CORRECTION_RECEIVED = "behavior_repair_correction_received"
     APPLIED = "behavior_repair_applied"
     FAILED = "behavior_repair_failed"
 
@@ -21,6 +24,7 @@ class BehaviorRepairPhase(str, Enum):
 class BehaviorRepairBlocker(str, Enum):
     INTERRUPTED = "behavior_repair_interrupted"
     PROTOCOL_FAILURE = "behavior_repair_protocol_failure"
+    PROTOCOL_EXHAUSTED = "behavior_repair_protocol_exhausted"
     PROVIDER_FAILURE = "behavior_repair_provider_failure"
     NO_PROGRESS = "behavior_repair_no_progress"
     INCOMPATIBLE = "behavior_repair_incompatible"
@@ -95,6 +99,8 @@ class BehaviorRepairRecord:
     rationale: str | None = None
     blocker: BehaviorRepairBlocker | None = None
     detail: str | None = None
+    corrected_response: str | None = None
+    validation_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +109,7 @@ class BehaviorRepairRecord:
             "repaired": None if self.repaired is None else self.repaired.to_dict(),
             "rationale": self.rationale,
             "blocker": None if self.blocker is None else self.blocker.value, "detail": self.detail,
+            "corrected_response": self.corrected_response, "validation_error": self.validation_error,
         }
 
     @classmethod
@@ -113,6 +120,7 @@ class BehaviorRepairRecord:
             None if value["repaired"] is None else BehaviorContractRequirement.from_dict(value["repaired"]),
             value["rationale"],
             None if value["blocker"] is None else BehaviorRepairBlocker(value["blocker"]), value["detail"],
+            value.get("corrected_response"), value.get("validation_error"),
         )
 
 

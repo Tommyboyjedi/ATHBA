@@ -14,9 +14,10 @@ from typing import Protocol, cast
 from core.development.behavior_replan_domain import (
     BehaviorReplanCorrectionRequest, BehaviorReplanRequest, BehaviorReplanResponse,
 )
+from core.development.required_public_signature import required_signatures, validate_clause_signatures
 from core.development.behavior_replanning import BehaviorRequirementReplanner
 from core.development.behavior_requirement_repair import BehaviorRequirementRepairPlanner
-from core.development.behavior_requirement_repair_domain import BehaviorRepairRequest
+from core.development.behavior_requirement_repair_domain import BehaviorRepairRequest, BehaviorRepairRecord
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.contract_run_store import ContractRunStore
 from core.development.failure_progression import (
@@ -366,6 +367,7 @@ class RequirementClausePlanner:
         result = await self.gateway.reason(reasoning_request)
         try:
             clauses = _decode_source_clauses(result.text)
+            validate_clause_signatures(requirement_text, tuple(clause.text for clause in clauses))
         except (ValueError, KeyError, TypeError) as error:
             initial_attempt = SourceClausePlanningAttempt(result.text, str(error))
             repair_request = ReasoningRequest(
@@ -382,6 +384,7 @@ class RequirementClausePlanner:
             repaired = await self.gateway.reason(repair_request)
             try:
                 clauses = _decode_source_clauses(repaired.text)
+                validate_clause_signatures(requirement_text, tuple(clause.text for clause in clauses))
             except (ValueError, KeyError, TypeError) as repair_error:
                 raise SourceClausePlanningFailure((
                     initial_attempt,
@@ -403,6 +406,9 @@ class BehaviorContractPlanner:
 
     async def repair_requirement(self, request: BehaviorRepairRequest) -> str:
         return await BehaviorRequirementRepairPlanner(self.gateway).repair(request)
+
+    async def correct_requirement(self, record: BehaviorRepairRecord) -> str:
+        return await BehaviorRequirementRepairPlanner(self.gateway).correct(record)
 
     async def replan_requirement(self, request: BehaviorReplanRequest) -> BehaviorReplanResponse:
         return await BehaviorRequirementReplanner(self.gateway).replan(request)
@@ -1950,6 +1956,7 @@ def _source_clause_rules() -> list[str]:
         "for quality clauses, evidence_kind must be review and must never be quality",
         "use mechanical for deterministic environment or dependency constraints",
         "do not include implementation details",
+        "retain explicitly source-mandated public call signatures verbatim; parameters and their order are functional authority, not implementation choices",
         "do not invent requirements beyond reasonable decomposition of the supplied text",
         "keep the clause set complete enough that every meaningful behavioral obligation from the source text is represented",
         "do not include worker ids, model ids, GPU ids, endpoints, ports, or backend selection",
@@ -2002,6 +2009,7 @@ def _contract_prompt(
             "project_id": project_id,
             "requirement_text": requirement_text,
             "source_clauses": [clause.to_dict() for clause in source_clauses],
+            "required_signatures": [item.to_dict() for item in required_signatures(requirement_text)],
             "allowed_production_paths": production_paths,
             "allowed_test_paths": test_paths,
             "path_rules": [

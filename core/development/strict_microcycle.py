@@ -1,6 +1,9 @@
 """Deterministic strict-TDD frontier materialisation and narrow GREEN execution."""
 from __future__ import annotations
 
+from core.development.required_public_signature import RequiredPublicSignature
+from core.development.signature_candidate_validation import SignatureCandidateContext, validate_signature_candidate
+
 import json
 import shutil
 import subprocess
@@ -137,6 +140,7 @@ class DeveloperFrontierRequest:
     accepted_red_revision: str
     development_base_revision: str
     attempt_number: int
+    required_signatures: tuple[RequiredPublicSignature, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -156,6 +160,7 @@ class DeveloperFrontierWorkUnitFactory:
                 "materialised_active_frontier_test": request.artifact.complete_source,
                 "boundary_diagnostic": request.assessment.diagnostic.to_dict(),
                 "production_path": request.production_path,
+                "required_signatures": [item.to_dict() for item in request.required_signatures],
                 "accepted_red_revision": request.accepted_red_revision,
                 "development_base_context": request.development_base_revision,
             },
@@ -199,6 +204,7 @@ class RegressionRepairWorkUnitFactory:
             "current_frontier_test": request.artifact.complete_source,
             "newly_failing_prior_tests": failing_nodes,
             "production_path": request.production_path,
+                "required_signatures": [item.to_dict() for item in request.required_signatures],
         }, sort_keys=True)
         commands = [[sys.executable, "-m", "pytest", "-q", request.artifact.canonical_test_identity]]
         commands.extend([[sys.executable, "-m", "pytest", "-q", node] for node in failing_nodes])
@@ -301,8 +307,10 @@ class RegressionRepairService:
             base,
             state.development_base_revision,
             state.retry_counts.regression + 1,
+            state.scenario_draft.required_signatures,
         )
         result = await self.gateway.execute(self.factory.build(packet, failing), _working_binding(request, base))
+        result = validate_signature_candidate(SignatureCandidateContext(request.repository_root, request.production_path, state.scenario_draft.required_signatures, state.model.language_id), result)
         updated = replace(
             state,
             retry_counts=replace(state.retry_counts, regression=state.retry_counts.regression + 1),
@@ -468,11 +476,13 @@ class StrictMicrocycleService:
         packet = DeveloperFrontierRequest(
             request.project_id, request.production_path, artifact, assessment, red,
             state.candidate_chain_revision or state.development_base_revision, counts.developer_attempts + 1,
+            state.scenario_draft.required_signatures,
         )
         work_unit = self.developer_factory.build(packet)
         result = await self.gateway.execute(work_unit, _working_binding(request, red))
         if result.work_unit_id != work_unit.id:
             raise ValueError("stale Rack AI packet does not match the active Developer frontier")
+        result = validate_signature_candidate(SignatureCandidateContext(request.repository_root, request.production_path, state.scenario_draft.required_signatures, state.model.language_id), result)
         state = _record_developer(state, red, result)
         if result.accepted and result.accepted_revision is not None:
             _advance_working_revision(request, result.accepted_revision, RevisionTransitionKind.DEVELOPER_CANDIDATE_ACCEPTED.value, result.evidence_location)

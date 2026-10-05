@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol
 
+from core.development.required_public_signature import SignatureInspection, RequiredPublicSignature
 from core.development.microcycle_domain import LanguageAdapterDescriptor
 from core.development.specification_domain import SourceRequirementClause, SpecificationChecklistItem
 from core.development.specification_obligations import EvidencePolicy, ObligationModality, explicit_modality
@@ -70,6 +71,9 @@ class SpecificationEvidenceAdapter(Protocol):
     descriptor: LanguageAdapterDescriptor
 
     def verify(self, decision: EvidenceDecision, snapshot: SpecificationSnapshot) -> EvidenceResult: ...
+    def verify_public_signatures(self, request: SignatureInspection) -> tuple[str, ...]: ...
+    def verify_scenario_signatures(self, request: SignatureInspection) -> tuple[str, ...]: ...
+    def verify_signature_snapshot(self, snapshot: SpecificationSnapshot, signatures: tuple[RequiredPublicSignature, ...]) -> tuple[str, ...]: ...
 
 
 @dataclass(frozen=True)

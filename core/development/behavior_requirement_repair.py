@@ -1,4 +1,4 @@
-"""One narrow Behavior Planner submission and exact semantic response validation."""
+"""One semantic Planner submission with one strictly bounded format correction."""
 from __future__ import annotations
 from core.execution.rack_ai_runtime import RackAiResourceWait
 
@@ -21,10 +21,22 @@ class BehaviorRequirementRepairPlanner:
         self.gateway = gateway
 
     async def repair(self, request: BehaviorRepairRequest) -> str:
+        return await self._submit(ReasoningRequest(REPAIR_PURPOSE, repair_prompt(request), request.project_id))
+
+    async def correct(self, record: BehaviorRepairRecord) -> str:
+        prompt = json.dumps({
+            "instruction": "Correct only the protocol format of the retained Behavior Planner response. Return raw JSON with exactly the flat schema. Preserve its semantic content; do not replan or split.",
+            "invalid_response": record.raw_response,
+            "validation_error": record.validation_error,
+            "response_schema": response_schema(),
+        }, sort_keys=True)
+        return await self._submit(ReasoningRequest(
+            "athba_behavior_requirement_repair_correction", prompt, record.request.project_id,
+        ))
+
+    async def _submit(self, request: ReasoningRequest) -> str:
         try:
-            result = await self.gateway.reason(ReasoningRequest(
-                REPAIR_PURPOSE, repair_prompt(request), request.project_id,
-            ))
+            result = await self.gateway.reason(request)
         except RackAiResourceWait:
             raise
         except Exception as error:
@@ -49,17 +61,21 @@ def repair_prompt(request: BehaviorRepairRequest) -> str:
         "behavior": request.original.to_dict(),
         "source_clauses": [item.to_dict() for item in request.source_clauses],
         "intent_review_feedback": [item.to_dict() for item in request.feedback],
-        "response_schema": {
-            "summary": "non-empty string", "observable_outcome": "non-empty string",
-            "test_hint": "non-empty string", "error_expectation": "non-empty string or null",
-            "preserves_state_on_failure": "boolean", "rationale": "non-empty string",
-        },
+        "response_schema": response_schema(),
     }, sort_keys=True)
+
+
+def response_schema() -> dict[str, str]:
+    return {
+        "summary": "non-empty string", "observable_outcome": "non-empty string",
+        "test_hint": "non-empty string", "error_expectation": "non-empty string or null",
+        "preserves_state_on_failure": "boolean", "rationale": "non-empty string",
+    }
 
 
 def validate_response(record: BehaviorRepairRecord) -> BehaviorRepairRecord:
     try:
-        value = json.loads(record.raw_response, object_pairs_hook=_unique_object)
+        value = json.loads(record.corrected_response if record.corrected_response is not None else record.raw_response, object_pairs_hook=_unique_object)
         if not isinstance(value, dict) or set(value) != SEMANTIC_FIELDS | {"rationale"}:
             raise ValueError("repair response must match the exact semantic schema")
         for field in ("summary", "observable_outcome", "test_hint", "rationale"):

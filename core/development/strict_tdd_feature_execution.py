@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from core.development.feature_signature_evidence import signature_evidence
+from core.development.specification_revision_snapshot import GitSpecificationSnapshot
+
 import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -107,6 +110,10 @@ class CompletedFeatureReconciler:
             except ReconciliationFailure as error:
                 completed = tuple(dict(entry.result) for entry in journal.items if entry.result is not None)
                 raise replace(error, completed_results=completed) from error
+        functional_api = signature_evidence(request.contract.requirement_source,
+            GitSpecificationSnapshot(self.repository_root).read(request.canonical_revision), language)
+        if functional_api is not None:
+            results.append(functional_api)
         return tuple(results)
 
     def _state(self, scenario_id: str):

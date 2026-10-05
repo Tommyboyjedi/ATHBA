@@ -1,6 +1,9 @@
 """Bounded Developer repair for a semantically rejected completed behavior."""
 from __future__ import annotations
 
+from core.development.required_public_signature import RequiredPublicSignature
+from core.development.signature_candidate_validation import SignatureCandidateContext, validate_signature_candidate
+
 import json
 import sys
 from dataclasses import dataclass, field, replace
@@ -88,6 +91,7 @@ class BehaviorRepairWorkUnitRequest:
     production_diff: str
     base_revision: str
     attempt_number: int
+    required_signatures: tuple[RequiredPublicSignature, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,7 @@ class BehaviorRepairWorkUnitFactory:
                 "task": "Repair the completed behavior so the approved scenario remains passing and the Senior Review findings are resolved.",
                 "completed_canonical_scenario_test": request.artifact.complete_source,
                 "behavior_ticket": request.behavior_ticket,
+                "required_signatures": [item.to_dict() for item in request.required_signatures],
                 "senior_review_findings": request.findings,
                 "production_diff_evidence": request.production_diff,
                 "allowed_production_path": request.production_path,
@@ -212,11 +217,13 @@ class BehaviorRepairService:
             BehaviorRepairWorkUnitRequest(
                 request.project_id, request.production_path, artifact, state.scenario_draft.behavior_ref,
                 review.findings, review.production_diff, base, review.repair.attempts + 1,
+                state.scenario_draft.required_signatures,
             )
         )
         result = await self.gateway.execute(unit, _working_binding(request, base))
         if result.work_unit_id != unit.id:
             raise ValueError("stale Rack AI packet does not match the active behavior repair")
+        result = validate_signature_candidate(SignatureCandidateContext(request.repository_root, request.production_path, state.scenario_draft.required_signatures, state.model.language_id), result)
         if result.accepted and result.accepted_revision is not None:
             _advance_working_revision(request, result.accepted_revision, result.evidence_location)
         progress = _progress_after_submission(review.repair, unit.id, result.accepted_revision, result.evidence_location, result.error)

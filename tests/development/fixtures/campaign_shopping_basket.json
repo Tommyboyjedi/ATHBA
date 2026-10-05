@@ -1,0 +1,221 @@
+{
+  "contract": {
+    "capability": "Manage a shopping basket with item tracking and price summation.",
+    "completion_criteria": [
+      "A ShoppingBasket class is implemented in shopping_basket.py.",
+      "The basket starts empty.",
+      "Items can be added with names and non-negative integer prices.",
+      "The count of items is correctly reported.",
+      "The total price of all items is correctly calculated.",
+      "The system uses only in-memory state and no external dependencies."
+    ],
+    "component_name": "ShoppingBasket",
+    "error_semantics": [
+      "Raise ValueError or TypeError if price is not a non-negative integer"
+    ],
+    "id": "PR16",
+    "invariants": [
+      "A new ShoppingBasket instance must be empty.",
+      "The basket must keep all state in memory.",
+      "The system must use no external dependencies."
+    ],
+    "non_goals": [
+      "Persistence to a database",
+      "Network communication",
+      "Discount logic",
+      "Inventory management"
+    ],
+    "observable_requirements": [
+      {
+        "depends_on": [],
+        "error_expectation": null,
+        "observable_outcome": "A new ShoppingBasket instance has an item count of 0 and a total price of 0.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ_01",
+        "source_refs": [
+          "PR16.4"
+        ],
+        "summary": "Initial state is empty",
+        "test_hint": "Verify count and total price are 0 on instantiation."
+      },
+      {
+        "depends_on": [
+          "REQ_01"
+        ],
+        "error_expectation": "Raise error for negative prices",
+        "observable_outcome": "Calling add_item(name, price) increases the item count by 1 and updates the total price.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ_02",
+        "source_refs": [
+          "PR16.5",
+          "PR16.6"
+        ],
+        "summary": "Add item with validation",
+        "test_hint": "Add valid items and verify count/price; attempt to add negative price and catch error."
+      },
+      {
+        "depends_on": [
+          "REQ_02"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "item_count() returns the correct number of items added.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ_03",
+        "source_refs": [
+          "PR16.7"
+        ],
+        "summary": "Retrieve item count",
+        "test_hint": "Add multiple items and assert item_count() matches the number of calls."
+      },
+      {
+        "depends_on": [
+          "REQ_02"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "total_price() returns the sum of all item prices.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ_04",
+        "source_refs": [
+          "PR16.8"
+        ],
+        "summary": "Retrieve total price",
+        "test_hint": "Add items with various prices and assert total_price() matches the sum."
+      },
+      {
+        "depends_on": [
+          "REQ_02"
+        ],
+        "error_expectation": null,
+        "observable_outcome": "Adding bread for 3 and milk for 2 results in count 2 and total price 5.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ_05",
+        "source_refs": [
+          "PR16.9"
+        ],
+        "summary": "Specific scenario validation",
+        "test_hint": "Execute the specific bread and milk addition and verify final state."
+      }
+    ],
+    "production_paths": [
+      "shopping_basket.py"
+    ],
+    "project_id": "three-e2e-fresh-20261005T092145Z-s02-shoppingbasket",
+    "public_api": [
+      "add_item(name, price)",
+      "item_count()",
+      "total_price()"
+    ],
+    "requirement_source": "Provide a ShoppingBasket class in shopping_basket.py. A new basket is empty. Calling add_item(name, price) adds one item with a non-negative integer price. Calling item_count() returns the number of items. Calling total_price() returns the sum of all item prices. Adding bread for 3 and milk for 2 must produce an item count of 2 and a total price of 5. Keep all state in memory and use no external dependencies.",
+    "source_clauses": [
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "ref": "PR16.1",
+        "text": "The ShoppingBasket class must be provided in the shopping_basket.py file."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "ref": "PR16.2",
+        "text": "The system must keep all state in memory."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "ref": "PR16.3",
+        "text": "The system must use no external dependencies."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "invariant",
+        "ref": "PR16.4",
+        "text": "A new ShoppingBasket instance must be empty."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16.5",
+        "text": "Calling add_item(name, price) must add one item to the basket."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "validation",
+        "ref": "PR16.6",
+        "text": "The price provided to add_item must be a non-negative integer."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16.7",
+        "text": "Calling item_count() must return the number of items in the basket."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16.8",
+        "text": "Calling total_price() must return the sum of all item prices."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "ref": "PR16.9",
+        "text": "Adding bread for 3 and milk for 2 must result in an item count of 2 and a total price of 5."
+      }
+    ],
+    "status": "tdd_ready",
+    "test_paths": [
+      "tests/test_shopping_basket.py"
+    ]
+  },
+  "production_source": "\"\"\"ATHBA initial production module.\"\"\"\n\n\nclass ShoppingBasket:\n    \"\"\"Represents a shopping basket for items.\"\"\"\n    \n    def __init__(self):\n        self.items = {}\n    \n    def add_item(self, item_id, quantity=1, price=0):\n        \"\"\"Add an item to the basket.\"\"\"\n        if item_id in self.items:\n            self.items[item_id][\"quantity\"] += quantity\n        else:\n            self.items[item_id] = {\"quantity\": quantity, \"price\": price}\n    \n    def total(self):\n        \"\"\"Calculate total price of basket.\"\"\"\n        return sum(item[\"quantity\"] * item[\"price\"] for item in self.items.values())\n    \n    def total_price(self):\n        \"\"\"Calculate total price of basket.\"\"\"\n        return self.total()\n    \n    def item_count(self):\n        \"\"\"Return the number of unique items in the basket.\"\"\"\n        return len(self.items)\n    \n    def items_dict(self):\n        \"\"\"Return items as a dictionary.\"\"\"\n        return self.items\n",
+  "planner_record": {
+    "blocker": "behavior_repair_protocol_failure",
+    "detail": "Expecting value: line 1 column 1 (char 0)",
+    "phase": "behavior_repair_failed",
+    "rationale": null,
+    "raw_response": "```json\n{\n  \"behavior\": {\n    \"depends_on\": [\n      \"REQ_01\"\n    ],\n    \"error_expectation\": \"Raise an error if the price provided is a negative integer.\",\n    \"observable_outcome\": \"Calling add_item(name, price) increases the item count by 1 and updates the total price, provided the price is a non-negative integer.\",\n    \"preserves_state_on_failure\": true,\n    \"ref\": \"REQ_02\",\n    \"source_refs\": [\n      \"PR16.5\",\n      \"PR16.6\"\n    ],\n    \"summary\": \"Add item with non-negative price validation\",\n    \"test_hint\": \"Add valid items and verify count/price; attempt to add a negative price and verify that an error is raised and the state remains unchanged.\",\n    \"rationale\": \"The behavior was updated to strictly enforce the non-negative integer constraint from PR16.6. The previous version failed to correctly model the error handling, as the test hint implied the system might accept negative prices. The updated behavior ensures that negative prices are rejected, aligning with the validation requirement.\"\n  }\n}\n```",
+    "repaired": null,
+    "request": {
+      "canonical_ref": "refs/heads/main",
+      "canonical_revision": "a6fd11949adb90168ef19ba591dc1c30dd99ec46",
+      "feedback": [
+        {
+          "attempt_number": 3,
+          "rationale": "The test scenario fails to validate the requirement PR16.6, which states that the price must be a non-negative integer. In the test case, 'item3' is added with a price of -5, and the assertion passes (total price becomes 25). To correctly demonstrate the behavior, the test should assert that adding a negative price raises an exception or is rejected, rather than allowing it to be added to the total.",
+          "status": "wrong_behavior"
+        }
+      ],
+      "original": {
+        "depends_on": [
+          "REQ_01"
+        ],
+        "error_expectation": "Raise error for negative prices",
+        "observable_outcome": "Calling add_item(name, price) increases the item count by 1 and updates the total price.",
+        "preserves_state_on_failure": true,
+        "ref": "REQ_02",
+        "source_refs": [
+          "PR16.5",
+          "PR16.6"
+        ],
+        "summary": "Add item with validation",
+        "test_hint": "Add valid items and verify count/price; attempt to add negative price and catch error."
+      },
+      "project_id": "three-e2e-fresh-20261005T092145Z-s02-shoppingbasket",
+      "scenario_id": "three-e2e-fresh-20261005T092145Z-s02-shoppingbasket--REQ_02",
+      "source_clauses": [
+        {
+          "evidence_kind": "test",
+          "kind": "behavior",
+          "ref": "PR16.5",
+          "text": "Calling add_item(name, price) must add one item to the basket."
+        },
+        {
+          "evidence_kind": "test",
+          "kind": "validation",
+          "ref": "PR16.6",
+          "text": "The price provided to add_item must be a non-negative integer."
+        }
+      ]
+    }
+  }
+}
