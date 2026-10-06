@@ -166,9 +166,11 @@ def test_rack_ai_limit_integration_has_no_fixed_local_primary_budget():
 def test_runtime_configuration_defaults_resource_wait_for_cold_backend_start(tmp_path, monkeypatch):
     configure_runtime_env(tmp_path, monkeypatch)
     monkeypatch.delenv("ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS", raising=False)
+    monkeypatch.delenv("ATHBA_RACK_AI_RETAIN_MODEL_INTERACTIONS", raising=False)
     configuration = RackAiRuntimeConfiguration.from_env()
     assert configuration.resource_wait_seconds == 960.0
     assert configuration.http_timeout_seconds == 30.0
+    assert configuration.retained_model_interactions is False
 
 
 def test_runtime_configuration_uses_positive_resource_wait_override(tmp_path, monkeypatch):
@@ -193,6 +195,7 @@ def test_one_campaign_reserves_required_services_once_and_persists_identity(tmp_
     assert len(calls) == 1
     assert calls[0]["request"]["services"] == ["local-primary", "local-coder"]
     assert calls[0]["request"]["priority"] == "low"
+    assert "diagnostics" not in calls[0]["request"]
     assert store.load("campaign").rack_ai.reservation_id == "R1"
     persisted_limits = store.load_reservation("campaign").service_limits
     assert persisted_limits["local-primary"] == client.service_limits["local-primary"]
@@ -431,3 +434,31 @@ def test_live_composition_uses_public_scoped_reasoning_and_public_workspace_port
     assert captured[0].reasoning_gateway.provider.runtime_access.reservation is reservation
     assert isinstance(captured[0].execution_gateway.port, RackAiPublicWorkspaceExecutionPort)
     assert reservation.binding is None
+
+
+def test_diagnostics_environment_opt_in_only_adds_reservation_diagnostics(tmp_path, monkeypatch):
+    configure_runtime_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("ATHBA_RACK_AI_RETAIN_MODEL_INTERACTIONS", "true")
+    configuration = RackAiRuntimeConfiguration.from_env()
+    reservation, client, _store = session(tmp_path)
+    default_configuration = client.configuration
+    client.configuration = replace(
+        default_configuration,
+        retained_model_interactions=configuration.retained_model_interactions,
+    )
+
+    reservation.ready("local-primary")
+
+    request = operations(client, "reserve")[0]["request"]
+    assert request["diagnostics"] == {"retained_model_interactions": True}
+    assert request["services"] == ["local-primary", "local-coder"]
+    assert request["priority"] == "low"
+    assert request["ttl_seconds"] == default_configuration.ttl_seconds
+    assert replace(client.configuration, retained_model_interactions=False) == default_configuration
+
+
+def test_diagnostics_environment_rejects_ambiguous_setting(tmp_path, monkeypatch):
+    configure_runtime_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("ATHBA_RACK_AI_RETAIN_MODEL_INTERACTIONS", "maybe")
+    with pytest.raises(ValueError, match="ATHBA_RACK_AI_RETAIN_MODEL_INTERACTIONS.*true or false"):
+        RackAiRuntimeConfiguration.from_env()

@@ -11,6 +11,7 @@ import httpx
 
 DEFAULT_RACK_AI_RESOURCE_WAIT_SECONDS = 960.0
 RACK_AI_RESOURCE_WAIT_ENV = "ATHBA_RACK_AI_RESOURCE_WAIT_SECONDS"
+RACK_AI_RETAIN_INTERACTIONS_ENV = "ATHBA_RACK_AI_RETAIN_MODEL_INTERACTIONS"
 
 
 class RackAiResourceWait(Exception):
@@ -33,6 +34,7 @@ class RackAiRuntimeConfiguration:
     refresh_seconds: float = 300.0
     resource_wait_seconds: float = DEFAULT_RACK_AI_RESOURCE_WAIT_SECONDS
     http_timeout_seconds: float = 30.0
+    retained_model_interactions: bool = False
 
     def __post_init__(self) -> None:
         url = urlsplit(self.origin)
@@ -51,6 +53,7 @@ class RackAiRuntimeConfiguration:
             os.environ["ATHBA_RACK_AI_ORIGIN"],
             Path(os.environ["ATHBA_RACK_AI_CREDENTIAL_FILE"]),
             resource_wait_seconds=_resource_wait_seconds_from_env(),
+            retained_model_interactions=_retained_model_interactions_from_env(),
         )
 
 
@@ -69,6 +72,13 @@ def _resource_wait_seconds_from_env() -> float:
     if not _positive_finite(seconds):
         raise ValueError(f"{RACK_AI_RESOURCE_WAIT_ENV} must be a positive numeric value")
     return seconds
+
+
+def _retained_model_interactions_from_env() -> bool:
+    value = os.getenv(RACK_AI_RETAIN_INTERACTIONS_ENV, "false").strip().lower()
+    if value not in {"true", "false"}:
+        raise ValueError(f"{RACK_AI_RETAIN_INTERACTIONS_ENV} must be true or false")
+    return value == "true"
 
 
 class RackAiRuntimeClient:

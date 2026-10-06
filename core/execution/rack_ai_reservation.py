@@ -369,10 +369,13 @@ def _reserve_state(client: RackAiRuntimeClient, binding: ReservationBinding, sta
         state, priority="low", reservation_id=None, ready_observed=False,
         service_limits={}, release_requested=False, released=False,
     )
-    result = client.operation({"operation": "reserve", "request": {
+    request: dict[str, object] = {
         "work_id": state.work_id, "acquisition_id": state.acquisition_id,
         "services": list(state.services), "priority": state.priority, "ttl_seconds": state.ttl_seconds,
-    }})
+    }
+    if client.configuration.retained_model_interactions:
+        request["diagnostics"] = {"retained_model_interactions": True}
+    result = client.operation({"operation": "reserve", "request": request})
     if result.get("state") in UNOWNED_RESERVATIONS:
         binding.save(state)
         return result
