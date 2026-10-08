@@ -819,6 +819,8 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "visible_paths": [request.ticket.production_path, request.allowed_test_path],
         },
     }
+    if any(item.obligation_type == "precondition" for item in request.source_requirement_evidence):
+        payload["input_domain_policy"] = "Use examples within the selected source preconditions. Outside-domain behavior is unspecified; do not invent rejection or exceptions."
     if request.semantic_annotations:
         payload["semantic_annotations"] = [item.to_dict() for item in request.semantic_annotations]
     if feedback:
@@ -932,6 +934,7 @@ def _repair_binding(
 
 def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:
     payload = {
+        "input_domain_policy": "Caller preconditions specify valid inputs only. Do not require runtime validation, rejection or exceptions outside that domain unless the selected source explicitly specifies them.",
         "question": "Does this complete scenario, if eventually GREEN, demonstrate the selected observable behavior? Equivalent lexical identifier differences reconcile later in Naming; do not reject solely for spelling.",
         "behavior_ticket": {
             "id": request.behavior_ref,

@@ -325,7 +325,7 @@ async def test_repeated_invalid_split_response_is_distinct_from_genuine_unsplitt
 
     result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
 
-    assert result.disposition == "unsplittable"
+    assert result.disposition == "exhausted"
     assert result.rejection_reason == "invalid_split_response_exhausted"
     assert "bounded schema repair" in result.rationale
     assert len(result.attempts) == 2

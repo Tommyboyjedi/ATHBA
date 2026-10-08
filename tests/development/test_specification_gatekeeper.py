@@ -824,7 +824,7 @@ def test_gatekeeper_records_explicit_evidence_and_assessment_round_trip():
 async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
     payload = contract_payload()
     payload["source_clauses"] = [
-        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "Reject duplicate resource ids, duplicate reservation ids, reservations for unknown resources,", "subject": "duplicate reservation ids"}
     ]
     payload["observable_requirements"] = [
         {
@@ -884,7 +884,7 @@ async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
         {
             "project_id": "reservation-book",
             "requirement_text": requirement_text(),
-            "items": [{"ref": "REQ-08", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}],
+            "items": [{"ref": "REQ-08", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "Reject duplicate resource ids, duplicate reservation ids, reservations for unknown resources,", "subject": "duplicate reservation ids"}],
         }
     )
     gatekeeper = SpecificationGatekeeper(
@@ -914,7 +914,7 @@ async def test_gatekeeper_matches_equivalent_checklist_text_when_refs_drift():
 def test_gap_adapter_uses_contract_source_ref_when_checklist_ref_drifts():
     payload = contract_payload()
     payload["source_clauses"] = [
-        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "resource"}
+        {"ref": "REQ-010", "text": "Reject duplicate reservation ids.", "kind": "validation", "evidence_kind": "test", "modality": "required", "source_quote": "Reject duplicate resource ids, duplicate reservation ids, reservations for unknown resources,", "subject": "duplicate reservation ids"}
     ]
     payload["observable_requirements"] = [
         {

@@ -33,7 +33,7 @@ def test_cli_process_death_resumes_durable_gatekeeper_without_repeating_calls(
                 self.log.append(request)
                 return ReasoningResult(json.dumps({"answer": "NO", "selected_test_names": [],
                                                    "rationale": "Atomic tests do not cover compound item"}))
-        if request.purpose == "athba_specification_checklist_split":
+        if request.purpose in {"athba_specification_checklist_split", "athba_specification_checklist_split_repair"}:
             self.call_count += 1
             self.log.append(request)
             prompt = json.loads(request.prompt)
@@ -96,7 +96,7 @@ def test_cli_process_death_resumes_durable_gatekeeper_without_repeating_calls(
     assert current.status == ("blocked" if boundary == "rejected_split" else "completed")
     assert current.final_reconciliation[0]["answer"] == ("YES" if boundary in {"yes", "final"} else "NO")
     if boundary == "rejected_split":
-        assert current.final_reconciliation[0]["blocked_reason"] == "specification_gatekeeper_unsplittable"
+        assert current.final_reconciliation[0]["blocked_reason"] == "specification_split_correction_exhausted"
     replay: Any = Factory([], [])
     assert main(args("resume", state, evidence)[:-2], replay) == expected_exit
     capsys.readouterr()

@@ -163,7 +163,8 @@ def requirement_text() -> str:
         "Clients can add resources, create uniquely identified reservations for a number of units on a resource, "
         "cancel reservations, and query remaining availability. "
         "Reject duplicate resource ids, duplicate reservation ids, reservations for unknown resources, "
-        "cancellation of unknown reservations, zero or negative quantities, and reservations exceeding remaining capacity. "
+        "cancellation of unknown reservations, zero or negative quantities, non-positive resource capacities, "
+        "and reservations exceeding remaining capacity with ValueError. "
         "Failed operations must not corrupt existing state. Cancelling a reservation restores that capacity. "
         "The implementation must be in-memory only, dependency-free, small, direct, readable Python 3.14, "
         "suitable for pytest, and free of unnecessary abstractions."
@@ -173,10 +174,15 @@ def requirement_text() -> str:
 def source_clause_payload():
     return {
         "clauses": [
-            {"ref": "SRC-1", "text": "A resource can be added with a unique id.", "kind": "behavior"},
-            {"ref": "SRC-2", "text": "A resource capacity must be a positive integer.", "kind": "validation"},
-            {"ref": "SRC-3", "text": "A reservation can be created for a known resource.", "kind": "behavior"},
-            {"ref": "SRC-4", "text": "A reservation quantity must not exceed remaining capacity.", "kind": "validation"},
+            {"ref": "SRC-1", "text": "A resource can be added with a unique id.", "kind": "behavior",
+             "source_quote": "Clients can add resources", "subject": "add resources"},
+            {"ref": "SRC-2", "text": "A resource capacity must be a positive integer.", "kind": "validation",
+             "source_quote": "A resource has a unique id and a positive integer capacity.", "subject": "positive integer capacity"},
+            {"ref": "SRC-3", "text": "A reservation can be created for a known resource.", "kind": "behavior",
+             "source_quote": "create uniquely identified reservations for a number of units on a resource", "subject": "create uniquely identified reservations"},
+            {"ref": "SRC-4", "text": "Reject reservations exceeding remaining capacity.", "kind": "validation",
+             "source_quote": "Reject duplicate resource ids, duplicate reservation ids, reservations for unknown resources, cancellation of unknown reservations, zero or negative quantities, non-positive resource capacities, and reservations exceeding remaining capacity with ValueError.",
+             "subject": "Reject"},
         ]
     }
 
@@ -196,7 +202,7 @@ def contract_payload():
                 "summary": "Add a resource with a unique id and positive capacity.",
                 "observable_outcome": "add_resource stores a new resource and availability reflects full capacity.",
                 "test_hint": "test_add_resource_sets_availability",
-                "error_expectation": "duplicate resource ids and non-positive capacity raise ValueError",
+                "error_expectation": None,
                 "preserves_state_on_failure": True,
             },
             {
@@ -519,7 +525,7 @@ async def test_valid_source_requirement_clause_extraction_parses():
     clauses = await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
 
     assert [clause.ref for clause in clauses] == ["SRC-1", "SRC-2", "SRC-3", "SRC-4"]
-    assert clauses[0] == SourceRequirementClause(ref="SRC-1", text="A resource can be added with a unique id.", kind="behavior")
+    assert clauses[0] == SourceRequirementClause.from_dict(source_clause_payload()["clauses"][0])
 
 
 @pytest.mark.asyncio
@@ -544,6 +550,7 @@ async def test_source_requirement_clause_evidence_kind_is_repaired():
             }
         ]
     }
+    repaired["clauses"][0].update(source_quote="Clients can add resources", subject="add resources")
     gateway = FakeReasoningGateway([invalid, repaired])
     planner = RequirementClausePlanner(gateway)
 
@@ -628,7 +635,7 @@ async def test_malformed_contract_input_fails_closed():
     planner = BehaviorContractPlanner(gateway)
 
     with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
-        await planner.create_contract(project_id="reservation-book", requirement_text="broken")
+        await planner.create_contract(project_id="reservation-book", requirement_text=requirement_text())
 
 @pytest.mark.asyncio
 async def test_contract_planner_repairs_uncovered_source_clauses_once():
@@ -655,7 +662,7 @@ async def test_contract_planner_repairs_uncovered_source_clauses_once():
 @pytest.mark.parametrize("mutation", ["altered", "extra", "missing"])
 async def test_contract_planner_installs_immutable_authoritative_fields_before_validation(mutation):
     payload = contract_payload()
-    exact_requirement = "Component: ExampleWidget\n\n1. Stores exact text: punctuation!\n2. Preserves Case.\n"
+    exact_requirement = requirement_text() + "\nComponent: ExampleWidget\n\n1. Stores exact text: punctuation!\n2. Preserves Case.\n"
     if mutation == "altered":
         payload["project_id"] = "renamed-project"
         payload["requirement_source"] = "changed source"
@@ -667,6 +674,9 @@ async def test_contract_planner_installs_immutable_authoritative_fields_before_v
     else:
         for field in ("project_id", "requirement_source", "source_clauses", "status"):
             payload.pop(field)
+    payload["error_semantics"] = []
+    for behavior in payload["observable_requirements"]:
+        behavior["error_expectation"] = None
     gateway = FakeReasoningGateway([source_clause_payload(), payload])
 
     restored = await BehaviorContractPlanner(gateway).create_contract(
@@ -700,7 +710,7 @@ async def test_fenced_json_contract_output_fails_closed():
     planner = BehaviorContractPlanner(gateway)
 
     with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
-        await planner.create_contract(project_id="reservation-book", requirement_text="broken")
+        await planner.create_contract(project_id="reservation-book", requirement_text=requirement_text())
 
 
 @pytest.mark.asyncio
@@ -710,7 +720,7 @@ async def test_prose_before_json_contract_output_fails_closed():
     planner = BehaviorContractPlanner(gateway)
 
     with pytest.raises(ValueError, match="behavior contract response was not valid JSON"):
-        await planner.create_contract(project_id="reservation-book", requirement_text="broken")
+        await planner.create_contract(project_id="reservation-book", requirement_text=requirement_text())
 
 
 def test_contract_requirement_refs_are_retained_through_round_trip():
@@ -806,7 +816,7 @@ def test_source_clause_only_in_completion_criteria_still_fails_coverage():
 def test_one_source_clause_can_map_to_multiple_observable_requirements():
     payload = contract_payload()
     payload["source_clauses"] = [
-        {"ref": "SRC-1", "text": "Reservation quantity must be positive.", "kind": "validation"},
+        {"ref": "SRC-1", "text": "Reject zero or negative reservation quantities.", "kind": "validation"},
     ]
     payload["observable_requirements"] = [
         {

@@ -6,6 +6,7 @@ from hashlib import sha256
 import json
 import re
 
+from core.development.source_obligation_semantics import ObligationType, validate_behavior_authority
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
 from core.development.behavior_replan_domain import (
     BehaviorReplanDisposition, BehaviorReplanPolicy, BehaviorReplanRecord,
@@ -90,7 +91,7 @@ def validate_split(record: BehaviorReplanRecord, context: BehaviorSplitValidatio
     if len(structural_outcomes) != len(children) or any(not item or item in forbidden for item in outcomes):
         raise ValueError("non-progressing split: unchanged parent, ancestor, existing behavior or duplicate children")
     if any(set(normalized(parent.observable_outcome).split()).issubset(set(item.split())) for item in outcomes):
-        raise ValueError("child reproduces the entire parent outcome")
+        raise ValueError("child reproduces the entire parent outcome; select a proper observable subset instead of adding qualifiers")
     refs = set(parent.source_refs)
     covered: set[str] = set()
     reserved = set(active) | {item.request.parent.ref for item in history}
@@ -99,13 +100,17 @@ def validate_split(record: BehaviorReplanRecord, context: BehaviorSplitValidatio
             raise ValueError("child identity is not a unique deterministic descendant")
         if not set(child.source_refs).issubset(refs) or len(set(child.source_refs)) != len(child.source_refs):
             raise ValueError("child source refs must be unique and drawn from parent")
+        validate_behavior_authority(contract, child)
+        clauses = [clause for clause in contract.source_clauses if clause.ref in child.source_refs]
+        if clauses and all(clause.obligation_type == ObligationType.PRECONDITION.value for clause in clauses):
+            raise ValueError(f"child {child.ref} is a precondition, not a behavioral outcome")
         if child.depends_on != parent.depends_on:
             raise ValueError("child dependencies must inherit parent dependencies")
         if parent.preserves_state_on_failure and not child.preserves_state_on_failure:
             raise ValueError("split drops state-preservation obligation")
         covered.update(child.source_refs)
     if covered != refs:
-        raise ValueError("split drops parent source coverage")
+        raise ValueError(f"split drops parent source coverage: missing {sorted(refs - covered)}")
     if parent.error_expectation and not any(child.error_expectation == parent.error_expectation for child in children):
         raise ValueError("split must retain the parent error expectation in at least one child")
     digest = structure_digest(children)

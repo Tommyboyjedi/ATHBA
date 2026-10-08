@@ -35,7 +35,7 @@ class Reasoning:
         self.call_count += 1; self.log.append(request)
 
         values = {
-            "athba_source_requirement_clauses": {"clauses":[{"ref":"SRC-1","text":"Instantiate ToggleSwitch.","kind":"behavior"},{"ref":"SRC-2","text":"New switch is off.","kind":"behavior"},{"ref":"SRC-3","text":"toggle makes switch on.","kind":"behavior"}]},
+            "athba_source_requirement_clauses": {"clauses":[{"ref":"SRC-1","text":"Instantiate ToggleSwitch.","kind":"behavior","source_quote":REQUIREMENT,"subject":"It can be instantiated"},{"ref":"SRC-2","text":"New switch is off.","kind":"behavior","source_quote":REQUIREMENT,"subject":"begins in the off state"},{"ref":"SRC-3","text":"toggle makes switch on.","kind":"behavior","source_quote":REQUIREMENT,"subject":"calling toggle changes it to the on state"}]},
             "athba_behavior_contract": contract(),
             "athba_specification_checklist": {"items":[{"ref":"CHK-1","text":"A ToggleSwitch is created off and toggled on.","kind":"behavior","modality":"required","source_quote":REQUIREMENT,"subject":"ToggleSwitch"}]},
             "athba_scenario_intent_review": {"disposition":"approved","feedback":"scenario observes every behavior","evidence_refs":["SRC-1","SRC-2","SRC-3"]},

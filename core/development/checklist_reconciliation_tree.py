@@ -63,8 +63,11 @@ class ChecklistNodeCheckpoint:
         record.update({"parent_item": self.state.item.to_dict(), "trusted_revision": self.state.trusted_revision,
                        "ancestry": list(self.state.ancestry), "split_depth": len(self.state.ancestry),
                        "split_rationale": split.rationale, "attempted_split": split.attempted_response,
-                       "rejection_reason": split.rejection_reason})
-        if split.disposition == "unsplittable":
+                       "rejection_reason": split.rejection_reason,
+                       "response_attempts": [item.to_dict() for item in split.attempts]})
+        if split.disposition == "exhausted":
+            record.update({"status": "split_correction_exhausted", "blocked_reason": "specification_split_correction_exhausted"})
+        elif split.disposition == "unsplittable":
             record.update({"status": "unsplittable", "blocked_reason": UNSPLITTABLE_REASON})
         else:
             record.update({"status": "superseded", "child_refs": [child.ref for child in split.children]})
@@ -102,7 +105,7 @@ class ChecklistReconciliationTree:
         if split is None:
             raise AssertionError("split checkpoint was not persisted")
         results = [dict(checkpoint.state.result or {})]
-        if split.disposition == "unsplittable":
+        if split.disposition != "split":
             return results
         ancestry = ChecklistSplitAncestry((*context.ancestry.items, context.item),
                                           (*context.ancestry.structures, split_structure(split.children)))
@@ -133,7 +136,7 @@ class ChecklistReconciliationTree:
                 attempted_response=split.attempted_response, rejection_reason="child_ref_collision"))
             return
         checkpoint.split(ChecklistSplitProgress(split.disposition, split.rationale, split.children,
-                                               split.attempted_response, split.rejection_reason))
+                                               split.attempted_response, split.rejection_reason, split.attempts))
 
 
 def validate_persisted_tree(journal: ReconciliationJournal, roots: list[SpecificationChecklistItem]) -> None:

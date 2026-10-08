@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from core.development.source_obligation_semantics import clause_source_context, classification_subject, validated_type
 from core.development.specification_obligations import ObligationModality, grounded_modality
 from core.development.specification_provenance import PROVENANCE_ERROR, resolve_source_quote
 
@@ -28,12 +29,19 @@ class SourceRequirementClause:
     text: str
     kind: str
     evidence_kind: str = ChecklistEvidenceKind.TEST.value
+    source_quote: str = ""
+    subject: str = ""
+    obligation_type: str = ""
 
     def __post_init__(self) -> None:
         require_text(self.ref, "source clause ref")
         require_text(self.text, "source clause text")
         object.__setattr__(self, "kind", enum_value(self.kind, ChecklistItemKind, "source clause kind"))
         object.__setattr__(self, "evidence_kind", normalize_evidence_kind(self.kind, self.evidence_kind))
+        object.__setattr__(self, "obligation_type", validated_type(classification_subject(self.subject or self.text, self.kind, self.source_quote), self.kind, self.obligation_type))
+
+    def source_context(self, source: str) -> str:
+        return clause_source_context(self, source)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,6 +49,8 @@ class SourceRequirementClause:
             "text": self.text,
             "kind": self.kind,
             "evidence_kind": self.evidence_kind,
+            "source_quote": self.source_quote, "subject": self.subject,
+            "obligation_type": self.obligation_type,
         }
 
     @classmethod
@@ -51,6 +61,8 @@ class SourceRequirementClause:
             text=str(payload["text"]),
             kind=kind,
             evidence_kind=normalize_evidence_kind(kind, payload.get("evidence_kind")),
+            source_quote=str(payload.get("source_quote", "")), subject=str(payload.get("subject", "")),
+            obligation_type=str(payload.get("obligation_type", "")),
         )
 
 
@@ -64,11 +76,13 @@ class SpecificationChecklistItem:
     modality: str = ObligationModality.REQUIRED.value
     source_quote: str = ""
     subject: str = ""
+    obligation_type: str = ""
 
     def __post_init__(self) -> None:
         require_text(self.ref, "checklist item ref")
         require_text(self.text, "checklist item text")
         object.__setattr__(self, "kind", enum_value(self.kind, ChecklistItemKind, "checklist item kind"))
+        object.__setattr__(self, "obligation_type", validated_type(classification_subject(self.subject or self.text, self.kind, self.source_quote), self.kind, self.obligation_type))
         source = self.source_quote or self.text
         object.__setattr__(self, "modality", (grounded_modality(self.modality, source) if self.source_quote else ObligationModality(self.modality)).value)
 
@@ -93,17 +107,20 @@ class SpecificationChecklistItem:
             grounded_modality(self.modality, provenance.context)
         except ValueError as error:
             raise ValueError(f"{error}: item {self.ref} field modality") from error
+        from core.development.source_obligation_semantics import validate_error_authority
+        validate_error_authority(self.text, provenance.context)
         return provenance.context
 
     def to_dict(self) -> dict[str, Any]:
         return {"ref": self.ref, "text": self.text, "kind": self.kind,
-                "modality": self.modality, "source_quote": self.source_quote, "subject": self.subject}
+                "modality": self.modality, "source_quote": self.source_quote, "subject": self.subject, "obligation_type": self.obligation_type}
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SpecificationChecklistItem":
         return cls(ref=str(payload["ref"]), text=str(payload["text"]), kind=str(payload["kind"]),
                    modality=str(payload.get("modality", ObligationModality.REQUIRED.value)),
-                   source_quote=str(payload.get("source_quote", "")), subject=str(payload.get("subject", "")))
+                   source_quote=str(payload.get("source_quote", "")), subject=str(payload.get("subject", "")),
+                   obligation_type=str(payload.get("obligation_type", "")))
 
 
 @dataclass(frozen=True)

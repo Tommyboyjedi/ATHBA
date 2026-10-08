@@ -10,7 +10,7 @@ from typing import Any, Callable
 from core.development.reconciliation_response import (
     ReconciliationAttempt, ReconciliationFailure, ReconciliationFailureKind,
 )
-from core.development.specification_domain import SpecificationChecklistItem
+from core.development.specification_domain import SpecificationChecklistItem, ChecklistAtomizationAttempt
 
 PROGRESS_SCHEMA = "gatekeeper-progress/v1"
 
@@ -60,20 +60,23 @@ class ChecklistSplitProgress:
     children: tuple[SpecificationChecklistItem, ...] = ()
     attempted_response: str = ""
     rejection_reason: str | None = None
+    attempts: tuple[ChecklistAtomizationAttempt, ...] = ()
 
     def __post_init__(self) -> None:
-        if (self.disposition not in {"split", "unsplittable"} or not self.rationale.strip()
+        if (self.disposition not in {"split", "unsplittable", "exhausted"} or not self.rationale.strip()
                 or (self.disposition == "split" and len(self.children) < 2)
-                or (self.disposition == "unsplittable" and self.children)):
+                or (self.disposition != "split" and self.children)):
             raise ValueError("invalid persisted checklist split")
 
     def to_dict(self) -> dict[str, Any]:
-        return {**asdict(self), "children": [item.to_dict() for item in self.children]}
+        return {**asdict(self), "children": [item.to_dict() for item in self.children],
+                "attempts": [item.to_dict() for item in self.attempts]}
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> ChecklistSplitProgress:
         return cls(**{**value, "children": tuple(SpecificationChecklistItem.from_dict(child)
-                                                for child in value["children"])})
+                                                for child in value["children"]),
+                      "attempts": tuple(ChecklistAtomizationAttempt.from_dict(item) for item in value.get("attempts", ()))})
 
 
 @dataclass(frozen=True)

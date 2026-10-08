@@ -108,6 +108,8 @@ class BehaviorContract:
         validate_unique_refs(self.requirement_refs(), "requirement refs")
         validate_contract_source_coverage(self)
         validate_requirement_dependencies(self.observable_requirements)
+        for clause in self.source_clauses:
+            clause.source_context(self.requirement_source)
         validate_list_of_strings(self.invariants, "invariants")
         validate_repository_relative_paths(self.production_paths, "production paths")
         validate_repository_relative_paths(self.test_paths, "test paths")
