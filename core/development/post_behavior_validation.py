@@ -11,7 +11,7 @@ from core.development.post_behavior_assessment import NamingDecision
 from core.development.post_behavior_authority import (
     PythonPostBehaviorAuthority, RenameAuthorityRequest, RefactorAuthorityRequest,
 )
-from core.development.post_behavior_domain import PostBehaviorEntry, PostBehaviorOutcome, PostBehaviorPass, PostBehaviorState, ValidationEvidence
+from core.development.post_behavior_domain import PostBehaviorEntry, PostBehaviorOutcome, PostBehaviorPass, PostBehaviorPhase, PostBehaviorState, ValidationEvidence
 from core.development.post_behavior_entry import AcceptedBehavioralDelivery
 from core.development.post_behavior_evidence import PostBehaviorEvidenceStore
 from core.development.post_behavior_git import PostBehaviorGit
@@ -24,6 +24,7 @@ from core.development.post_behavior_slice import (
 class PostBehaviorProductionRevision:
     entry: PostBehaviorEntry
     revision: str
+    phase: PostBehaviorPhase | None = None
 
 
 @dataclass(frozen=True)
@@ -37,13 +38,15 @@ class PostBehaviorSource:
     git: PostBehaviorGit
 
     def focused(self, state: PostBehaviorState) -> FocusedProductionSlice:
-        return self.for_revision(PostBehaviorProductionRevision(state.entry, state.current_post_behavior_revision))
+        phase = state.active_pass.phase if state.active_pass else None
+        return self.for_revision(PostBehaviorProductionRevision(state.entry, state.current_post_behavior_revision, phase))
 
     def for_revision(self, request: PostBehaviorProductionRevision) -> FocusedProductionSlice:
         scope = ProductionSliceScope(request.entry.trusted_entry_revision,
                                      request.entry.behaviorally_accepted_revision, request.entry.production_paths)
         return PythonProductionSlice().derive(SliceRequest(
-            self.git.snapshot(scope.entry_revision), self.git.snapshot(request.revision), scope))
+            self.git.snapshot(scope.entry_revision), self.git.snapshot(request.revision), scope,
+            include_unchanged=request.phase == PostBehaviorPhase.NAMING))
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,7 @@ class PostBehaviorCandidateAuthority:
         if active.candidate is None or active.candidate.revision is None or active.assessment is None:
             raise ValueError("write authority requires the durable candidate and assessment")
         self.source.git.validate_candidate((active.base_revision, active.candidate.revision))
-        production = self.source.for_revision(PostBehaviorProductionRevision(request.entry, active.base_revision))
+        production = self.source.for_revision(PostBehaviorProductionRevision(request.entry, active.base_revision, active.phase))
         if active.assessment.slice_identity != production.identity:
             raise ValueError("assessed production slice identity has changed")
         trusted = self.source.git.snapshot(active.base_revision)

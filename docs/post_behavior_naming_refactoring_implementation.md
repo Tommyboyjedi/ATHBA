@@ -165,3 +165,5 @@ unsupported_language_boundary. Final Gatekeeper, naming and refactoring were not
 reached. Canonical target eafb172da6d834725b70e409ff7f756a194bc0e8 and its
 generated staged frontier-test change are preserved. No fixture/harness changes
 were made to bypass that new blocker.
+
+Naming inspects accepted declarations in the registered production paths, including unchanged declarations. Refactoring retains the changed-unit projection. Assessment, mutation validation and replay reconstruct the same phase-specific slice from immutable revisions. Unrelated paths, incomplete snapshots and unsupported syntax remain excluded or rejected.
