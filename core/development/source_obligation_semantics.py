@@ -30,7 +30,6 @@ ERROR_IDENTIFIER = re.compile(r"\b[A-Z]\w*(?:Error|Exception)\b")
 NON_PERSISTENCE = re.compile(
     r"\bin[- ]memory\b|\b(?:no|without|not|never)\b.{0,70}"
     r"\b(?:persist\w*|database\w*|storage|files?|disk)\b", re.I)
-PERSISTENCE = re.compile(r"\b(?:persist\w*|database\w*|storage|files?|disk)\b", re.I)
 POSITIVE_PERSISTENCE = re.compile(r"\bpersist\w*\b|\b(?:save|store|retain)\w*\b.{0,80}\b(?:files?|disk|database|sessions?|restarts?)\b", re.I)
 LEXICAL_NAME = re.compile(r"\b(?:named|identifier|spelling|exact name|required_name)\b", re.I)
 
@@ -57,13 +56,26 @@ def classify_obligation(subject: str, kind: str) -> ObligationType:
     return ObligationType.BEHAVIOR
 
 
+def source_predicate(subject: str, quote: str) -> str:
+    """Select the source conjunct containing this subject, not adjacent authority."""
+    parts = re.split(r"\band\b|\bor\b|[,;.!?\n]", quote, flags=re.I)
+    matches = [part for part in parts if subject.casefold() in part.casefold()]
+    if len(matches) == 1:
+        return matches[0]
+    if not matches and subject.casefold() in quote.casefold():
+        # A compound subject stays compound and must pass the existing split guard.
+        return quote
+    return ""
+
+
 def classification_subject(subject: str, kind: str, quote: str) -> str:
-    if kind == "validation" and explicit_error(quote):
-        return quote
-    if kind in {"constraint", "quality"} and LEXICAL_NAME.search(quote):
-        return quote
-    if kind in {"constraint", "quality"} and PERSISTENCE.search(subject) and NON_PERSISTENCE.search(quote):
-        return quote
+    predicate = source_predicate(subject, quote)
+    if kind == "validation" and explicit_error(predicate):
+        return predicate
+    if kind in {"constraint", "quality"} and (
+            LEXICAL_NAME.search(predicate) or NON_PERSISTENCE.search(predicate)
+            or POSITIVE_PERSISTENCE.search(predicate)):
+        return predicate
     return subject
 
 

@@ -115,6 +115,10 @@ class EvidencePolicyRouter:
         modality = explicit_modality(quote) or ObligationModality(getattr(item, "modality", "required"))
         subject = (getattr(item, "subject", "") or item.text).lower()
         policy = _policy(item.kind, modality, subject)
+        if (policy != EvidencePolicy.UNSUPPORTED
+                and item.obligation_type == ObligationType.NON_PERSISTENCE.value
+                and modality in {ObligationModality.REQUIRED, ObligationModality.FORBIDDEN}):
+            policy = EvidencePolicy.STORAGE
         if modality == ObligationModality.REQUIRED:
             if item.obligation_type == ObligationType.PRECONDITION.value:
                 policy = EvidencePolicy.DOMAIN
