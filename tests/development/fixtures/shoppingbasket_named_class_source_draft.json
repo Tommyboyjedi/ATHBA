@@ -1,0 +1,88 @@
+{
+  "requirement_text": "Provide a ShoppingBasket class in shopping_basket.py. A new basket is empty. Calling add_item(name, price) adds one item with a non-negative integer price. Calling item_count() returns the number of items. Calling total_price() returns the sum of all item prices. Adding bread for 3 and milk for 2 must produce an item count of 2 and a total price of 5. Keep all state in memory and use no external dependencies.",
+  "draft": {
+    "clauses": [
+      {
+        "evidence_kind": "review",
+        "kind": "quality",
+        "obligation_type": "naming",
+        "ref": "Provide a ShoppingBasket class in shopping_basket.py",
+        "source_quote": "Provide a ShoppingBasket class in shopping_basket.py",
+        "subject": "ShoppingBasket class",
+        "text": "The system shall provide a ShoppingBasket class in the file shopping_basket.py."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "invariant",
+        "obligation_type": "invariant",
+        "ref": "A new basket is empty",
+        "source_quote": "A new basket is empty",
+        "subject": "new basket",
+        "text": "A newly instantiated ShoppingBasket must be empty."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "obligation_type": "observable_behavior",
+        "ref": "Calling add_item(name, price) adds one item",
+        "source_quote": "Calling add_item(name, price) adds one item",
+        "subject": "add_item(name, price)",
+        "text": "Calling add_item(name, price) shall add one item to the basket."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "validation",
+        "obligation_type": "precondition",
+        "ref": "with a non-negative integer price",
+        "source_quote": "with a non-negative integer price",
+        "subject": "non-negative integer price",
+        "text": "The price provided to add_item must be a non-negative integer."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "obligation_type": "observable_behavior",
+        "ref": "Calling item_count() returns the number of items",
+        "source_quote": "Calling item_count() returns the number of items",
+        "subject": "item_count()",
+        "text": "Calling item_count() shall return the total number of items in the basket."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "obligation_type": "observable_behavior",
+        "ref": "Calling total_price() returns the sum of all item prices",
+        "source_quote": "Calling total_price() returns the sum of all item prices",
+        "subject": "total_price()",
+        "text": "Calling total_price() shall return the sum of all item prices in the basket."
+      },
+      {
+        "evidence_kind": "test",
+        "kind": "behavior",
+        "obligation_type": "observable_behavior",
+        "ref": "Adding bread for 3 and milk for 2 must produce an item count of 2 and a total price of 5",
+        "source_quote": "Adding bread for 3 and milk for 2 must produce an item count of 2 and a total price of 5",
+        "subject": "bread for 3 and milk for 2",
+        "text": "Adding bread for 3 and milk for 2 must result in an item count of 2 and a total price of 5."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "obligation_type": "non_persistence_assurance",
+        "ref": "Keep all state in memory",
+        "source_quote": "Keep all state in memory",
+        "subject": "state",
+        "text": "All state must be kept in memory."
+      },
+      {
+        "evidence_kind": "mechanical",
+        "kind": "constraint",
+        "obligation_type": "mechanical_assurance",
+        "ref": "use no external dependencies",
+        "source_quote": "use no external dependencies",
+        "subject": "external dependencies",
+        "text": "The system shall use no external dependencies."
+      }
+    ]
+  }
+}

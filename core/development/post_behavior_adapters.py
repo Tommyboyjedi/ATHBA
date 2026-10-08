@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 import re
 
 from core.development.athba_workspace_routing import AthbaWorkspaceIdentity
-from core.development.required_public_signature import required_signatures
+from core.development.required_public_signature import required_signatures, SOURCE_CLASS_NAME
 from core.development.post_behavior_assessment import (
     NamingAssessor, NamingAssessmentInput, NamingMaterial, NamingDecision, RefactorAssessor,
 )
@@ -67,6 +67,7 @@ class PostBehaviorAssessors:
 NAMING_ENTITY_PATTERN = r"(?:class|object|function|method|property|field|attribute|identifier|event|command)"
 NAMING_IDENTIFIER_PATTERN = r"([A-Za-z_][A-Za-z_0-9.]*)"
 EXPLICIT_NAMING_PATTERNS = (
+    SOURCE_CLASS_NAME,
     re.compile(NAMING_ENTITY_PATTERN + r"\s+(?:named|called)\s+\x60?" + NAMING_IDENTIFIER_PATTERN),
     re.compile(NAMING_ENTITY_PATTERN + r"\s+\x60" + NAMING_IDENTIFIER_PATTERN + r"\x60"),
     re.compile(r"(?:class|object)\s+([A-Z][A-Za-z_0-9.]*)"),
