@@ -75,3 +75,12 @@ def test_adjacent_rejection_does_not_convert_the_input_domain_to_error_behavior(
     item = SpecificationChecklistItem("D", "Values are integers.", "validation",
         source_quote=source, subject="integers", obligation_type="precondition")
     assert EvidencePolicyRouter().route_source(item, source).policy == EvidencePolicy.DOMAIN
+
+
+def test_ordered_source_citation_retains_negation_during_authoritative_resolution():
+    source = "The component must not expose persistence."
+    quote = "The component must not ... persistence."
+    item = SpecificationChecklistItem("C", quote, "constraint", modality="forbidden",
+        source_quote=quote, subject="persistence", obligation_type="non_persistence_assurance")
+    assert SpecificationChecklistItem.from_dict(item.to_dict()) == item
+    assert EvidencePolicyRouter().route_source(item, source).policy == EvidencePolicy.PUBLIC_SURFACE

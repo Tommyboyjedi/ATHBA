@@ -58,7 +58,7 @@ def classify_obligation(subject: str, kind: str) -> ObligationType:
 
 def source_predicate(subject: str, quote: str) -> str:
     """Select the source conjunct containing this subject, not adjacent authority."""
-    parts = re.split(r"\band\b|\bor\b|[,;.!?\n]", quote, flags=re.I)
+    parts = re.split(r"\band\b|\bor\b|[,;!?\n]|(?<!\.)\.(?!\.)", quote, flags=re.I)
     matches = [part for part in parts if subject.casefold() in part.casefold()]
     if len(matches) == 1:
         return matches[0]
