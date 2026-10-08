@@ -14,6 +14,7 @@ from typing import Protocol, cast
 from core.development.behavior_replan_domain import (
     BehaviorReplanCorrectionRequest, BehaviorReplanRequest, BehaviorReplanResponse,
 )
+from core.development.source_obligation_semantics import validate_planned_clauses
 from core.development.required_public_signature import required_signatures, validate_clause_signatures
 from core.development.behavior_replanning import BehaviorRequirementReplanner
 from core.development.behavior_requirement_repair import BehaviorRequirementRepairPlanner
@@ -367,6 +368,7 @@ class RequirementClausePlanner:
         result = await self.gateway.reason(reasoning_request)
         try:
             clauses = _decode_source_clauses(result.text)
+            validate_planned_clauses(clauses, requirement_text)
             validate_clause_signatures(requirement_text, tuple(clause.text for clause in clauses))
         except (ValueError, KeyError, TypeError) as error:
             initial_attempt = SourceClausePlanningAttempt(result.text, str(error))
@@ -384,6 +386,7 @@ class RequirementClausePlanner:
             repaired = await self.gateway.reason(repair_request)
             try:
                 clauses = _decode_source_clauses(repaired.text)
+                validate_planned_clauses(clauses, requirement_text)
                 validate_clause_signatures(requirement_text, tuple(clause.text for clause in clauses))
             except (ValueError, KeyError, TypeError) as repair_error:
                 raise SourceClausePlanningFailure((
@@ -1937,6 +1940,9 @@ def _source_clause_schema() -> dict[str, object]:
                 "text": "string",
                 "kind": "behavior|validation|invariant|constraint|quality",
                 "evidence_kind": "test|mechanical|review",
+                "source_quote": "exact original source passage",
+                "subject": "one contiguous relevant subject from that passage",
+                "obligation_type": "observable_behavior|precondition|error_behavior|invariant|mechanical_assurance|non_persistence_assurance|naming",
             }
         ]
     }
@@ -1945,6 +1951,11 @@ def _source_clause_schema() -> dict[str, object]:
 def _source_clause_rules() -> list[str]:
     return [
         "one source obligation per clause",
+        "include source_quote and subject grounded in original text; classification is validated deterministically",
+        "validation without explicit rejection/error is precondition: only valid-input behavior is specified; outside-domain behavior is unspecified",
+        "do not invent runtime validation, rejection, exception type, coercion or out-of-domain behavior",
+        "explicit rejection is error_behavior and gets a separate small observable obligation",
+        "keep dependency assurance and non-persistence assurance in separate clauses",
         "do not bundle unrelated behaviors into one clause",
         "preserve happy-path, failure, query, and state-preservation obligations",
         "preserve constraint and quality obligations from the source text",
@@ -2023,6 +2034,9 @@ def _contract_prompt(
             ],
             "required_json_schema": schema,
             "requirement_atomicity_rules": [
+                "precondition clauses define valid inputs, not an independent rejection requirement; use valid examples and attach relevant domain source refs to the corresponding behavior",
+                "outside-domain behavior is unspecified unless original source explicitly defines it; never invent ValueError or any other rejection",
+                "error_expectation must be null and error_semantics empty unless source explicitly requires error behavior",
                 "each observable_requirements entry must describe one independently verifiable behavior or invariant slice",
                 "one requirement ref must be completable by one focused semantic TDD slice",
                 "if two cases require distinct tests or distinct failure conditions, give them separate refs",
@@ -2067,13 +2081,16 @@ def _contract_from_response(
     payload["requirement_source"] = requirement_text
     payload["source_clauses"] = [clause.to_dict() for clause in source_clauses]
     payload["status"] = ContractPoolStatus.TDD_READY.value
-    return BehaviorContract.from_dict(
+    contract = BehaviorContract.from_dict(
         payload,
         BehaviorContractLoadOptions(
             allowed_production_paths=allowed_production_paths,
             allowed_test_paths=allowed_test_paths,
         ),
     )
+    from core.development.source_obligation_semantics import validate_contract_authority
+    validate_contract_authority(contract)
+    return contract
 
 
 def _is_recoverable_contract_error(error: ValueError) -> bool:
@@ -2081,6 +2098,8 @@ def _is_recoverable_contract_error(error: ValueError) -> bool:
     return (
         message.startswith("test-evidence source clauses must be covered by observable requirements:")
         or message.startswith("observable requirements must include at least one test-evidence source clause:")
+        or message.startswith("source does not specify rejection")
+        or message.startswith("error identifier is not specified by source")
     )
 
 
@@ -2135,6 +2154,8 @@ def _contract_repair_prompt(
                 "do not add commentary before or after the JSON",
             ],
             "repair_rules": [
+                "precondition/domain constraints specify valid inputs only; remove invented out-of-domain behavior or exception types",
+                "do not create a standalone observable requirement whose only authority is a precondition",
                 "keep the contract within the supplied repository-relative production and test paths",
                 "preserve valid semantic fields where possible",
                 "every supplied source clause ref whose evidence_kind is test must appear in at least one observable_requirements[].source_refs entry",

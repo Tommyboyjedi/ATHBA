@@ -63,13 +63,13 @@ class ChecklistSplitResponse:
     attempts: tuple[ChecklistAtomizationAttempt, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.disposition not in {"split", "unsplittable"}:
-            raise ValueError("checklist split disposition must be split or unsplittable")
+        if self.disposition not in {"split", "unsplittable", "exhausted"}:
+            raise ValueError("checklist split disposition must be split, unsplittable or exhausted")
         if not self.rationale.strip():
             raise ValueError("checklist split rationale is required")
         if self.disposition == "split" and len(self.children) < 2:
             raise ValueError("checklist split requires at least two children")
-        if self.disposition == "unsplittable" and self.children:
+        if self.disposition != "split" and self.children:
             raise ValueError("unsplittable checklist split cannot contain children")
 
 
@@ -113,7 +113,7 @@ class SpecificationChecklistPlanner:
                 split = _decode_split(request, repaired.text)
             except (ValueError, KeyError, TypeError) as repair_error:
                 return ChecklistSplitResponse(
-                    "unsplittable",
+                    "exhausted",
                     f"checklist split validation failed after bounded schema repair: {repair_error}",
                     attempted_response=repaired.text,
                     rejection_reason="invalid_split_response_exhausted",
@@ -145,8 +145,7 @@ def _decode_split(request: ChecklistSplitRequest, response: str) -> ChecklistSpl
     validate_mechanical_children(parent, children)
     reason = rejected_split(parent, children, request.ancestry)
     if reason is not None:
-        return ChecklistSplitResponse("unsplittable", rationale, attempted_response=response,
-                                      rejection_reason=reason)
+        raise ValueError(reason)
     return ChecklistSplitResponse("split", rationale, children, response)
 
 
@@ -221,6 +220,9 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
 def _atomization_rules() -> list[str]:
     return [
         "one semantic obligation per item",
+        "validation without explicit rejection/error is a caller precondition; outside-domain behavior is unspecified",
+        "do not invent runtime validation, exceptions or rejection from domain constraints",
+        "read/nonmutation is an observable invariant proved by repeated public observations; do not require an internal-state proof",
         "every checklist item ref must be unique within the complete checklist",
         "modality is mandatory: required, forbidden, or non_goal; kind remains independent",
         "not required, optional, and out of scope mean modality=non_goal",
@@ -259,6 +261,7 @@ def _checklist_output_schema() -> dict[str, object]:
             "modality": "required|forbidden|non_goal",
             "source_quote": "supporting words copied from one original source passage; full excerpt or ordered complete tokens with optional .../… omissions",
             "subject": "source-backed capability or quality phrase contained in one retained source run",
+            "obligation_type": "observable_behavior|precondition|error_behavior|invariant|mechanical_assurance|non_persistence_assurance|naming",
         }]
     }
 

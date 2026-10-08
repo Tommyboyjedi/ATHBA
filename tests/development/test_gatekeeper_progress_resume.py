@@ -47,7 +47,7 @@ class Gateway:
     async def reason(self, request):
         prompt = json.loads(request.prompt)
         self.prompts.append(prompt)
-        if request.purpose == "athba_specification_checklist_split":
+        if request.purpose in {"athba_specification_checklist_split", "athba_specification_checklist_split_repair"}:
             ref = prompt["parent"]["ref"]
             self.split_calls.append(ref)
             response = self.splits.get(ref, {"disposition": "unsplittable", "rationale": "Atomic obligation"})
@@ -157,17 +157,18 @@ async def test_no_then_yes_restart_does_not_repeat_completed_item(fixture, bound
     (split("  RETURN   THE LATEST PAYLOAD ", "Report status"), "child_identical_to_parent"),
     (split("Retain history", "  RETAIN   HISTORY "), "duplicate_children"),
 ])
-async def test_nonprogress_is_durable_unsplittable_without_recursion(fixture, decomposition, reason):
+async def test_nonprogress_is_durable_correction_exhaustion_without_recursion(fixture, decomposition, reason):
     gateway = Gateway(splits={"CHK-1": decomposition})
     result = await run(fixture, gateway)
-    assert result[0]["blocked_reason"] == "specification_gatekeeper_unsplittable"
-    assert result[0]["rejection_reason"] == reason
+    assert result[0]["blocked_reason"] == "specification_split_correction_exhausted"
+    assert result[0]["rejection_reason"] == "invalid_split_response_exhausted"
+    assert result[0]["response_attempts"][-1]["validation_error"] == reason
     assert result[0]["parent_item"]["text"] == "Return the latest payload"
     assert json.loads(result[0]["attempted_split"]) == decomposition
     assert result[0]["split_depth"] == 0 and result[0]["ancestry"] == []
     assert len(result[0]["individual_test_attempts"]) == 3
     assert result[0]["trusted_revision"] == fixture[2][0].semantic_revision
-    assert gateway.split_calls == ["CHK-1"]
+    assert gateway.split_calls == ["CHK-1", "CHK-1"]
     assert len(gateway.tests) == 3
     before = fixture[1].load("project-1").to_dict()
     replay = Gateway()
@@ -184,9 +185,10 @@ async def test_repeated_ancestor_decomposition_is_blocked_before_loop(fixture, r
     gateway = Gateway(splits={"CHK-1": split(*texts), "CHK-1-S001": split(*repeated)})
     result = await run(fixture, gateway)
     child_result = result[1]
-    assert child_result["rejection_reason"] == "repeated_ancestor_split_structure"
+    assert child_result["rejection_reason"] == "invalid_split_response_exhausted"
+    assert child_result["response_attempts"][-1]["validation_error"] == "repeated_ancestor_split_structure"
     assert child_result["ancestry"] == ["CHK-1"] and child_result["split_depth"] == 1
-    assert len(gateway.split_calls) == 3
+    assert len(gateway.split_calls) == 4
     assert len(gateway.tests) == 9
     assert all("-S001-S" not in ref for ref, _ in gateway.tests)
 
@@ -280,7 +282,8 @@ async def test_repeated_split_ancestry_is_restored_after_restart(fixture):
     resumed = Gateway(splits={"CHK-1-S001-S001": split("  REPORT STATUS ", "retain history")})
     result = await run(fixture, resumed)
     repeated = next(item for item in result if item["checklist_ref"] == "CHK-1-S001-S001")
-    assert repeated["rejection_reason"] == "repeated_ancestor_split_structure"
+    assert repeated["rejection_reason"] == "invalid_split_response_exhausted"
+    assert repeated["response_attempts"][-1]["validation_error"] == "repeated_ancestor_split_structure"
     assert repeated["ancestry"] == ["CHK-1", "CHK-1-S001"]
     assert repeated["split_depth"] == 2
     assert "CHK-1" not in resumed.split_calls and "CHK-1-S001" not in resumed.split_calls

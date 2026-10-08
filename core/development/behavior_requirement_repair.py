@@ -8,6 +8,7 @@ from dataclasses import replace
 from core.development.behavior_requirement_repair_domain import (
     BehaviorRepairBlocker, BehaviorRepairFailure, BehaviorRepairRecord, BehaviorRepairRequest,
 )
+from core.development.source_obligation_semantics import validate_error_authority
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
 
 SEMANTIC_FIELDS = frozenset({
@@ -91,6 +92,13 @@ def validate_response(record: BehaviorRepairRecord) -> BehaviorRepairRecord:
         raise BehaviorRepairFailure(BehaviorRepairBlocker.PROTOCOL_FAILURE, str(error)) from error
     if repaired == record.request.original:
         raise BehaviorRepairFailure(BehaviorRepairBlocker.NO_PROGRESS, "Repair repeats the original semantic fields")
+    source = " ".join(clause.source_quote or clause.text for clause in record.request.source_clauses)
+    try:
+        for claim in (repaired.summary, repaired.observable_outcome, repaired.test_hint,
+                      repaired.error_expectation or ""):
+            validate_error_authority(claim, source)
+    except ValueError as error:
+        raise BehaviorRepairFailure(BehaviorRepairBlocker.PROTOCOL_FAILURE, str(error)) from error
     return replace(record, repaired=repaired, rationale=value["rationale"])
 
 

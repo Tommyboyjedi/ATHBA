@@ -15,8 +15,17 @@ from core.development.python_public_signature import production_signature_findin
 FIXTURE = json.loads((Path(__file__).parent / "fixtures/campaign_shopping_basket.json").read_text())
 
 
+def behavior_only_retained_contract():
+    payload = json.loads(json.dumps(FIXTURE["contract"]))
+    payload["error_semantics"] = []
+    behavior = payload["observable_requirements"][1]
+    behavior["error_expectation"] = None
+    behavior["test_hint"] = "Add a valid item and observe count and total."
+    return payload
+
+
 def test_retained_contract_preserves_signature_even_if_model_omits_public_api():
-    payload = dict(FIXTURE["contract"], public_api=[])
+    payload = dict(behavior_only_retained_contract(), public_api=[])
     contract = BehaviorContract.from_dict(payload)
     signatures = contract.required_signatures
     add = next(item for item in signatures if item.name == "add_item")
@@ -28,7 +37,7 @@ def test_retained_contract_preserves_signature_even_if_model_omits_public_api():
 
 
 def test_model_cannot_replace_authoritative_serialized_signature():
-    payload = BehaviorContract.from_dict(FIXTURE["contract"]).to_dict()
+    payload = BehaviorContract.from_dict(behavior_only_retained_contract()).to_dict()
     payload["required_signatures"][0]["parameters"] = ["item_id", "quantity", "price"]
     with pytest.raises(ValueError, match="source"):
         BehaviorContract.from_dict(payload)
@@ -127,7 +136,8 @@ async def test_source_deduction_omission_uses_existing_single_repair():
         async def reason(self, request):
             requests.append(request)
             text = "Add one item." if len(requests) == 1 else "Calling add_item(name, price) adds one item."
-            return ReasoningResult(json.dumps({"clauses": [{"ref": "source", "text": text, "kind": "behavior", "evidence_kind": "test"}]}))
+            return ReasoningResult(json.dumps({"clauses": [{"ref": "source", "text": text, "kind": "behavior", "evidence_kind": "test",
+                "source_quote": "Calling add_item(name, price) adds an item.", "subject": "add_item(name, price)"}]}))
     result = await RequirementClausePlanner(Gateway()).plan_clauses(
         project_id="project", requirement_text="Provide a Basket class. Calling add_item(name, price) adds an item.")
     assert len(requests) == 2
