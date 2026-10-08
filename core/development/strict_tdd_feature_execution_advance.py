@@ -157,6 +157,11 @@ def _scenario_draft_request(
         source_evidence,
         _semantic_annotations(executor, request, language_id, source_evidence),
         draft_artifact_path=artifact,
+        candidate_interface_facts=tuple(
+            SemanticApiAnnotation(signature.name, "invoke",
+                signature.name + "(" + ",".join(f"arg{index}" for index in range(len(signature.parameters))) + ")",
+                None, signature.owner, len(signature.parameters))
+            for signature in getattr(request.contract, "required_signatures", ())),
     )
 
 
@@ -190,7 +195,10 @@ def _semantic_annotations(
                          if signature.name == annotation.symbol)
         if len(selected) == 1:
             annotation = replace(annotation, receiver_owner=selected[0].owner,
-                                 argument_count=len(selected[0].parameters))
+                                 argument_count=len(selected[0].parameters),
+                                 interaction=SemanticInteraction.INVOKE.value,
+                                 source_expression=(annotation.source_expression if annotation.interaction == SemanticInteraction.INVOKE.value
+                                    else selected[0].name + "(" + ",".join(f"arg{index}" for index in range(len(selected[0].parameters))) + ")"))
         annotations.append(annotation)
     return tuple(annotations)
 

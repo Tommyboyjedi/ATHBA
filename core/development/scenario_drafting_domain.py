@@ -186,6 +186,7 @@ class ScenarioCandidateAssessmentRequest:
     production_path: str
     contract: ScenarioAuthoringContract
     semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
+    candidate_interface_facts: tuple[SemanticApiAnnotation, ...] = ()
 
 class ScenarioDraftStatus(str, Enum):
     DRAFTING = "drafting"
@@ -287,6 +288,7 @@ class ScenarioDraftRequest:
     semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
     required_signatures: tuple[RequiredPublicSignature, ...] = ()
     draft_artifact_path: str | None = None
+    candidate_interface_facts: tuple[SemanticApiAnnotation, ...] = ()
 
     @property
     def authoring_path(self) -> str:
@@ -314,6 +316,8 @@ class ScenarioDraftRequest:
             evidence_refs = tuple(item.ref for item in self.source_requirement_evidence)
             if evidence_refs != self.source_requirement_refs:
                 raise ValueError("source requirement evidence must match source requirement refs")
+        if any(not isinstance(item, SemanticApiAnnotation) for item in self.candidate_interface_facts):
+            raise ValueError("candidate interface facts must be typed")
         if any(not isinstance(item, SemanticApiAnnotation) for item in self.semantic_annotations):
             raise ValueError("scenario draft semantic annotations must be typed")
 
@@ -439,6 +443,7 @@ class ScenarioDraftRunState:
     harness_failure_evidence: ScenarioHarnessFailureEvidence | None = None
     semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
     draft_artifact_path: str | None = None
+    candidate_interface_facts: tuple[SemanticApiAnnotation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.draft_artifact_path is not None and self.draft_artifact_path != draft_artifact_path(self.scenario_id, self.allowed_test_path):
@@ -462,6 +467,8 @@ class ScenarioDraftRunState:
             raise ValueError("approved scenario state must have approved status")
         if len(self.attempts) > MAX_TESTER_SCENARIO_ATTEMPTS:
             raise ValueError("scenario draft attempt cap exceeded")
+        if any(not isinstance(item, SemanticApiAnnotation) for item in self.candidate_interface_facts):
+            raise ValueError("candidate interface facts must be typed")
         if any(not isinstance(item, SemanticApiAnnotation) for item in self.semantic_annotations):
             raise ValueError("scenario draft semantic annotations must be typed")
 
@@ -481,6 +488,7 @@ class ScenarioDraftRunState:
             "project_synchronised": self.project_synchronised,
             "harness_failure_evidence": None if self.harness_failure_evidence is None else self.harness_failure_evidence.to_dict(),
             "semantic_annotations": [item.to_dict() for item in self.semantic_annotations],
+            "candidate_interface_facts": [item.to_dict() for item in self.candidate_interface_facts],
         }
 
     @classmethod
@@ -498,6 +506,7 @@ class ScenarioDraftRunState:
             development_base_revision=str(value["development_base_revision"]),
             attempts=tuple(ScenarioDraftAttempt.from_dict(dict(item)) for item in value.get("attempts", ())),
             semantic_annotations=tuple(SemanticApiAnnotation.from_dict(dict(item)) for item in value.get("semantic_annotations", ())),
+            candidate_interface_facts=tuple(SemanticApiAnnotation.from_dict(dict(item)) for item in value.get("candidate_interface_facts", ())),
             approved_microcycle=None if approved is None else MicrocycleState.from_dict(dict(approved)),
             status=str(value.get("status", ScenarioDraftStatus.DRAFTING.value)),
             project_synchronised=bool(value.get("project_synchronised", False)),
