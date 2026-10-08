@@ -382,6 +382,7 @@ def _reconciliation_prompt(
                 "select only tests with final_revision_verified=true",
                 "do not infer semantics merely from requirement references or test names",
                 "never invent a test identifier",
+                "reconcile observable behavior independently; equivalent lexical identifier differences belong to post-behavior Naming, not a behavioral rejection",
                 "do not use production code, review, mechanical checks, or assumptions as evidence",
             ],
         },

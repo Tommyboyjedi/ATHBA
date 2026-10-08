@@ -512,7 +512,7 @@ async def test_naming_prompt_limits_mismatch_to_missing_required_identifier(loca
     instruction = calls[0].prompt.rsplit("\n", 1)[0]
     assert "A naming mismatch exists only when an explicitly required identifier is absent" in instruction
     assert "and the same public/product concept is implemented under a different identifier" in instruction
-    assert "If the required identifier already exists in production, answer NO." in instruction
+    assert "If every required identifier exists in its required declaration, answer NO." in instruction
     assert "Do not suggest removal of aliases or duplicate helpers" in instruction
     assert "syntax changes, API-shape changes, style improvements, general cleanup or refactoring" in instruction
 

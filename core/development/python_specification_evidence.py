@@ -32,7 +32,7 @@ class PythonSpecificationEvidenceAdapter:
         if not snapshot.complete or any(PurePosixPath(file.path).suffix in FOREIGN_SOURCE_SUFFIXES for file in snapshot.files):
             return ("required public signature has incomplete/unsupported source boundary",)
         source = "\n".join(file.source for file in snapshot.files if production_python(file))
-        return self.verify_public_signatures(SignatureInspection(source, signatures, complete=True))
+        return self.verify_public_signatures(SignatureInspection(source, signatures, complete=False))
 
     def verify(self, decision: EvidenceDecision, snapshot: SpecificationSnapshot) -> EvidenceResult:
         try:

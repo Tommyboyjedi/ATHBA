@@ -146,11 +146,7 @@ def _ticket_for(request: FeatureScenarioRequest) -> TddStepProposal:
 
 
 def _facts(root: Path, revision: str, ticket: TddStepProposal) -> ScenarioRepositoryFacts:
-    paths = tuple(_git(root, "ls-tree", "-r", "--name-only", revision).splitlines())
-    return ScenarioRepositoryFacts(
-        revision, paths, _show(root, revision, ticket.production_path),
-        _show(root, revision, ticket.test_path),
-    )
+    return ScenarioRepositoryFacts(revision, (ticket.production_path, ticket.test_path), "", "")
 
 
 def _git(root: Path, *args: str) -> str:

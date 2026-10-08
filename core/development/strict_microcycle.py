@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from core.development.required_public_signature import RequiredPublicSignature
-from core.development.signature_candidate_validation import SignatureCandidateContext, validate_signature_candidate
 
 import json
 import shutil
@@ -155,14 +154,10 @@ class DeveloperFrontierWorkUnitFactory:
         identifier = f"{request.artifact.scenario_id}--frontier-{request.artifact.frontier_index}--developer-{request.attempt_number}"
         objective = json.dumps(
             {
-                "role": "Developer",
-                "task": "Make this active frontier pass using the smallest production change required.",
+                "task": "Make this accepted RED pass by changing permitted production code only. Do not modify tests.",
                 "materialised_active_frontier_test": request.artifact.complete_source,
-                "boundary_diagnostic": request.assessment.diagnostic.to_dict(),
+                "boundary_diagnostic": _developer_diagnostic(request),
                 "production_path": request.production_path,
-                "required_signatures": [item.to_dict() for item in request.required_signatures],
-                "accepted_red_revision": request.accepted_red_revision,
-                "development_base_context": request.development_base_revision,
             },
             sort_keys=True,
         )
@@ -204,7 +199,6 @@ class RegressionRepairWorkUnitFactory:
             "current_frontier_test": request.artifact.complete_source,
             "newly_failing_prior_tests": failing_nodes,
             "production_path": request.production_path,
-                "required_signatures": [item.to_dict() for item in request.required_signatures],
         }, sort_keys=True)
         commands = [[sys.executable, "-m", "pytest", "-q", request.artifact.canonical_test_identity]]
         commands.extend([[sys.executable, "-m", "pytest", "-q", node] for node in failing_nodes])
@@ -310,7 +304,6 @@ class RegressionRepairService:
             state.scenario_draft.required_signatures,
         )
         result = await self.gateway.execute(self.factory.build(packet, failing), _working_binding(request, base))
-        result = validate_signature_candidate(SignatureCandidateContext(request.repository_root, request.production_path, state.scenario_draft.required_signatures, state.model.language_id), result)
         updated = replace(
             state,
             retry_counts=replace(state.retry_counts, regression=state.retry_counts.regression + 1),
@@ -482,7 +475,6 @@ class StrictMicrocycleService:
         result = await self.gateway.execute(work_unit, _working_binding(request, red))
         if result.work_unit_id != work_unit.id:
             raise ValueError("stale Rack AI packet does not match the active Developer frontier")
-        result = validate_signature_candidate(SignatureCandidateContext(request.repository_root, request.production_path, state.scenario_draft.required_signatures, state.model.language_id), result)
         state = _record_developer(state, red, result)
         if result.accepted and result.accepted_revision is not None:
             _advance_working_revision(request, result.accepted_revision, RevisionTransitionKind.DEVELOPER_CANDIDATE_ACCEPTED.value, result.evidence_location)
@@ -733,3 +725,12 @@ def _complete_revision_lifecycle(request: StrictMicrocycleRequest, state: Microc
     if current.canonical_development_base != state.development_base_revision:
         raise ValueError("strict microcycle completion diverged from canonical revision lifecycle")
     request.revision_lifecycle.complete(RevisionCompletionRequest(current, state.regression.evidence_refs))
+
+def _developer_diagnostic(request: DeveloperFrontierRequest) -> dict[str, object]:
+    diagnostic = request.assessment.diagnostic
+    return {
+        "kind": diagnostic.kind,
+        "message": diagnostic.message,
+        "facts": [{"name": item.name, "value": item.value}
+                  for item in diagnostic.facts if item.name in {"exception_type", "source_line"}],
+    }

@@ -1,8 +1,7 @@
 """Session 4 bounded scenario drafting; it deliberately does not run microcycles."""
 from __future__ import annotations
 
-from core.development.required_public_signature import RequiredPublicSignature, SignatureInspection
-from core.development.public_signature_validation import scenario_signature_findings
+from core.development.required_public_signature import RequiredPublicSignature
 
 import json
 from hashlib import sha256
@@ -600,9 +599,7 @@ def _validate_resume(state: ScenarioDraftRunState, request: ScenarioDraftRequest
     )
     if any(left != right for left, right in immutable):
         raise ValueError("stale scenario draft state must not be reused after ticket, source, or base changes")
-    if (state.approved_microcycle is not None
-            and state.approved_microcycle.scenario_draft.required_signatures != request.required_signatures):
-        raise ValueError("approved scenario signature authority differs from the source contract")
+
 
 
 def _attempt(
@@ -710,9 +707,6 @@ def _prepare_candidate(
     if not callable(assessor):
         raise ValueError("language adapter does not implement scenario candidate assessment")
     assessment = assessor(ScenarioCandidateAssessmentRequest(provisional, request.ticket.production_path, _authoring_contract(request)))
-    signature_issues = tuple(ScenarioCandidateIssue("required_public_signature_mismatch", finding)
-                             for finding in scenario_signature_findings(SignatureInspection(source, request.required_signatures), request.language_id)) if assessment.syntax_valid else ()
-    assessment = replace(assessment, issues=(*assessment.issues, *signature_issues))
     if not assessment.accepted:
         return ScenarioCandidatePreparation(provisional, assessment, None, None)
     analysis = adapter.analyse_candidate(provisional, request.ticket.production_path)
@@ -804,9 +798,11 @@ def _authoring_contract(request: ScenarioDraftRequest) -> ScenarioAuthoringContr
 
 def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repair: ScenarioDraftAttempt | None) -> str:
     payload: dict[str, object] = {
-        "role": "Tester",
-        "task": "REPAIR MODE. Refactor the existing submitted test candidate. The existing test file is present in your base revision. Make the smallest changes required to resolve the listed violations. Preserve correct behavior already expressed. Do not discard it and invent an unrelated test." if repair else ("Your previous Tester submission produced no candidate source or revision. Submit a new complete scenario from the unchanged development base. Use only tools actually exposed by the execution harness." if feedback and feedback.startswith("Your previous Tester submission") else "Draft one complete behavioral scenario conforming to the supplied strict authoring contract."),
-        "repair_mode": "repair_previous_candidate" if repair else ("fresh_retry_after_no_candidate" if feedback and feedback.startswith("Your previous Tester submission") else "fresh_draft"),
+        "task": (
+            "Repair only your previous test candidate using the feedback."
+            if repair else
+            "Write one complete test demonstrating this behavior. Missing production capability is expected RED; do not fix production."
+        ),
         "authoring_contract": _authoring_contract(request).to_dict(),
         "ticket": {
             "id": request.ticket.step_id,
@@ -816,53 +812,19 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
         },
         "source_requirement_refs": list(request.source_requirement_refs),
         "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
-        "required_signatures": [item.to_dict() for item in request.required_signatures],
-        "language": request.language_id,
-        "test_framework": request.test_framework,
         "allowed_test_path": request.allowed_test_path,
         "repository_facts": {
-            "trusted_revision": request.repository_facts.trusted_revision,
-            "visible_paths": list(request.repository_facts.visible_paths),
-            "production_excerpt": request.repository_facts.production_excerpt,
-            "test_excerpt": request.repository_facts.test_excerpt,
+            "production_path": request.ticket.production_path,
+            "visible_paths": [request.ticket.production_path, request.allowed_test_path],
         },
-        "development_base": request.development_base_revision,
-        "repair_feedback": feedback,
-        "requirements": [
-            "edit only the allowed test path",
-            "do not edit production code",
-            "write one complete syntactically valid scenario",
-            "do not include a module docstring, test-function docstring, or standalone string-expression statement",
-            "exercise the declared production path without a substitute implementation or behavior mock",
-            "do not skip, xfail, or evade a missing production capability",
-            "do not materialise a frontier or start implementation",
-        ],
     }
-    if repair is not None and request.repository_facts.test_excerpt == repair.candidate_source:
-        facts: dict[str, object] = {
-            "trusted_revision": request.repository_facts.trusted_revision,
-            "visible_paths": list(request.repository_facts.visible_paths),
-            "production_excerpt": request.repository_facts.production_excerpt,
-            "test_excerpt": request.repository_facts.test_excerpt,
-        }
-        facts["test_excerpt"] = "Same source retained in previous_candidate.source"
-        payload["repository_facts"] = facts
     if request.semantic_annotations:
-        payload["semantic_annotations"] = [
-            item.to_dict() for item in request.semantic_annotations
-        ]
+        payload["semantic_annotations"] = [item.to_dict() for item in request.semantic_annotations]
+    if feedback:
+        payload["repair_feedback"] = feedback
     if repair is not None:
-        payload["previous_candidate"] = {
-            "attempt": repair.attempt_number,
-            "ref": _candidate_git_operand(repair),
-            "sha": repair.candidate_revision,
-            "source": repair.candidate_source,
-            "assessment": None if repair.candidate_assessment is None else repair.candidate_assessment.to_dict(),
-            "deterministic_feedback": ("Same feedback retained in repair_feedback" if repair.feedback == feedback else repair.feedback),
-            "intent_feedback": None if repair.intent is None else repair.intent.rationale,
-        }
+        payload["previous_candidate"] = {"source": repair.candidate_source}
     return json.dumps(payload, sort_keys=True)
-
 
 
 def _last_candidate_attempt(state: ScenarioDraftRunState) -> ScenarioDraftAttempt | None:
@@ -969,7 +931,7 @@ def _repair_binding(
 
 def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:
     payload = {
-        "question": "Does this complete scenario, if eventually GREEN, demonstrate the requested Behavior Planner ticket?",
+        "question": "Does this complete scenario, if eventually GREEN, demonstrate the selected observable behavior? Equivalent lexical identifier differences reconcile later in Naming; do not reject solely for spelling.",
         "behavior_ticket": {
             "id": request.behavior_ref,
             "behavior": request.behavior_summary,
@@ -977,7 +939,6 @@ def _intent_prompt(request: ScenarioIntentReviewRequest) -> str:
         },
         "source_requirement_refs": list(request.source_requirement_refs),
         "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
-        "required_signatures": [item.to_dict() for item in request.required_signatures],
         "complete_scenario_source": request.complete_scenario_source,
         "static_scenario_facts": {
             "canonical_test_identity": request.canonical_test_identity,

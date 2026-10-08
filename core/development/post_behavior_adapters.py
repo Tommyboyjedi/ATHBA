@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 import re
 
 from core.development.athba_workspace_routing import AthbaWorkspaceIdentity
+from core.development.required_public_signature import required_signatures
 from core.development.post_behavior_assessment import (
     NamingAssessor, NamingAssessmentInput, NamingMaterial, NamingDecision, RefactorAssessor,
 )
@@ -91,7 +92,14 @@ def focused_naming_material(delivery: AcceptedBehavioralDelivery) -> NamingMater
                 clauses.append(sentence)
                 for identifier in identifiers:
                     names.update(identifier.split("."))
-    return NamingMaterial("\n".join((*declarations, *clauses)), tuple(sorted(names)))
+    signatures = required_signatures(getattr(delivery.contract, "requirement_source", ""))
+    for signature in signatures:
+        names.update(signature.parameters)
+        names.add(signature.name)
+        if signature.owner:
+            names.add(signature.owner)
+    return NamingMaterial("\n".join((*declarations, *clauses, *(item.source_quote for item in signatures))),
+                          tuple(sorted(names)), signatures)
 
 
 @dataclass(frozen=True)

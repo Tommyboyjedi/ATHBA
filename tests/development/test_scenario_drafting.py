@@ -379,7 +379,7 @@ async def test_approved_catalog_scenario_is_frozen_from_isolated_candidate_witho
     assert state.attempts[0].candidate_revision == "b" * 40
     assert gateway.calls[0][1].base_sha == "a" * 40
     unit = gateway.calls[0][0]
-    assert "frontier" in unit.objective
+    assert "Missing production capability is expected RED" in unit.objective
     assert len(reader.calls) == 1
     prompt = reasoning.requests[0].prompt
     assert "production_path" not in prompt
@@ -742,9 +742,9 @@ async def test_repair_uses_verified_previous_candidate_ref_sha_source_and_struct
     assert second.submitted_attempt
     assert repair_binding.base_ref == "m" * 40
     assert repair_binding.base_sha == "m" * 40
-    assert objective["repair_mode"] == "repair_previous_candidate"
+    assert objective["task"].startswith("Repair only your previous test candidate")
     assert objective["previous_candidate"]["source"] == invalid
-    assert objective["previous_candidate"]["assessment"]["issues"]
+    assert objective["repair_feedback"] == attempt.candidate_assessment.repair_feedback()
     assert objective["authoring_contract"]["required_test_count"] == 1
 
 
@@ -1293,7 +1293,8 @@ async def test_pre_intent_mechanical_failure_is_typed_durable_and_feeds_repair(s
     await service.submit_candidate(request("catalog"), binding())
     payload = json.loads(gateway.calls[1][0].objective)
     assert payload["repair_feedback"] == attempt.feedback
-    assert payload["previous_candidate"]["assessment"] == json.loads(json.dumps(attempt.candidate_assessment.to_dict()))
+    assert set(payload["previous_candidate"]) == {"source"}
+    assert persisted.attempts[0].candidate_assessment == attempt.candidate_assessment
     assert payload["previous_candidate"]["source"] == source
     assert gateway.calls[1][1].base_sha == "b" * 40
     repaired = await service.review_intent(request("catalog"))
@@ -1326,7 +1327,7 @@ async def test_pre_intent_semantic_rejection_has_no_frontier_and_remains_repaira
     service.state_store.save(ScenarioDraftRunState.from_dict(rejected.state.to_dict()))
     await service.submit_candidate(request("catalog"), binding())
     payload = json.loads(gateway.calls[1][0].objective)
-    assert payload["previous_candidate"]["intent_feedback"] == feedback
+    assert "intent_feedback" not in payload["previous_candidate"]
     assert payload["repair_feedback"] == feedback
     repaired = await service.review_intent(request("catalog"))
     assert repaired.approved
@@ -1459,5 +1460,5 @@ def test_identical_repair_source_context_is_sent_once():
                                    candidate_source=candidate)
     packet = json.loads(_tester_objective(value, "repair feedback", attempt))
     assert packet["previous_candidate"]["source"] == candidate
-    assert packet["repository_facts"]["test_excerpt"] == "Same source retained in previous_candidate.source"
+    assert "test_excerpt" not in packet["repository_facts"]
     assert json.dumps(packet).count("def test_value") == 100

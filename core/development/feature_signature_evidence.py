@@ -25,6 +25,6 @@ def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id
         "checklist_ref": "source-required-public-signatures", "answer": "NO" if findings else "YES",
         "accepted_test_names": [], "evidence_policy": "source_public_signature",
         "revision": snapshot.revision, "findings": findings,
-        "rationale": "Exact source-required public parameter shape checked at the canonical revision.",
+        "rationale": "Existing source-bound call shapes checked at the canonical revision; lexical identifiers reconcile in Naming.",
         "required_signatures": [item.to_dict() for item in signatures],
     }

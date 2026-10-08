@@ -16,6 +16,7 @@ from core.development.specification_revision_snapshot import production_python
 class DeclarationKind(str, Enum):
     SYMBOL = "symbol"
     FIELD = "field"
+    PARAMETER = "parameter"
 
 
 class BindingKind(str, Enum):
@@ -34,6 +35,7 @@ class RenameTarget:
     replacement: str
     declaration_line: int
     kind: DeclarationKind = DeclarationKind.SYMBOL
+    operation: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class PythonDeclaration:
     name: str
     node: ast.AST
     kind: DeclarationKind = DeclarationKind.SYMBOL
+    operation: str = ""
 
 
 def select_target(request: RenameSelection) -> RenameTarget:
@@ -111,11 +114,12 @@ def _declaration_target(file: RevisionFile, selection: tuple[PythonDeclaration, 
     declaration, required_name = selection
     node = declaration.node
     return RenameTarget(file.path, module_name(file.path), declaration.owner, declaration.name,
-                        required_name, getattr(node, "lineno", start_line(node)), declaration.kind)
+                        required_name, getattr(node, "lineno", start_line(node)), declaration.kind, declaration.operation)
 
 
 def _require_available_name(target: RenameTarget, available: tuple[PythonDeclaration, ...]) -> None:
-    if any(item.owner == target.owner and item.name == target.replacement for item in available):
+    if any(item.owner == target.owner and item.operation == target.operation
+           and item.name == target.replacement for item in available):
         raise ValueError("required identifier already exists in the target scope")
 
 
@@ -138,6 +142,11 @@ def declarations(body: list[ast.stmt], owner: str = "") -> tuple[PythonDeclarati
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             result.append(PythonDeclaration(owner, node.name, node))
+            if isinstance(node, ast.FunctionDef):
+                arguments = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
+                parameters = arguments[1:] if owner else arguments
+                result.extend(PythonDeclaration(owner, arg.arg, node, DeclarationKind.PARAMETER, node.name)
+                              for arg in parameters)
         if isinstance(node, ast.ClassDef) and not owner:
             result.extend(declarations(node.body, node.name))
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):
@@ -154,8 +163,9 @@ def declarations(body: list[ast.stmt], owner: str = "") -> tuple[PythonDeclarati
     return tuple(result)
 
 
-def declared_identifier_names(files: tuple[RevisionFile, ...]) -> tuple[str, ...]:
-    return tuple(sorted({item.name for file in files for item in declarations(ast.parse(file.source).body)}))
+def declared_identifier_names(files: tuple[RevisionFile, ...], include_parameters: bool = False) -> tuple[str, ...]:
+    return tuple(sorted({item.name for file in files for item in declarations(ast.parse(file.source).body)
+                         if include_parameters or item.kind != DeclarationKind.PARAMETER}))
 
 
 def scoped_nodes(body: list[ast.stmt]) -> tuple[ast.AST, ...]:
@@ -175,6 +185,9 @@ class PythonRenameReferences:
     file: RevisionFile
 
     def positions(self) -> frozenset[tuple[int, int]]:
+        if self.target.kind == DeclarationKind.PARAMETER:
+            from core.development.python_parameter_rename import PythonParameterReferences
+            return PythonParameterReferences(self.target, self.file).positions()
         self.tokens = tuple(tokenize.generate_tokens(io.StringIO(self.file.source).readline))
         self.found: set[tuple[int, int]] = set()
         tree = ast.parse(self.file.source)

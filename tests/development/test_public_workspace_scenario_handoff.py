@@ -326,9 +326,8 @@ async def test_branchless_rejected_candidate_repairs_from_persisted_commit(tmp_p
     assert repair_workspace["repository"]["base_ref"] == invalid_revision
     assert repair_workspace["repository"]["base_sha"] == invalid_revision
     objective = json.loads(repair_workspace["objective"])
-    assert objective["repair_mode"] == "repair_previous_candidate"
-    assert objective["previous_candidate"]["ref"] == invalid_revision
-    assert objective["previous_candidate"]["sha"] == invalid_revision
+    assert objective["task"].startswith("Repair only your previous test candidate")
+    assert set(objective["previous_candidate"]) == {"source"}
     assert objective["previous_candidate"]["source"] == _invalid_source()
     assert second.state.attempts[-1].candidate_revision == repaired_revision
     assert second.state.attempts[-1].candidate_branch is None
