@@ -64,3 +64,10 @@ def test_nonrequired_source_declarations_do_not_create_required_naming(quote):
     delivery = SimpleNamespace(contract=SimpleNamespace(
         public_api=(), source_clauses=(clause,), requirement_source=quote))
     assert focused_naming_material(delivery).required_identifiers == ()
+
+
+
+def test_compound_class_and_assurance_is_not_delegated_as_naming_only():
+    quote = "Provide a Ledger class and use no external dependencies"
+    with pytest.raises(ValueError):
+        SourceRequirementClause("S1", quote, "quality", "review", quote, quote, "naming")

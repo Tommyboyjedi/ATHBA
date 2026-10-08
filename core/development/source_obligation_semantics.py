@@ -36,7 +36,8 @@ LEXICAL_NAME = re.compile(r"\b(?:named|identifier|spelling|exact name|required_n
 
 
 def explicit_naming(text: str) -> bool:
-    return bool(LEXICAL_NAME.search(text) or SOURCE_CLASS_NAME.search(text))
+    atomic_class = SOURCE_CLASS_NAME.search(text) and not re.search(r"\band\b|\bor\b|[,;]", text, re.I)
+    return bool(LEXICAL_NAME.search(text) or atomic_class)
 
 
 def explicit_error(text: str) -> bool:
