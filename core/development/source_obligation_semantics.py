@@ -82,7 +82,9 @@ def classification_subject(subject: str, kind: str, quote: str) -> str:
 def validated_type(subject: str, kind: str, supplied: str = "") -> str:
     expected = classify_obligation(subject, kind)
     if supplied and ObligationType(supplied) != expected:
-        raise ValueError("obligation classification disagrees with the source subject/kind")
+        advice = " Caller domains use kind=validation without inventing rejection behavior." if supplied == ObligationType.PRECONDITION.value else ""
+        raise ValueError("obligation classification disagrees with the source subject/kind: "
+                         f"kind={kind}; expected={expected.value}; received={supplied}; source subject={subject!r}.{advice}")
     return expected.value
 
 

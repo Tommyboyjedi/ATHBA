@@ -220,6 +220,10 @@ def _checklist_prompt(*, project_id: str, requirement_text: str) -> str:
 def _atomization_rules() -> list[str]:
     return [
         "one semantic obligation per item",
+        "kind=validation without explicit source rejection uses obligation_type=precondition; with explicit rejection it uses error_behavior",
+        "kind=invariant uses obligation_type=invariant; kind=behavior uses observable_behavior unless explicit source errors require error_behavior",
+        "kind=constraint or kind=quality uses non_persistence_assurance for in-memory/no-persistence authority, naming for explicit lexical authority, and mechanical_assurance for other assurances",
+        "positive persistence across storage/session boundaries is observable_behavior, never absence assurance",
         "validation without explicit rejection/error is a caller precondition; outside-domain behavior is unspecified",
         "do not invent runtime validation, exceptions or rejection from domain constraints",
         "read/nonmutation is an observable invariant proved by repeated public observations; do not require an internal-state proof",
@@ -274,8 +278,27 @@ def _decode_checklist(request: ChecklistAtomizationRequest, response: str) -> Sp
     return SpecificationChecklist(
         project_id=request.project_id,
         requirement_text=request.requirement_text,
-        items=[_grounded_item(dict(item), request.requirement_text) for item in raw_items],
+        items=[item for item in _grounded_items(raw_items, request.requirement_text)],
     )
+
+
+def _grounded_items(raw_items: list[object], source: str) -> list[SpecificationChecklistItem]:
+    """Report every item error to the same bounded corrective submission."""
+    items: list[SpecificationChecklistItem] = []
+    errors: list[str] = []
+    for index, raw in enumerate(raw_items):
+        try:
+            if not isinstance(raw, dict):
+                raise ValueError("checklist item must be a JSON object")
+            items.append(_grounded_item(raw, source))
+        except (ValueError, KeyError, TypeError) as error:
+            ref = raw.get("ref", index) if isinstance(raw, dict) else index
+            errors.append(f"{error} [item {ref}]")
+    if errors:
+        # Preserve the established error prefix for durable routing/diagnostics.
+        raise ValueError("\nAdditional invalid items:\n".join((errors[0], "\n".join(errors[1:])))
+                         if len(errors) > 1 else errors[0])
+    return items
 
 
 def _json_object(text: str, *, label: str) -> dict[str, object]:
