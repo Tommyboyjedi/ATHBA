@@ -1,3 +1,4 @@
+from core.development.strict_tdd_execution_budget import StrictTddWorkKind
 import json
 import shutil
 import subprocess
@@ -87,8 +88,8 @@ class GitGateway:
         worktree.rmdir()
         run(self.root, "worktree", "add", "--detach", str(worktree), binding.base_sha)
         try:
-            if any(path.startswith("tests/") for path in unit.allowed_paths):
-                target = worktree / "tests" / "test_B_1.py"
+            if unit.work_kind in {StrictTddWorkKind.SCENARIO_DRAFT, StrictTddWorkKind.SCENARIO_REPAIR}:
+                target = worktree / unit.allowed_paths[0]
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(
                     "# ATHBA-SCENARIO-RATIONALE: visible module value\n"

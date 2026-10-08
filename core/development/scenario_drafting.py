@@ -1,6 +1,7 @@
 """Session 4 bounded scenario drafting; it deliberately does not run microcycles."""
 from __future__ import annotations
 
+from core.development.tester_artifact import selected_source_payload
 from core.development.required_public_signature import RequiredPublicSignature
 
 import json
@@ -173,10 +174,10 @@ class ScenarioDraftWorkUnitFactory:
             project_id=draft.ticket.step_id,
             parent_ticket_id=draft.ticket.step_id,
             objective=_tester_objective(draft, request.feedback, request.repair_attempt),
-            allowed_paths=[draft.allowed_test_path],
+            allowed_paths=[draft.authoring_path],
             acceptance=AcceptanceContract(
-                commands=[[self.python_executable, "-B", "-m", "py_compile", draft.allowed_test_path]],
-                required_artifacts=[draft.allowed_test_path],
+                commands=[[self.python_executable, "-B", "-m", "py_compile", draft.authoring_path]],
+                required_artifacts=[draft.authoring_path],
             ),
             max_implementation_attempts=1,
             timeout_seconds=self.budget_policy.timeout_for(work_kind),
@@ -339,8 +340,8 @@ class ScenarioDraftingService:
             raise ValueError("scenario intent review requires an unreviewed accepted draft")
         source = None
         try:
-            _safe_test_path(request.allowed_test_path)
-            source = self.source_reader.read(attempt.candidate_revision, request.allowed_test_path)
+            _safe_test_path(request.authoring_path)
+            source = self.source_reader.read(attempt.candidate_revision, request.authoring_path)
             prepared = _prepare_candidate(request, attempt, source, self.adapter_catalog)
         except (SyntaxError, ValueError) as error:
             outcome = _candidate_failure(ScenarioCandidateFailureRequest(state, attempt, source, str(error)))
@@ -517,7 +518,7 @@ def _record_submission(
         return _append_attempt(state, path_failure)
     if state.attempts and attempt.candidate_revision is not None:
         try:
-            returned_source = source_reader.read(attempt.candidate_revision, record.request.allowed_test_path)
+            returned_source = source_reader.read(attempt.candidate_revision, record.request.authoring_path)
         except ValueError:
             returned_source = None
         attempt = replace(attempt, candidate_source=returned_source)
@@ -544,7 +545,7 @@ def _path_violation_attempt(
     evidence = record.result.policy_evidence
     if evidence is None:
         return None
-    outside = tuple(path for path in evidence.changed_paths if path != record.request.allowed_test_path)
+    outside = tuple(path for path in evidence.changed_paths if path != record.request.authoring_path)
     if not outside:
         return None
     detail = f"Candidate edits outside the permitted test path: {', '.join(outside)}. Submit only the permitted test artifact."
@@ -582,6 +583,7 @@ def _initial_state(request: ScenarioDraftRequest) -> ScenarioDraftRunState:
         language_id=request.language_id,
         test_framework=request.test_framework,
         allowed_test_path=request.allowed_test_path,
+        draft_artifact_path=request.draft_artifact_path,
         development_base_revision=request.development_base_revision,
         semantic_annotations=request.semantic_annotations,
     )
@@ -594,6 +596,7 @@ def _validate_resume(state: ScenarioDraftRunState, request: ScenarioDraftRequest
         (state.language_id, request.language_id),
         (state.test_framework, request.test_framework),
         (state.allowed_test_path, request.allowed_test_path),
+        (state.draft_artifact_path, request.draft_artifact_path),
         (state.development_base_revision, request.development_base_revision),
         (state.semantic_annotations, request.semantic_annotations),
     )
@@ -802,7 +805,7 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
         "task": (
             "Repair only your previous test candidate using the feedback."
             if repair else
-            "Write one complete test demonstrating this behavior. Missing production capability is expected RED; do not fix production."
+            "Write one standalone test draft demonstrating this behavior, using public imports/interfaces. Missing production capability is expected RED; do not fix production."
         ),
         "authoring_contract": _authoring_contract(request).to_dict(),
         "ticket": {
@@ -812,11 +815,11 @@ def _tester_objective(request: ScenarioDraftRequest, feedback: str | None, repai
             "planned_canonical_test_identity": request.ticket.test_name,
         },
         "source_requirement_refs": list(request.source_requirement_refs),
-        "source_requirements": [item.to_dict() for item in request.source_requirement_evidence],
-        "allowed_test_path": request.allowed_test_path,
+        "source_requirements": [selected_source_payload(item) for item in request.source_requirement_evidence],
+        "allowed_test_path": request.authoring_path,
         "repository_facts": {
             "production_path": request.ticket.production_path,
-            "visible_paths": [request.ticket.production_path, request.allowed_test_path],
+            "visible_paths": [request.ticket.production_path, request.authoring_path],
         },
     }
     if any(item.obligation_type == "precondition" for item in request.source_requirement_evidence):

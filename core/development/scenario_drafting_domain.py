@@ -1,6 +1,7 @@
 """Persistent records for bounded Tester scenario drafting."""
 from __future__ import annotations
 
+from core.development.tester_artifact import draft_artifact_path
 from core.development.required_public_signature import RequiredPublicSignature
 
 from dataclasses import asdict, dataclass
@@ -285,6 +286,11 @@ class ScenarioDraftRequest:
     source_requirement_evidence: tuple[SourceRequirementClause, ...] = ()
     semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
     required_signatures: tuple[RequiredPublicSignature, ...] = ()
+    draft_artifact_path: str | None = None
+
+    @property
+    def authoring_path(self) -> str:
+        return self.draft_artifact_path or self.allowed_test_path
 
     def __post_init__(self) -> None:
         values = (
@@ -298,6 +304,8 @@ class ScenarioDraftRequest:
             raise ValueError("scenario draft request fields must be non-empty")
         if not self.source_requirement_refs or any(not value.strip() for value in self.source_requirement_refs):
             raise ValueError("scenario draft request requires source requirement refs")
+        if self.draft_artifact_path is not None and self.draft_artifact_path != draft_artifact_path(self.scenario_id, self.allowed_test_path):
+            raise ValueError("scenario draft artifact must be scoped to its scenario identity")
         if self.allowed_test_path != self.ticket.test_path:
             raise ValueError("scenario draft path must match the behavior ticket")
         if self.repository_facts.trusted_revision != self.development_base_revision:
@@ -430,8 +438,11 @@ class ScenarioDraftRunState:
     project_synchronised: bool = False
     harness_failure_evidence: ScenarioHarnessFailureEvidence | None = None
     semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
+    draft_artifact_path: str | None = None
 
     def __post_init__(self) -> None:
+        if self.draft_artifact_path is not None and self.draft_artifact_path != draft_artifact_path(self.scenario_id, self.allowed_test_path):
+            raise ValueError("persisted draft artifact belongs to another scenario")
         values = (
             self.scenario_id,
             self.behavior_ref,
@@ -462,6 +473,7 @@ class ScenarioDraftRunState:
             "language_id": self.language_id,
             "test_framework": self.test_framework,
             "allowed_test_path": self.allowed_test_path,
+            "draft_artifact_path": self.draft_artifact_path,
             "development_base_revision": self.development_base_revision,
             "attempts": [item.to_dict() for item in self.attempts],
             "approved_microcycle": None if self.approved_microcycle is None else self.approved_microcycle.to_dict(),
@@ -482,6 +494,7 @@ class ScenarioDraftRunState:
             language_id=str(value["language_id"]),
             test_framework=str(value["test_framework"]),
             allowed_test_path=str(value["allowed_test_path"]),
+            draft_artifact_path=value.get("draft_artifact_path"),
             development_base_revision=str(value["development_base_revision"]),
             attempts=tuple(ScenarioDraftAttempt.from_dict(dict(item)) for item in value.get("attempts", ())),
             semantic_annotations=tuple(SemanticApiAnnotation.from_dict(dict(item)) for item in value.get("semantic_annotations", ())),
