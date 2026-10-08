@@ -48,7 +48,8 @@ class GitGateway:
     def __init__(self, root, log): self.root, self.log, self.call_count = root, log, 0
     async def execute(self, unit, binding):
         self.call_count += 1
-        objective, role = json.loads(unit.objective), json.loads(unit.objective)["role"]
+        objective = json.loads(unit.objective)
+        role = "Tester" if unit.allowed_paths == ["tests/test_toggle_switch.py"] else "Developer"
         self.log.append((role, unit.id, tuple(unit.allowed_paths), binding.base_ref, binding.base_sha, objective))
         assert binding.base_sha and binding.base_ref
         assert unit.allowed_paths == (["tests/test_toggle_switch.py"] if role == "Tester" else ["toggle_switch.py"])

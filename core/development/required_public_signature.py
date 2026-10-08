@@ -21,7 +21,7 @@ class RequiredPublicSignature:
     source_quote: str
 
     def to_dict(self) -> dict[str, object]:
-        return asdict(self)
+        return {**asdict(self), "parameters": list(self.parameters)}
 
     @classmethod
     def from_dict(cls, value: dict) -> RequiredPublicSignature:

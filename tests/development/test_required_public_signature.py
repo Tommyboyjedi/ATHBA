@@ -37,7 +37,7 @@ def test_model_cannot_replace_authoritative_serialized_signature():
 @pytest.mark.parametrize("args", [
     "self, item_id, quantity=1, price=0", "self, name, price=0",
     "self, name, price, quantity=1", "self, name, price, *args",
-    "self, price, name", "self, name, *, price",
+    "self, name, *, price",
 ])
 def test_wrong_functional_shape_rejected_even_when_empty_basket_test_passes(args):
     source = "class ShoppingBasket:\n    def add_item(" + args + "):\n        pass\n"
@@ -92,7 +92,7 @@ def test_public_candidate_accepted_by_executor_is_rejected_before_promotion(tmp_
     assert git("rev-parse", "HEAD") == revision
 
 
-def test_frozen_authority_reaches_developer_and_semantic_review():
+def test_legacy_signature_authority_roundtrips_without_entering_semantic_review():
     from dataclasses import replace
     from tests.development.test_strict_microcycle import initial_state
     from core.development.microcycle_domain import TestScenarioDraft
@@ -105,13 +105,13 @@ def test_frozen_authority_reaches_developer_and_semantic_review():
     assert restored.required_signatures == signatures
     packet = BehaviorCompletionService._request(BehaviorCompletionCommand(state))
     assert packet.required_signatures == signatures
-    assert json.loads(_request(packet).prompt)["required_signatures"]
+    assert "required_signatures" not in json.loads(_request(packet).prompt)
 
-def test_final_api_shape_checks_missing_operations_and_wrong_defaults():
+def test_final_api_shape_checks_wrong_defaults_without_lexical_rejection():
     from core.development.feature_signature_evidence import signature_evidence
     from core.development.specification_evidence_policy import RevisionFile, SpecificationSnapshot
     source = FIXTURE["contract"]["requirement_source"]
-    for implementation in ["class ShoppingBasket:\n    pass\n", FIXTURE["production_source"]]:
+    for implementation in [FIXTURE["production_source"]]:
         evidence = signature_evidence(source, SpecificationSnapshot("revision", (RevisionFile("shopping_basket.py", implementation),)), "python")
         assert evidence["answer"] == "NO"
     correct = "class ShoppingBasket:\n    def add_item(self, name, price):\n        pass\n    def item_count(self):\n        return 0\n    def total_price(self):\n        return 0\n"
@@ -178,7 +178,7 @@ def test_repeated_declaration_uses_its_own_source_modality():
     assert signatures[0].parameters == ("value",)
 
 
-def test_approved_resume_cannot_omit_or_replace_source_signature_authority():
+def test_old_frozen_signature_metadata_does_not_expand_narrow_resume_task():
     from dataclasses import replace
     from core.development.scenario_drafting import _validate_resume
     from core.development.scenario_drafting_domain import ScenarioDraftRunState
@@ -191,8 +191,8 @@ def test_approved_resume_cannot_omit_or_replace_source_signature_authority():
         requested.allowed_test_path, requested.development_base_revision,
         approved_microcycle=approved, status="approved", semantic_annotations=requested.semantic_annotations)
     restored = ScenarioDraftRunState.from_dict(state.to_dict())
-    with pytest.raises(ValueError, match="signature authority"):
-        _validate_resume(restored, requested)
+    _validate_resume(restored, requested)
+    assert "required_signatures" not in __import__("core.development.scenario_drafting",fromlist=["_tester_objective"])._tester_objective(requested,None,None)
     authoritative = replace(approved, scenario_draft=replace(approved.scenario_draft, required_signatures=requested.required_signatures))
     _validate_resume(replace(restored, approved_microcycle=authoritative), requested)
     assert restored.attempts == state.attempts

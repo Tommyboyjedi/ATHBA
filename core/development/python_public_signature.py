@@ -27,10 +27,10 @@ def production_signature_findings(source: str, signatures: tuple[RequiredPublicS
             args = node.args
             names = tuple(arg.arg for arg in args.posonlyargs + args.args)
             expected = item.parameters
-            receiver_valid = not item.owner or bool(names and names[0] == "self")
+            receiver_valid = not item.owner or bool(names)
             if item.owner:
                 names = names[1:]
-            if (not receiver_valid or names != expected or args.defaults or args.kwonlyargs or args.vararg or args.kwarg
+            if (not receiver_valid or len(names) != len(expected) or args.defaults or args.kwonlyargs or args.vararg or args.kwarg
                     or args.posonlyargs or node.decorator_list or isinstance(node, ast.AsyncFunctionDef)):
                 findings.append(f"{SIGNATURE_MISMATCH}: {item.source_quote}; observed {ast.unparse(node.args)}")
     return tuple(findings)

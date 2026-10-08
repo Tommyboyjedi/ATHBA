@@ -81,7 +81,7 @@ class PipelineGateway:
     async def execute(self, unit, binding):
         self.bindings.append(binding)
         objective = json.loads(unit.objective)
-        tester = objective.get("role") == "Tester"
+        tester = any(path.startswith("tests/") for path in unit.allowed_paths)
         if tester:
             ref = objective["ticket"]["id"]
             self.tester[ref] += 1

@@ -87,7 +87,7 @@ class GitGateway:
         worktree.rmdir()
         run(self.root, "worktree", "add", "--detach", str(worktree), binding.base_sha)
         try:
-            if '"role": "Tester"' in unit.objective:
+            if any(path.startswith("tests/") for path in unit.allowed_paths):
                 target = worktree / "tests" / "test_B_1.py"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from core.development.post_behavior_slice import FocusedProductionSlice
 from core.development.post_behavior_rename import declared_identifier_names
+from core.development.required_public_signature import RequiredPublicSignature
+from core.development.parameter_naming import ParameterNamingInspection, parameter_naming_mismatches, missing_signature_names
 from core.execution.local_only_post_behavior_reasoning import LocalOnlyPostBehaviorReasoning
 from core.execution.reasoning_gateway import ReasoningRequest
 
@@ -24,7 +26,8 @@ NAMING_INSTRUCTION = (
     "Compare the explicitly required identifier names with the production code. "
     "A naming mismatch exists only when an explicitly required identifier is absent "
     "and the same public/product concept is implemented under a different identifier. "
-    "If the required identifier already exists in production, answer NO. "
+    "Compare parameters within their owning operation, not with unrelated names elsewhere. "
+    "If every required identifier exists in its required declaration, answer NO. "
     "Do not suggest removal of aliases or duplicate helpers, syntax changes, API-shape changes, "
     "style improvements, general cleanup or refactoring. "
     "Return exactly either:\n"
@@ -84,6 +87,7 @@ class RefactorDecision:
 class NamingMaterial:
     text: str
     required_identifiers: tuple[str, ...]
+    required_signatures: tuple[RequiredPublicSignature, ...] = ()
 
     def __post_init__(self) -> None:
         if any(re.fullmatch(IDENTIFIER_PATTERN, name) is None for name in self.required_identifiers):
@@ -110,6 +114,10 @@ class NamingAssessor:
             },
             "production": _production_context(request.production),
         }
+        if request.material.required_signatures:
+            naming = context["explicit_behavior_naming"]
+            assert isinstance(naming, dict)
+            naming["required_parameters"] = [item.to_dict() for item in request.material.required_signatures]
         return await _reason_with_one_correction(
             self.reasoning,
             "identifier_requirement_comparison",
@@ -170,7 +178,14 @@ async def _reason_with_one_correction(
 
 
 def parse_naming_decision(raw: str, request: NamingAssessmentInput) -> NamingDecision:
+    mismatches = parameter_naming_mismatches(ParameterNamingInspection(
+        request.production.files, request.material.required_signatures,
+    )) if request.material.required_signatures else ()
     if raw.strip() == "NO":
+        if mismatches:
+            raise ValueError("explicit parameter naming mismatch remains")
+        if missing_signature_names(ParameterNamingInspection(request.production.files, request.material.required_signatures)):
+            raise ValueError("explicit operation naming mismatch remains")
         return NamingDecision()
     match = re.fullmatch(
         rf"YES\ncurrent_name: ({IDENTIFIER_PATTERN})\nrequired_name: ({IDENTIFIER_PATTERN})",
@@ -184,8 +199,13 @@ def parse_naming_decision(raw: str, request: NamingAssessmentInput) -> NamingDec
     rename = IdentifierRename(*match.groups())
     if rename.required_name not in request.material.required_identifiers:
         raise ValueError("required identifier has no explicit Behavior authority")
-    if rename.current_name not in declared_identifier_names(request.production.files):
+    if (rename.current_name not in declared_identifier_names(request.production.files)
+            and (rename.current_name, rename.required_name) not in {(item.current_name, item.required_name) for item in mismatches}):
         raise ValueError("current identifier is absent from focused production declarations")
+    parameter_pairs = {(item.current_name, item.required_name) for item in mismatches}
+    if any(item.current_name == rename.current_name for item in mismatches) and (
+            rename.current_name, rename.required_name) not in parameter_pairs:
+        raise ValueError("parameter rename does not match scoped original source authority")
     return NamingDecision(rename)
 
 

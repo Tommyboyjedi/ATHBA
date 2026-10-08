@@ -1,6 +1,8 @@
 """One-transition scenario executor beneath the strict-TDD feature application."""
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -150,7 +152,6 @@ def _scenario_draft_request(
         request.canonical_development_base,
         source_evidence,
         _semantic_annotations(executor, request, language_id, source_evidence),
-        request.contract.required_signatures,
     )
 
 
@@ -208,8 +209,18 @@ def _semantic_expression_sources(
         ):
             for expression in extractor(text):
                 add(expression)
-    for expression in request.contract.public_api:
-        add(expression)
+    # Only current behavior bindings may be recovered from the API catalogue.
+    # The catalogue itself is never sent to Tester.
+    focus = " ".join((request.behavior.observable_outcome, request.behavior.test_hint))
+    describer = getattr(adapter, "describe_api_expression", None)
+    if describer is not None:
+        for expression in request.contract.public_api:
+            try:
+                annotation = describer(ApiExpressionDescriptionRequest(expression))
+            except ValueError:
+                continue
+            if annotation.symbol and re.search(r"\b" + re.escape(annotation.symbol) + r"\b", focus):
+                add(expression)
     return tuple(expressions)
 
 async def _submit_draft(

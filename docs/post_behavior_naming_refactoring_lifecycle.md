@@ -380,3 +380,29 @@ Do not implement or restore the old PR21 design as part of this work. In particu
 This PR's implementation is complete when ATHBA can take a Gatekeeper-approved behavioral revision, correct explicit Behavior-to-code identifier drift through a mechanically constrained naming loop, then perform zero or more one-opportunity-at-a-time refactoring passes against production code only, with unchanged behavioral authority, deterministic regression, Gatekeeper reconciliation, durable restart-safe trusted-revision progression, and a bounded autonomous stop.
 
 The final reported revision is always an accepted revision. Failed post-behavior candidates never replace it.
+## Strict TDD authority separation
+
+Original explicit call declarations remain source/provenance authority. Tester receives
+only the current behavior and relevant source; Developer receives its accepted RED,
+failure evidence and production target. Neither receives a contract-wide signature
+array. Candidate acceptance does not impose parameter spelling independently of RED.
+
+Final pre-Naming reconciliation preserves the full original specification and
+behavioral call-domain checks. Equivalent lexical parameter names are deferred to
+Naming. Absence of a source-spelled operation is not proof of missing behavior by
+itself: the behavioral checklist evaluates accepted tests independently, and Naming
+cannot finish while explicit operation/parameter authority is unresolved.
+
+Naming includes symbolic parameter declarations explicitly required by original
+source, scoped to their operation and argument position. A single exact mapping
+must match that source authority. Syntax and reference mechanics remain in the
+language adapter. One plain unambiguous parameter declaration, its bound body
+references and mechanically resolved keyword calls may be renamed; strings,
+unrelated identifiers, algorithms and test expectations cannot change.
+Ambiguous declarations, capture, escaping callables, dynamic keyword dictionaries,
+nested/indirect bindings and unsupported syntax fail closed at Naming.
+
+Accepted behavioral/regression tests and independent Gatekeeper reconciliation
+still run before any rename is promoted. Resume reconstructs the same narrow
+behavioral work; original naming authority stays in the durable source contract,
+not in a parallel Developer specification.
