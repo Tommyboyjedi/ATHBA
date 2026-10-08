@@ -43,6 +43,7 @@ class ScenarioSubmissionOutcome(str, Enum):
     EXTERNAL_BLOCKER = "external_blocker"
 
 class ScenarioCandidateIssueCode(str, Enum):
+    BEHAVIOR_CALL_SHAPE = "behavior_call_shape"
     SYNTAX_INVALID = "syntax_invalid"
     UNUSABLE_ARTIFACT = "unusable_artifact"
     MODULE_DOCSTRING = "module_docstring"
@@ -183,6 +184,7 @@ class ScenarioCandidateAssessmentRequest:
     candidate: ScenarioSourceCandidate
     production_path: str
     contract: ScenarioAuthoringContract
+    semantic_annotations: tuple[SemanticApiAnnotation, ...] = ()
 
 class ScenarioDraftStatus(str, Enum):
     DRAFTING = "drafting"

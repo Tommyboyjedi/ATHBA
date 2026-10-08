@@ -84,8 +84,14 @@ class PostBehaviorWorkspaceRequests:
         if request.rename_reference_sources is not None:
             sources = tuple(file for file in request.rename_reference_sources.files if production_python(file))
         production = affected_reference_sources(RenameReferenceContext(target, sources))
+        substitution: dict[str, object] = {"current_name": rename.current_name, "required_name": rename.required_name}
+        if rename.parameter_operation is not None:
+            substitution.update({
+                "owner": target.owner, "operation": target.operation,
+                "parameter_index": target.parameter_index, "path": target.path,
+            })
         payload = {
-            "identifier_substitution": {"current_name": rename.current_name, "required_name": rename.required_name},
+            "identifier_substitution": substitution,
             "production": _sources(production),
             "affected_tests": _sources(affected_tests),
         }
@@ -147,10 +153,12 @@ def _rename_target(request: PostBehaviorWorkspaceInput, mapping: IdentifierRenam
     if request.rename_reference_sources is not None:
         return select_target(RenameSelection(
             request.rename_reference_sources, request.production,
-            mapping.current_name, mapping.required_name,
+            mapping.current_name, mapping.required_name, mapping.parameter_owner,
+            mapping.parameter_operation, mapping.parameter_index,
         ))
     return select_focused_target(FocusedRenameSelection(
-        request.production.files, mapping.current_name, mapping.required_name,
+        request.production.files, mapping.current_name, mapping.required_name, mapping.parameter_owner,
+        mapping.parameter_operation, mapping.parameter_index,
     ))
 
 

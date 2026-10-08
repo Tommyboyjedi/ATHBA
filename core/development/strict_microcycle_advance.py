@@ -36,6 +36,7 @@ from core.development.strict_microcycle import (
     _load_state,
     _promote_canonical_revision,
     _record_execution,
+    _workspace_relative_diagnostic,
 )
 from core.development.strict_tdd_transitions import (
     MicrocycleAdvanceResult,
@@ -124,6 +125,9 @@ def _observe_frontier(
         diagnostic = adapter.execute_frontier(
             FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path)
         )
+        diagnostic = replace(diagnostic, message=_workspace_relative_diagnostic(
+            diagnostic.message, candidate.project_root,
+        ))
         previous = BoundaryOutcome.GREEN.value if state.frontier.index else None
         assessment = adapter.classify_boundary(
             BoundaryClassificationRequest(
@@ -214,6 +218,9 @@ def _verify_developer_green(
         diagnostic = adapter.execute_frontier(
             FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path)
         )
+        diagnostic = replace(diagnostic, message=_workspace_relative_diagnostic(
+            diagnostic.message, candidate.project_root,
+        ))
         previous = BoundaryOutcome.GREEN.value if state.frontier.index else None
         assessment = adapter.classify_boundary(
             BoundaryClassificationRequest(

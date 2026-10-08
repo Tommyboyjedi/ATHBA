@@ -46,7 +46,10 @@ class PythonPostBehaviorAuthority:
         if any(not name.isidentifier() or keyword.iskeyword(name) for name in names) or names[0] == names[1]:
             return WriteAuthorityResult(False, "rename requires distinct Python identifiers")
         try:
-            selection = RenameSelection(request.trusted, request.production, *names)
+            selection = RenameSelection(
+                request.trusted, request.production, *names, mapping.parameter_owner,
+                mapping.parameter_operation, mapping.parameter_index,
+            )
             target = select_target(selection)
             before = {file.path: file for file in request.trusted.files}
             changed = False
