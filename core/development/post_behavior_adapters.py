@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 import re
 
 from core.development.athba_workspace_routing import AthbaWorkspaceIdentity
+from core.development.specification_obligations import ObligationModality, explicit_modality
 from core.development.required_public_signature import required_signatures, SOURCE_CLASS_NAME
 from core.development.post_behavior_assessment import (
     NamingAssessor, NamingAssessmentInput, NamingMaterial, NamingDecision, RefactorAssessor,
@@ -88,7 +89,9 @@ def focused_naming_material(delivery: AcceptedBehavioralDelivery) -> NamingMater
     for clause in delivery.contract.source_clauses:
         for sentence in re.split(r"(?<=[.!?])\s+|\n", clause.text):
             identifiers = tuple(match.group(1).rstrip(".") for pattern in EXPLICIT_NAMING_PATTERNS
-                                for match in pattern.finditer(sentence))
+                                for match in pattern.finditer(sentence)
+                                if pattern is not SOURCE_CLASS_NAME or explicit_modality(sentence) not in {
+                                    ObligationModality.FORBIDDEN, ObligationModality.NON_GOAL})
             if identifiers:
                 clauses.append(sentence)
                 for identifier in identifiers:

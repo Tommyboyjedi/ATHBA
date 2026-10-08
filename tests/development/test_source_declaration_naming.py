@@ -53,3 +53,14 @@ def test_persistence_subject_does_not_inherit_adjacent_class_naming():
         quote, "state", "non_persistence_assurance")
     clause.source_context(quote)
     assert clause.obligation_type == ObligationType.NON_PERSISTENCE.value
+
+
+@pytest.mark.parametrize("quote", [
+    "Do not implement a ForbiddenThing class.",
+    "An optional feature may define a FutureThing class.",
+])
+def test_nonrequired_source_declarations_do_not_create_required_naming(quote):
+    clause = SourceRequirementClause("S1", quote, "quality", "review", quote, quote, "naming")
+    delivery = SimpleNamespace(contract=SimpleNamespace(
+        public_api=(), source_clauses=(clause,), requirement_source=quote))
+    assert focused_naming_material(delivery).required_identifiers == ()
