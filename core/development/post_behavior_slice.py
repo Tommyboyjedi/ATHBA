@@ -46,6 +46,7 @@ class SliceRequest:
     entry: SpecificationSnapshot
     accepted: SpecificationSnapshot
     scope: ProductionSliceScope | None = None
+    include_unchanged: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,7 @@ class PythonProductionSlice:
         if any(before.get(file.path) != file and unsupported_production(file) for file in accepted.files):
             raise ValueError("unsupported production language")
         paths = tuple(sorted(file.path for file in accepted.files
-                             if production_python(file) and before.get(file.path) != file))
+                             if production_python(file) and (request.include_unchanged or before.get(file.path) != file)))
         scope = request.scope or ProductionSliceScope(entry.revision, accepted.revision, paths)
         sources: list[RevisionFile] = []
         regions: list[SourceRegion] = []
@@ -78,7 +79,7 @@ class PythonProductionSlice:
             if not production_python(file):
                 raise ValueError("unsupported production language")
             previous = before.get(file.path, RevisionFile(file.path, ""))
-            units = changed_units(previous.source, file.source)
+            units = changed_units("" if request.include_unchanged else previous.source, file.source)
             selected = focused_source(file.source, units)
             if selected:
                 sources.append(RevisionFile(file.path, selected))
