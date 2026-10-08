@@ -10,6 +10,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from os import sep
 from typing import Protocol
 
 from core.development.behavior_completion import REPAIR_REQUIRED, BehaviorCompletionCommand, BehaviorCompletionService
@@ -422,6 +423,9 @@ class StrictMicrocycleService:
         candidate = self.candidates.materialise(FrontierCandidateRequest(artifact, request.repository_root, state.model.test_path))
         try:
             diagnostic = adapter.execute_frontier(FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path))
+            diagnostic = replace(diagnostic, message=_workspace_relative_diagnostic(
+                diagnostic.message, candidate.project_root,
+            ))
             prior = BoundaryOutcome.GREEN.value if state.frontier.index else None
             assessment = adapter.classify_boundary(BoundaryClassificationRequest(diagnostic, candidate.artifact, state.fragments[state.frontier.index], prior))
             state = _record_execution(state, base, assessment)
@@ -734,3 +738,10 @@ def _developer_diagnostic(request: DeveloperFrontierRequest) -> dict[str, object
         "facts": [{"name": item.name, "value": item.value}
                   for item in diagnostic.facts if item.name in {"exception_type", "source_line"}],
     }
+
+
+def _workspace_relative_diagnostic(message: str, project_root: Path) -> str:
+    """Remove only this observation workspace's exact path prefix."""
+    for prefix in {str(project_root) + sep, project_root.as_posix() + "/"}:
+        message = message.replace(prefix, "")
+    return message

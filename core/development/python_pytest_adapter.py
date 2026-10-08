@@ -137,7 +137,7 @@ class PythonScenarioParser:
         return _Node(kind, self._source(request.source, request.node), SourceSpan(request.node.lineno, request.node.end_lineno or request.node.lineno), request.module_scope, self._capability(request.node))
 
     @staticmethod
-    def _source(source: str, node: ast.AST) -> str:
+    def _source(source: str, node: ast.stmt) -> str:
         value = ast.get_source_segment(source, node)
         if not value:
             raise ValueError("parser could not recover a complete source fragment")
@@ -253,6 +253,10 @@ class PythonCandidateAssessmentFactory:
     def _assessment(self, request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> ScenarioCandidateAssessment:
         facts = _candidate_facts(request, module)
         assessment = _assessment_from_facts(facts)
+        from core.development.python_behavior_call_shape import selected_call_shape_issues
+        shape_issues = selected_call_shape_issues(request, module)
+        if shape_issues:
+            assessment = replace(assessment, issues=(*assessment.issues, *shape_issues))
         if assessment.accepted:
             try:
                 PythonScenarioParser().parse(request.candidate.source)
@@ -628,14 +632,14 @@ class PythonPytestModuleMerger:
         return "\n".join(line for index, line in enumerate(lines, start=1) if index not in removals)
 
     @staticmethod
-    def _source(source: str, node: ast.AST) -> str:
+    def _source(source: str, node: ast.stmt) -> str:
         lines = source.splitlines()
         start = PythonPytestModuleMerger._start_line(node)
         end = node.end_lineno or node.lineno
         return "\n".join(lines[start - 1:end])
 
     @staticmethod
-    def _start_line(node: ast.AST) -> int:
+    def _start_line(node: ast.stmt) -> int:
         decorators = getattr(node, "decorator_list", ())
         return min([node.lineno, *(item.lineno for item in decorators)])
 

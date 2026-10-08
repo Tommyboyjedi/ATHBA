@@ -36,6 +36,7 @@ class RenameTarget:
     declaration_line: int
     kind: DeclarationKind = DeclarationKind.SYMBOL
     operation: str = ""
+    parameter_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,9 @@ class RenameSelection:
     production: FocusedProductionSlice
     current_name: str
     required_name: str
+    parameter_owner: str | None = None
+    parameter_operation: str | None = None
+    parameter_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,9 @@ class FocusedRenameSelection:
     files: tuple[RevisionFile, ...]
     current_name: str
     required_name: str
+    parameter_owner: str | None = None
+    parameter_operation: str | None = None
+    parameter_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +84,7 @@ class PythonDeclaration:
     node: ast.AST
     kind: DeclarationKind = DeclarationKind.SYMBOL
     operation: str = ""
+    parameter_index: int | None = None
 
 
 def select_target(request: RenameSelection) -> RenameTarget:
@@ -86,7 +94,7 @@ def select_target(request: RenameSelection) -> RenameTarget:
             continue
         available = declarations(ast.parse(file.source).body)
         for declaration in available:
-            if declaration.name != request.current_name:
+            if not _selected_declaration(declaration, request):
                 continue
             if any(region.path == file.path and region.start_line <= start_line(declaration.node) <= region.end_line
                    for region in request.production.regions):
@@ -103,18 +111,29 @@ def select_focused_target(request: FocusedRenameSelection) -> RenameTarget:
             raise ValueError("focused rename target must be production Python")
         available = declarations(ast.parse(file.source).body)
         for declaration in available:
-            if declaration.name == request.current_name:
+            if _selected_declaration(declaration, request):
                 target = _declaration_target(file, (declaration, request.required_name))
                 _require_available_name(target, available)
                 matches.append(target)
     return _unique_target(matches)
 
 
+def _selected_declaration(declaration: PythonDeclaration, request: RenameSelection | FocusedRenameSelection) -> bool:
+    if declaration.name != request.current_name:
+        return False
+    if request.parameter_operation is None:
+        return True
+    return (declaration.kind == DeclarationKind.PARAMETER
+            and declaration.owner == (request.parameter_owner or "")
+            and declaration.operation == request.parameter_operation
+            and declaration.parameter_index == request.parameter_index)
+
+
 def _declaration_target(file: RevisionFile, selection: tuple[PythonDeclaration, str]) -> RenameTarget:
     declaration, required_name = selection
     node = declaration.node
     return RenameTarget(file.path, module_name(file.path), declaration.owner, declaration.name,
-                        required_name, getattr(node, "lineno", start_line(node)), declaration.kind, declaration.operation)
+                        required_name, getattr(node, "lineno", start_line(node)), declaration.kind, declaration.operation, declaration.parameter_index)
 
 
 def _require_available_name(target: RenameTarget, available: tuple[PythonDeclaration, ...]) -> None:
@@ -145,8 +164,8 @@ def declarations(body: list[ast.stmt], owner: str = "") -> tuple[PythonDeclarati
             if isinstance(node, ast.FunctionDef):
                 arguments = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
                 parameters = arguments[1:] if owner else arguments
-                result.extend(PythonDeclaration(owner, arg.arg, node, DeclarationKind.PARAMETER, node.name)
-                              for arg in parameters)
+                result.extend(PythonDeclaration(owner, arg.arg, node, DeclarationKind.PARAMETER, node.name, index)
+                              for index, arg in enumerate(parameters))
         if isinstance(node, ast.ClassDef) and not owner:
             result.extend(declarations(node.body, node.name))
         elif isinstance(node, (ast.Assign, ast.AnnAssign)):

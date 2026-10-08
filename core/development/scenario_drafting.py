@@ -706,7 +706,7 @@ def _prepare_candidate(
     assessor = getattr(adapter, "assess_candidate", None)
     if not callable(assessor):
         raise ValueError("language adapter does not implement scenario candidate assessment")
-    assessment = assessor(ScenarioCandidateAssessmentRequest(provisional, request.ticket.production_path, _authoring_contract(request)))
+    assessment = assessor(ScenarioCandidateAssessmentRequest(provisional, request.ticket.production_path, _authoring_contract(request), request.semantic_annotations))
     if not assessment.accepted:
         return ScenarioCandidatePreparation(provisional, assessment, None, None)
     analysis = adapter.analyse_candidate(provisional, request.ticket.production_path)

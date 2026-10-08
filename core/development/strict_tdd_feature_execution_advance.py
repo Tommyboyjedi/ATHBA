@@ -181,6 +181,11 @@ def _semantic_annotations(
             continue
         if annotation.symbol is not None:
             seen_symbols.add(annotation.symbol)
+        selected = tuple(signature for signature in request.contract.required_signatures
+                         if signature.name == annotation.symbol)
+        if len(selected) == 1:
+            annotation = replace(annotation, receiver_owner=selected[0].owner,
+                                 argument_count=len(selected[0].parameters))
         annotations.append(annotation)
     return tuple(annotations)
 

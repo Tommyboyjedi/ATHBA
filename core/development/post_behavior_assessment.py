@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from core.development.post_behavior_slice import FocusedProductionSlice
 from core.development.post_behavior_rename import declared_identifier_names
@@ -55,12 +55,24 @@ REFACTOR_INSTRUCTION = (
 class IdentifierRename:
     current_name: str
     required_name: str
+    parameter_owner: str | None = None
+    parameter_operation: str | None = None
+    parameter_index: int | None = None
 
     def __post_init__(self) -> None:
         if not all(re.fullmatch(IDENTIFIER_PATTERN, item) for item in (self.current_name, self.required_name)):
             raise ValueError("rename must contain two exact identifiers")
         if self.current_name == self.required_name:
             raise ValueError("rename must change an identifier")
+        if self.parameter_operation is None:
+            if self.parameter_owner is not None or self.parameter_index is not None:
+                raise ValueError("parameter naming scope is incomplete")
+        elif (not re.fullmatch(IDENTIFIER_PATTERN, self.parameter_operation)
+              or not isinstance(self.parameter_index, int) or isinstance(self.parameter_index, bool)
+              or self.parameter_index < 0):
+            raise ValueError("parameter naming scope is invalid")
+        if self.parameter_owner is not None and not re.fullmatch(IDENTIFIER_PATTERN, self.parameter_owner):
+            raise ValueError("parameter naming owner is invalid")
 
 
 @dataclass(frozen=True)
@@ -196,7 +208,8 @@ def parse_naming_decision(raw: str, request: NamingAssessmentInput) -> NamingDec
         match = re.fullmatch(rf"({IDENTIFIER_PATTERN}) -> ({IDENTIFIER_PATTERN})", raw.strip())
     if match is None:
         raise ValueError("naming assessment must return NO or exactly one mapping")
-    rename = IdentifierRename(*match.groups())
+    current_name, required_name = match.groups()
+    rename = IdentifierRename(current_name, required_name)
     if rename.required_name not in request.material.required_identifiers:
         raise ValueError("required identifier has no explicit Behavior authority")
     if (rename.current_name not in declared_identifier_names(request.production.files)
@@ -206,6 +219,13 @@ def parse_naming_decision(raw: str, request: NamingAssessmentInput) -> NamingDec
     if any(item.current_name == rename.current_name for item in mismatches) and (
             rename.current_name, rename.required_name) not in parameter_pairs:
         raise ValueError("parameter rename does not match scoped original source authority")
+    scoped = tuple(item for item in mismatches
+                   if (item.current_name, item.required_name) == (rename.current_name, rename.required_name))
+    if len(scoped) > 1:
+        raise ValueError("parameter mapping requires one source-grounded declaration")
+    if scoped:
+        rename = replace(rename, parameter_owner=scoped[0].owner,
+                         parameter_operation=scoped[0].operation, parameter_index=scoped[0].index)
     return NamingDecision(rename)
 
 

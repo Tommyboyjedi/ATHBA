@@ -21,3 +21,15 @@ reservation diagnostics are unchanged machine-enforced controls.
 Original lexical authority persists in the Behavior Contract and is enforced by
 post-behavior Naming. Required argument domain remains a behavioral/final-check
 concern. Core orchestration must not gain language-specific storage semantics.
+
+Selected interaction annotations may retain the current operation's receiver form
+and argument count. They do not carry a global signature list or parameter spelling.
+The language adapter rejects replacing that instance interaction with a module helper.
+Equivalent lexical names remain a Naming concern.
+
+Naming decisions retain the source-grounded owning declaration and parameter position
+through persistence, workspace selection and exact write validation. A shared spelling
+in another operation does not authorize its rename. Unscoped ambiguity still fails closed.
+
+Developer diagnostics use paths relative to the exact ATHBA observation workspace;
+the observation's physical temporary prefix is not a path in the execution workspace.
