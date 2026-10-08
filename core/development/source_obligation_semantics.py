@@ -11,6 +11,7 @@ from enum import Enum
 import re
 
 from core.development.specification_provenance import resolve_source_quote
+from core.development.required_public_signature import SOURCE_CLASS_NAME
 
 
 class ObligationType(str, Enum):
@@ -34,6 +35,11 @@ POSITIVE_PERSISTENCE = re.compile(r"\bpersist\w*\b|\b(?:save|store|retain)\w*\b.
 LEXICAL_NAME = re.compile(r"\b(?:named|identifier|spelling|exact name|required_name)\b", re.I)
 
 
+def explicit_naming(text: str) -> bool:
+    atomic_class = SOURCE_CLASS_NAME.search(text) and not re.search(r"\band\b|\bor\b|[,;]", text, re.I)
+    return bool(LEXICAL_NAME.search(text) or atomic_class)
+
+
 def explicit_error(text: str) -> bool:
     return bool(ERROR_ACTION.search(text) or ERROR_IDENTIFIER.search(text))
 
@@ -44,7 +50,7 @@ def classify_obligation(subject: str, kind: str) -> ObligationType:
             return ObligationType.NON_PERSISTENCE
         if POSITIVE_PERSISTENCE.search(subject):
             return ObligationType.BEHAVIOR
-        if LEXICAL_NAME.search(subject):
+        if explicit_naming(subject):
             return ObligationType.NAMING
         return ObligationType.MECHANICAL
     if explicit_error(subject):
@@ -73,7 +79,7 @@ def classification_subject(subject: str, kind: str, quote: str) -> str:
     if kind == "validation" and explicit_error(predicate):
         return predicate
     if kind in {"constraint", "quality"} and (
-            LEXICAL_NAME.search(predicate) or NON_PERSISTENCE.search(predicate)
+            explicit_naming(predicate) or NON_PERSISTENCE.search(predicate)
             or POSITIVE_PERSISTENCE.search(predicate)):
         return predicate
     return subject

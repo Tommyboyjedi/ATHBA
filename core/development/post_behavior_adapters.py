@@ -7,7 +7,8 @@ from pathlib import PurePosixPath
 import re
 
 from core.development.athba_workspace_routing import AthbaWorkspaceIdentity
-from core.development.required_public_signature import required_signatures
+from core.development.specification_obligations import ObligationModality, explicit_modality
+from core.development.required_public_signature import required_signatures, SOURCE_CLASS_NAME
 from core.development.post_behavior_assessment import (
     NamingAssessor, NamingAssessmentInput, NamingMaterial, NamingDecision, RefactorAssessor,
 )
@@ -67,6 +68,7 @@ class PostBehaviorAssessors:
 NAMING_ENTITY_PATTERN = r"(?:class|object|function|method|property|field|attribute|identifier|event|command)"
 NAMING_IDENTIFIER_PATTERN = r"([A-Za-z_][A-Za-z_0-9.]*)"
 EXPLICIT_NAMING_PATTERNS = (
+    SOURCE_CLASS_NAME,
     re.compile(NAMING_ENTITY_PATTERN + r"\s+(?:named|called)\s+\x60?" + NAMING_IDENTIFIER_PATTERN),
     re.compile(NAMING_ENTITY_PATTERN + r"\s+\x60" + NAMING_IDENTIFIER_PATTERN + r"\x60"),
     re.compile(r"(?:class|object)\s+([A-Z][A-Za-z_0-9.]*)"),
@@ -87,7 +89,9 @@ def focused_naming_material(delivery: AcceptedBehavioralDelivery) -> NamingMater
     for clause in delivery.contract.source_clauses:
         for sentence in re.split(r"(?<=[.!?])\s+|\n", clause.text):
             identifiers = tuple(match.group(1).rstrip(".") for pattern in EXPLICIT_NAMING_PATTERNS
-                                for match in pattern.finditer(sentence))
+                                for match in pattern.finditer(sentence)
+                                if pattern is not SOURCE_CLASS_NAME or explicit_modality(sentence) not in {
+                                    ObligationModality.FORBIDDEN, ObligationModality.NON_GOAL})
             if identifiers:
                 clauses.append(sentence)
                 for identifier in identifiers:

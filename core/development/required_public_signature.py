@@ -10,6 +10,7 @@ from core.development.specification_provenance import resolve_source_quote
 
 DECLARATION = re.compile(r"\b(?:Calling|calling|call|Call|method|function|operation)\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\(([^()]*)\)")
 CLASS_DECLARATION = re.compile(r"\b([A-Za-z_]\w*)\s+class\b")
+SOURCE_CLASS_NAME = re.compile(r"\b(?:provide|implement|define)\s+(?:an?\s+)?" + CLASS_DECLARATION.pattern, re.I)
 SIGNATURE_MISMATCH = "required_public_signature_mismatch"
 
 
