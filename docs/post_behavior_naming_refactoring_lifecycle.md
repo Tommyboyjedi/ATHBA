@@ -406,3 +406,17 @@ Accepted behavioral/regression tests and independent Gatekeeper reconciliation
 still run before any rename is promoted. Resume reconstructs the same narrow
 behavioral work; original naming authority stays in the durable source contract,
 not in a parallel Developer specification.
+
+### Mechanically identified Naming frontiers
+When the registered language adapter identifies an exact parameter-declaration
+mismatch against explicit original call notation, Naming selects one scoped
+owner/operation/position mapping directly. A model need not infer that known
+declaration fact from unrelated aliases. The normal bounded Renamer, exact
+substitution audit, accepted tests and independent Gatekeeper still decide whether
+the candidate can be promoted.
+
+Naming can conclude NO mechanically only when complete scoped signature
+declarations cover every explicit naming item and no parameter mismatch remains.
+Missing operations or additional naming authority retain the existing model
+comparison and one corrective submission. Unsupported syntax, call-shape changes
+and unsafe reference substitution continue to fail closed.

@@ -22,6 +22,11 @@ class PythonParameterNaming:
         trees = [ast.parse(file.source) for file in request.files]
         result: list[ParameterNamingMismatch] = []
         for signature in request.signatures:
+            if signature.owner and sum(
+                isinstance(node, ast.ClassDef) and node.name == signature.owner
+                for tree in trees for node in tree.body
+            ) > 1:
+                raise ValueError("parameter naming requires one owning declaration")
             definitions: list[ast.FunctionDef] = []
             for tree in trees:
                 bodies = [tree.body]

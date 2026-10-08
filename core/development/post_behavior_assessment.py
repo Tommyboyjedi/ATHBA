@@ -113,12 +113,15 @@ class NamingAssessmentInput:
 
 
 class NamingAssessor:
-    """Ask one exact naming question with only explicit authority and focused source."""
+    """Use scoped declaration facts; ask only unresolved naming questions."""
 
     def __init__(self, reasoning: LocalOnlyPostBehaviorReasoning):
         self.reasoning = reasoning
 
     async def reason(self, request: NamingAssessmentInput) -> NamingDecision:
+        known = _signature_naming_decision(request)
+        if known is not None:
+            return known
         context: dict[str, object] = {
             "explicit_behavior_naming": {
                 "text": request.material.text,
@@ -187,6 +190,34 @@ async def _reason_with_one_correction(
                 f"{boundary} response validation exhausted: "
                 f"initial={first_error}; correction={correction_error}"
             ) from correction_error
+
+
+
+def _signature_naming_decision(request: NamingAssessmentInput) -> NamingDecision | None:
+    signatures = request.material.required_signatures
+    if not signatures:
+        return None
+    inspection = ParameterNamingInspection(request.production.files, signatures)
+    mismatches = parameter_naming_mismatches(inspection)
+    if mismatches:
+        selected = mismatches[0]
+        if selected.required_name not in request.material.required_identifiers:
+            raise ValueError("required parameter has no explicit Naming authority")
+        return NamingDecision(IdentifierRename(
+            selected.current_name, selected.required_name, selected.owner,
+            selected.operation, selected.index,
+        ))
+    signature_names = {name for item in signatures
+                       for name in (item.owner, item.name, *item.parameters) if name is not None}
+    signature_text = {text for item in signatures
+                      for text in (item.owner, item.name, item.source_quote) if text is not None}
+    authority_lines = {line.strip() for line in request.material.text.splitlines() if line.strip()}
+    # Same-spelled fields or prose authority still require comparison in their own scope.
+    if (not missing_signature_names(inspection)
+            and set(request.material.required_identifiers) <= signature_names
+            and bool(authority_lines) and authority_lines <= signature_text):
+        return NamingDecision()
+    return None
 
 
 def parse_naming_decision(raw: str, request: NamingAssessmentInput) -> NamingDecision:
