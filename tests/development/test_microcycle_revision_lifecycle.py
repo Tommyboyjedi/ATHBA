@@ -253,3 +253,21 @@ def test_behavior_completion_removes_working_ref_and_prevents_recreation(tmp_pat
 def test_unsafe_scenario_id_cannot_escape_managed_namespace(scenario_id):
     with pytest.raises(ValueError, match="unsafe"):
         managed_working_ref(scenario_id)
+
+def test_dotted_behavior_identity_uses_confined_hashed_working_ref(tmp_path):
+    root, repo, git, prior = setup_lifecycle(tmp_path)
+    scenario_id = "project--REQ.1"
+    state = RevisionStateInitialiser(repo, git).initialise(
+        RevisionInitialisationRequest(scenario_id, prior.canonical_ref, prior.canonical_development_base)
+    )
+    assert repo.load(scenario_id) == state
+    assert state.working_ref == managed_working_ref(scenario_id)
+    assert state.working_ref.startswith("refs/heads/athba/microcycles/")
+    assert scenario_id not in state.working_ref
+    assert git.resolve(RevisionResolveRequest(state.working_ref)) == prior.canonical_development_base
+
+
+@pytest.mark.parametrize("scenario_id", (".hidden", "trailing.", ".", "..", "a...b"))
+def test_dotted_scenario_identity_keeps_unsafe_segment_guard(scenario_id):
+    with pytest.raises(ValueError, match="unsafe"):
+        managed_working_ref(scenario_id)
