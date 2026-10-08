@@ -1,6 +1,8 @@
 """One-transition scenario executor beneath the strict-TDD feature application."""
 from __future__ import annotations
 
+from core.development.tester_artifact import draft_artifact_path
+
 import re
 
 from dataclasses import dataclass, replace
@@ -141,6 +143,8 @@ def _scenario_draft_request(
     ticket = _ticket_for(request)
     language_id = "python"
     source_evidence = _source_requirement_evidence(request)
+    prior = executor.drafting.state_store.load(scenario_id)
+    artifact = (prior.draft_artifact_path if prior is not None else draft_artifact_path(scenario_id, ticket.test_path))
     return ScenarioDraftRequest(
         scenario_id,
         ticket,
@@ -152,6 +156,7 @@ def _scenario_draft_request(
         request.canonical_development_base,
         source_evidence,
         _semantic_annotations(executor, request, language_id, source_evidence),
+        draft_artifact_path=artifact,
     )
 
 

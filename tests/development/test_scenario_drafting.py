@@ -410,7 +410,8 @@ async def test_author_and_intent_reviewer_receive_exact_source_requirement_evide
     author_payload = json.loads(gateway.calls[0][0].objective)
     reviewer_payload = json.loads(reasoning.requests[0].prompt)
     expected = [source_clause.to_dict()]
-    assert author_payload["source_requirements"] == expected
+    from core.development.tester_artifact import selected_source_payload
+    assert author_payload["source_requirements"] == [selected_source_payload(source_clause)]
     assert reviewer_payload["source_requirements"] == expected
 @pytest.mark.asyncio
 async def test_wrong_profile_behavior_is_rejected_with_descriptive_feedback_and_no_freeze():

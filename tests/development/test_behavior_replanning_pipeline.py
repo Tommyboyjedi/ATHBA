@@ -1,4 +1,5 @@
 """Real Git/pytest strict-TDD lifecycle with fake execution and reasoning only."""
+from core.development.strict_tdd_execution_budget import StrictTddWorkKind
 import json
 import shutil
 import subprocess
@@ -81,7 +82,7 @@ class PipelineGateway:
     async def execute(self, unit, binding):
         self.bindings.append(binding)
         objective = json.loads(unit.objective)
-        tester = any(path.startswith("tests/") for path in unit.allowed_paths)
+        tester = unit.work_kind in {StrictTddWorkKind.SCENARIO_DRAFT, StrictTddWorkKind.SCENARIO_REPAIR}
         if tester:
             ref = objective["ticket"]["id"]
             self.tester[ref] += 1

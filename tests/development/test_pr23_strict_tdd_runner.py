@@ -1,5 +1,6 @@
 """Deterministic executable proof for the thin PR23 CLI runner."""
 from __future__ import annotations
+from core.development.strict_tdd_execution_budget import StrictTddWorkKind
 
 from dataclasses import replace
 import json
@@ -49,15 +50,20 @@ class GitGateway:
     async def execute(self, unit, binding):
         self.call_count += 1
         objective = json.loads(unit.objective)
-        role = "Tester" if unit.allowed_paths == ["tests/test_toggle_switch.py"] else "Developer"
+        role = "Tester" if unit.work_kind in {StrictTddWorkKind.SCENARIO_DRAFT, StrictTddWorkKind.SCENARIO_REPAIR} else "Developer"
         self.log.append((role, unit.id, tuple(unit.allowed_paths), binding.base_ref, binding.base_sha, objective))
         assert binding.base_sha and binding.base_ref
-        assert unit.allowed_paths == (["tests/test_toggle_switch.py"] if role == "Tester" else ["toggle_switch.py"])
+        if role == "Tester":
+            from core.development.tester_artifact import draft_artifact_path
+            scope = unit.workspace_identity.work_id.removesuffix("--scenario-draft")
+            assert unit.allowed_paths == [draft_artifact_path(scope, "tests/test_toggle_switch.py")]
+        else:
+            assert unit.allowed_paths == ["toggle_switch.py"]
         worktree = Path(tempfile.mkdtemp(prefix="athba-runner-")); worktree.rmdir()
         git(self.root, "worktree", "add", "--detach", str(worktree), binding.base_sha)
         try:
             if role == "Tester":
-                target = worktree / "tests/test_toggle_switch.py"; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(scenario(), encoding="utf-8")
+                target = worktree / unit.allowed_paths[0]; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(scenario(), encoding="utf-8")
             else:
                 (worktree / "toggle_switch.py").write_text(implementation(objective["materialised_active_frontier_test"]), encoding="utf-8")
             git(worktree, "add", "--", *unit.allowed_paths)
