@@ -57,7 +57,30 @@ class ProviderSeniorBehaviorReviewer:
 
 
 def _request(request: BehaviorReviewRequest) -> ReasoningRequest:
-    prompt = json.dumps({"instruction": "Act as ATHBA's Senior behavior reviewer. Return one JSON object.", "behavior_ticket": request.behavior_ticket, "canonical_test_identity": request.canonical_test_identity, "approved_scenario": request.approved_scenario, "production_diff": request.production_diff, "microcycle_evidence": list(request.microcycle_evidence), "regression_evidence": list(request.regression_evidence), "question": "Does the completed scenario and production change satisfy the requested observable behavior?", "required_output": {"verdict": "approved|repair_required|replan_required", "rationale": "brief evidence-based explanation", "findings": ["descriptive semantic defects only"], "evidence_refs": ["provided evidence identifiers only"]}, "rules": ["approve only when evidence supports the behavior", "equivalent lexical identifier differences reconcile later in Naming; do not reject solely for spelling", "repair_required needs findings", "approved has no repair findings", "replan_required explains why repair is insufficient", "do not invent evidence references"]}, sort_keys=True)
+    prompt = json.dumps({
+        "instruction": "Act as ATHBA's Senior behavior reviewer. Return one JSON object.",
+        "behavior_ticket": request.behavior_ticket,
+        "selected_behavior": {"summary": request.behavior_summary, "expected_result": request.expected_result,
+                              "source_refs": list(request.source_requirement_refs)},
+        "canonical_test_identity": request.canonical_test_identity,
+        "approved_scenario": request.approved_scenario,
+        "production_diff": request.production_diff,
+        "current_production": None if request.production_material is None else request.production_material.to_dict(),
+        "current_execution": {"completed_revision": request.completed_revision, "regression_status": request.regression_status},
+        "historical_boundary_outcomes": list(request.microcycle_evidence),
+        "regression_evidence": list(request.regression_evidence),
+        "question": "Does the current accepted production satisfy this selected observable behavior?",
+        "required_output": {"verdict": "approved|repair_required|replan_required", "rationale": "brief evidence-based explanation",
+                            "findings": ["descriptive semantic defects only"], "evidence_refs": ["provided evidence identifiers only"]},
+        "rules": [
+            "approve only when current evidence supports the selected behavior",
+            "historical RED outcomes describe earlier frontiers; do not treat them as defects in the current accepted production",
+            "repair_required needs a concrete current semantic defect supported by the supplied evidence",
+            "equivalent lexical identifier differences reconcile later in Naming; do not reject solely for spelling",
+            "approved has no repair findings", "replan_required explains why repair is insufficient",
+            "do not invent evidence references",
+        ],
+    }, sort_keys=True)
     return ReasoningRequest(REVIEW_PURPOSE, prompt, request.behavior_ticket)
 
 

@@ -1,5 +1,7 @@
 """Reusable composition root for the strict-TDD feature path."""
 from __future__ import annotations
+
+from core.development.git_behavior_review_material import GitBehaviorProductionReader
 from dataclasses import dataclass, field
 from pathlib import Path
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -104,6 +106,7 @@ class StrictTddFeatureCompositionFactory:
                 ),
                 behavior_completion=completion,
                 behavior_repair=repair,
+                behavior_production_reader=GitBehaviorProductionReader(),
             )
         )
         drafting = ScenarioDraftingService(

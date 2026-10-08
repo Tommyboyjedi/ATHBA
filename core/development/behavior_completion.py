@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.development.required_public_signature import RequiredPublicSignature
+from core.development.behavior_review_material import BehaviorProductionMaterial
 
 from dataclasses import dataclass, replace
 from typing import Callable, Protocol
@@ -29,6 +30,12 @@ class BehaviorReviewRequest:
     microcycle_evidence: tuple[str, ...]
     regression_evidence: tuple[str, ...]
     required_signatures: tuple[RequiredPublicSignature, ...] = ()
+    behavior_summary: str = ""
+    expected_result: str = ""
+    source_requirement_refs: tuple[str, ...] = ()
+    completed_revision: str = ""
+    regression_status: str = ""
+    production_material: BehaviorProductionMaterial | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,7 @@ class BehaviorCompletionCommand:
     state: MicrocycleState
     production_diff: str = ""
     persist: Callable[[MicrocycleState], object] | None = None
+    production_material: BehaviorProductionMaterial | None = None
 
 
 class SeniorBehaviorReviewer(Protocol):
@@ -176,4 +184,10 @@ class BehaviorCompletionService:
             evidence,
             state.regression.evidence_refs,
             state.scenario_draft.required_signatures,
+            behavior_summary=state.scenario_draft.behavior_summary,
+            expected_result=state.scenario_draft.expected_result,
+            source_requirement_refs=state.scenario_draft.source_requirement_refs,
+            completed_revision=state.completion.completed_revision or state.development_base_revision,
+            regression_status=state.regression.status,
+            production_material=command.production_material,
         )

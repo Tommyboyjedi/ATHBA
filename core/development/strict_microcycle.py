@@ -14,6 +14,7 @@ from os import sep
 from typing import Protocol
 
 from core.development.behavior_completion import REPAIR_REQUIRED, BehaviorCompletionCommand, BehaviorCompletionService
+from core.development.behavior_review_material import BehaviorProductionReader
 from core.development.behavior_repair import BehaviorRepairRequest, BehaviorRepairService
 from core.development.deterministic_regression import (
     DeterministicRegressionRequest,
@@ -244,6 +245,7 @@ class StrictMicrocycleDependencies:
     regression_repair_factory: RegressionRepairWorkUnitFactory = RegressionRepairWorkUnitFactory()
     behavior_completion: BehaviorCompletionService | None = None
     behavior_repair: BehaviorRepairService | None = None
+    behavior_production_reader: BehaviorProductionReader | None = None
 
 
 @dataclass(frozen=True)
@@ -404,6 +406,7 @@ class StrictMicrocycleService:
         )
         self.behavior_completion = dependencies.behavior_completion
         self.behavior_repair = dependencies.behavior_repair
+        self.behavior_production_reader = dependencies.behavior_production_reader
 
     async def run(self, request: StrictMicrocycleRequest) -> StrictMicrocycleOutcome:
         from core.development.strict_microcycle_runner import StrictMicrocycleRunLoop

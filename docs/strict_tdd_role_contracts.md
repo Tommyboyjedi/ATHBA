@@ -33,3 +33,9 @@ in another operation does not authorize its rename. Unscoped ambiguity still fai
 
 Developer diagnostics use paths relative to the exact ATHBA observation workspace;
 the observation's physical temporary prefix is not a path in the execution workspace.
+
+## Current behavior review evidence
+
+The independent Behavior Reviewer receives only the approved selected behavior, its expected observable result and source references, the accepted test, and the selected production path read at immutable accepted Git revisions. Historical RED boundary outcomes are labelled as history. A repair finding must identify a concrete current semantic defect; earlier RED evidence is not a current failure. Production material does not come from the mutable working tree.
+
+Behavior repair retains the existing four-attempt limit across rejection and resume. Promotion updates the completion revision so subsequent review evaluates the accepted repair rather than the earlier candidate. Neither review nor repair gives Developer the full specification or lexical naming authority.

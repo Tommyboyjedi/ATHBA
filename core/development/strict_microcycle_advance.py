@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from core.development.behavior_completion import APPROVED, REPAIR_REQUIRED, REPLAN_REQUIRED, BehaviorCompletionCommand
 from core.development.behavior_repair import BehaviorRepairRequest
+from core.development.behavior_review_material import BehaviorProductionReadRequest
 from core.development.deterministic_regression import (
     ACCUMULATED_REGRESSION,
     REGRESSION_CLEAR,
@@ -422,7 +423,7 @@ async def _review_behavior(
 ) -> MicrocycleAdvanceResult:
     if service.behavior_completion is None:
         return _result(MicrocycleTransitionKind.SCENARIO_COMPLETED, prior_status, state, request, more=False)
-    command = BehaviorCompletionCommand(state, persist=service.state_store.save)
+    command = _review_command(service, request, state)
     updated = await service.behavior_completion.review(command)
     if updated.behavior_review.verdict == APPROVED:
         updated = replace(updated, pending_action=MicrocyclePendingAction.COMPLETE_BEHAVIOR.value)
@@ -443,6 +444,19 @@ async def _review_behavior(
     service.state_store.save(updated)
     return _result(kind, prior_status, updated, request, reasoning=True, blocker=blocker)
 
+
+
+def _review_command(service: StrictMicrocycleService, request: StrictMicrocycleRequest, state: MicrocycleState) -> BehaviorCompletionCommand:
+    material = None
+    if service.behavior_production_reader is not None:
+        material = service.behavior_production_reader.read(BehaviorProductionReadRequest(
+            request.repository_root, request.production_path, request.initial_state.development_base_revision,
+            state.completion.completed_revision or state.development_base_revision,
+        ))
+    return BehaviorCompletionCommand(
+        state, production_diff="" if material is None else material.diff,
+        persist=service.state_store.save, production_material=material,
+    )
 
 
 def _behavior_repair_request(
@@ -480,6 +494,10 @@ async def _submit_behavior_repair(
             pending_action=MicrocyclePendingAction.VERIFY_BEHAVIOR_REPAIR.value,
         )
         kind = MicrocycleTransitionKind.BEHAVIOR_REPAIR_SUBMITTED
+        blocker = None
+    elif outcome.status == "behavior_repair_candidate_rejected":
+        updated = replace(outcome.state, pending_action=MicrocyclePendingAction.SUBMIT_BEHAVIOR_REPAIR.value)
+        kind = MicrocycleTransitionKind.BEHAVIOR_REPAIR_CANDIDATE_REJECTED
         blocker = None
     elif outcome.status.endswith("exhausted"):
         updated = replace(outcome.state, pending_action=MicrocyclePendingAction.BLOCKED.value)
@@ -614,6 +632,7 @@ def _result(
             state.retry_counts.regression,
             state.retry_counts.frontier_execution,
             len(state.developer_attempts),
+            state.behavior_review.repair.attempts,
         ),
         state.pending_action,
     )
