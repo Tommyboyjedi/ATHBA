@@ -35,7 +35,9 @@ class MicrocycleRevisionRepository:
 def managed_working_ref(scenario_id: str) -> str:
     if not scenario_id or len(scenario_id) > 128:
         raise ValueError("scenario id must be between 1 and 128 characters")
-    if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for character in scenario_id):
+    if scenario_id.startswith(".") or scenario_id.endswith(".") or ".." in scenario_id:
+        raise ValueError("scenario id contains unsafe ref characters")
+    if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-." for character in scenario_id):
         raise ValueError("scenario id contains unsafe ref characters")
     return f"refs/heads/athba/microcycles/{_scenario_key(scenario_id)}"
 
