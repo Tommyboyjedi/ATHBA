@@ -37,6 +37,8 @@ async def test_one_bounded_correction_receives_all_retained_type_errors():
     assert len(gateway.requests) == len(result.attempts) == 2
     feedback = json.loads(gateway.requests[1].prompt)
     error = feedback["validation_error"]
+    assert error.startswith("obligation classification disagrees with the source subject/kind")
+    assert "Additional invalid items:" in error
     assert "REQ-004" in error and "kind=validation" in error
     assert "precondition" in error
     assert "REQ-008" in error and "non_persistence_assurance" in error

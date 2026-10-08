@@ -293,9 +293,11 @@ def _grounded_items(raw_items: list[object], source: str) -> list[SpecificationC
             items.append(_grounded_item(raw, source))
         except (ValueError, KeyError, TypeError) as error:
             ref = raw.get("ref", index) if isinstance(raw, dict) else index
-            errors.append(f"item {ref}: {error}")
+            errors.append(f"{error} [item {ref}]")
     if errors:
-        raise ValueError("checklist item validation errors:\n" + "\n".join(errors))
+        # Preserve the established error prefix for durable routing/diagnostics.
+        raise ValueError("\nAdditional invalid items:\n".join((errors[0], "\n".join(errors[1:])))
+                         if len(errors) > 1 else errors[0])
     return items
 
 
