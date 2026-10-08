@@ -586,6 +586,7 @@ def _initial_state(request: ScenarioDraftRequest) -> ScenarioDraftRunState:
         draft_artifact_path=request.draft_artifact_path,
         development_base_revision=request.development_base_revision,
         semantic_annotations=request.semantic_annotations,
+        candidate_interface_facts=request.candidate_interface_facts,
     )
 
 
@@ -599,6 +600,7 @@ def _validate_resume(state: ScenarioDraftRunState, request: ScenarioDraftRequest
         (state.draft_artifact_path, request.draft_artifact_path),
         (state.development_base_revision, request.development_base_revision),
         (state.semantic_annotations, request.semantic_annotations),
+        (state.candidate_interface_facts, request.candidate_interface_facts),
     )
     if any(left != right for left, right in immutable):
         raise ValueError("stale scenario draft state must not be reused after ticket, source, or base changes")
@@ -709,7 +711,7 @@ def _prepare_candidate(
     assessor = getattr(adapter, "assess_candidate", None)
     if not callable(assessor):
         raise ValueError("language adapter does not implement scenario candidate assessment")
-    assessment = assessor(ScenarioCandidateAssessmentRequest(provisional, request.ticket.production_path, _authoring_contract(request), request.semantic_annotations))
+    assessment = assessor(ScenarioCandidateAssessmentRequest(provisional, request.ticket.production_path, _authoring_contract(request), request.semantic_annotations, request.candidate_interface_facts))
     if not assessment.accepted:
         return ScenarioCandidatePreparation(provisional, assessment, None, None)
     analysis = adapter.analyse_candidate(provisional, request.ticket.production_path)

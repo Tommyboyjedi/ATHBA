@@ -13,9 +13,12 @@ from core.development.scenario_drafting_domain import (
 def selected_call_shape_issues(request: ScenarioCandidateAssessmentRequest, module: ast.Module) -> tuple[ScenarioCandidateIssue, ...]:
     production = str(PurePosixPath(request.production_path).with_suffix("")).replace("/", ".")
     issues: list[ScenarioCandidateIssue] = []
-    for annotation in request.semantic_annotations:
-        if annotation.receiver_owner is None or annotation.interaction != "invoke":
+    seen: set[tuple[str | None, str | None, int | None]] = set()
+    for annotation in (*request.semantic_annotations, *getattr(request, "candidate_interface_facts", ())):
+        identity = (annotation.symbol, annotation.receiver_owner, annotation.argument_count)
+        if identity in seen or annotation.interaction != "invoke":
             continue
+        seen.add(identity)
         inspector = _SelectedCallInspector(annotation, production)
         inspector.visit(module)
         issues.extend(inspector.issues)
@@ -91,32 +94,25 @@ class _SelectedCallInspector:
         direct = isinstance(function, ast.Name) and self.bindings.get(function.id) == "helper"
         member = isinstance(function, ast.Attribute) and function.attr == self.annotation.symbol
         module_call = isinstance(function, ast.Attribute) and member and isinstance(function.value, ast.Name) and self.bindings.get(function.value.id) == "module"
-        if direct or module_call:
+        if (direct or module_call) and self.annotation.receiver_owner is not None:
             self._issue("The selected behavior is an instance operation; a module/free helper does not demonstrate its receiver form.")
-        elif isinstance(function, ast.Attribute) and member and self._owned_receiver(function.value) and self.annotation.argument_count is not None:
-            expanded = any(isinstance(arg, ast.Starred) for arg in node.args) or any(arg.arg is None for arg in node.keywords)
-            count = len(node.args) + len(node.keywords)
-            if expanded or count != self.annotation.argument_count:
-                self._issue(f"The selected behavior requires {self.annotation.argument_count} explicit arguments; "
-                            f"this call has {'unresolved argument expansion' if expanded else str(count)}. "
-                            "Demonstrate the selected call shape without adding arguments or inferring parameter spellings.")
+        elif direct or module_call or (isinstance(function, ast.Attribute) and member and self._owned_receiver(function.value)):
+            issue = _argument_issue(self.annotation, node)
+            if issue:
+                self._issue(issue)
+        self._visit_children(node)
+
+    def visit_Compare(self, node: ast.Compare) -> None:
+        issue = _comparison_issue(self, node)
+        if issue:
+            self._issue(issue)
         self._visit_children(node)
 
     def _owned_receiver(self, expression: ast.AST) -> bool:
-        if isinstance(expression, ast.Name):
-            return self.bindings.get(expression.id) == "instance"
-        if not isinstance(expression, ast.Call):
-            return False
-        function = expression.func
-        if isinstance(function, ast.Name):
-            return self.bindings.get(function.id) == "constructor"
-        return (isinstance(function, ast.Attribute) and function.attr == self.annotation.receiver_owner
-                and isinstance(function.value, ast.Name) and self.bindings.get(function.value.id) == "module")
+        return _owned_receiver(self, expression)
 
     def _forget(self, node: ast.AST) -> None:
-        for child in ast.walk(node):
-            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
-                self.bindings.pop(child.id, None)
+        _forget_bindings(self.bindings, node)
 
     def _uncertain_scope(self, node: ast.AST) -> None:
         self._forget(node)
@@ -140,3 +136,42 @@ class _SelectedCallInspector:
 
     def _issue(self, message: str) -> None:
         self.issues.append(ScenarioCandidateIssue(ScenarioCandidateIssueCode.BEHAVIOR_CALL_SHAPE.value, message))
+
+
+def _argument_issue(annotation: SemanticApiAnnotation, call: ast.Call) -> str | None:
+    if annotation.argument_count is None:
+        return None
+    expanded = any(isinstance(arg, ast.Starred) for arg in call.args) or any(arg.arg is None for arg in call.keywords)
+    count = len(call.args) + len(call.keywords)
+    if expanded or count != annotation.argument_count:
+        return (f"The referenced public operation requires {annotation.argument_count} explicit arguments; "
+                f"this call has {'unresolved argument expansion' if expanded else str(count)}. "
+                "Demonstrate its call shape without adding arguments or inferring parameter spellings.")
+    return None
+
+
+def _comparison_issue(inspector: _SelectedCallInspector, node: ast.Compare) -> str | None:
+    for operand in (node.left, *node.comparators):
+        if (isinstance(operand, ast.Attribute) and operand.attr == inspector.annotation.symbol
+                and inspector._owned_receiver(operand.value)):
+            return ("Invoke the referenced public operation before comparing its observable result; "
+                    "a bare attribute comparison does not demonstrate the source call form.")
+    return None
+
+
+def _forget_bindings(bindings: dict[str, str], node: ast.AST) -> None:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+            bindings.pop(child.id, None)
+
+
+def _owned_receiver(inspector: _SelectedCallInspector, expression: ast.AST) -> bool:
+    if isinstance(expression, ast.Name):
+        return inspector.bindings.get(expression.id) == "instance"
+    if not isinstance(expression, ast.Call):
+        return False
+    function = expression.func
+    if isinstance(function, ast.Name):
+        return inspector.bindings.get(function.id) == "constructor"
+    return (isinstance(function, ast.Attribute) and function.attr == inspector.annotation.receiver_owner
+            and isinstance(function.value, ast.Name) and inspector.bindings.get(function.value.id) == "module")
