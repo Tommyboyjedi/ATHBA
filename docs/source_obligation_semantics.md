@@ -22,7 +22,7 @@ Mechanical compound subjects remain fail-closed until their source conjuncts are
 partitioned exactly once. No verifier approves half a compound. Read/nonmutation
 is observable invariant, not a static container proof.
 
-Assurance policy will keep behavioral correctness separate from proof confidence:
+Assurance policy keeps behavioral correctness separate from proof confidence:
 PROVEN allows full acceptance; VIOLATED blocks; source-grounded non-behavioral
 UNPROVEN can continue to Naming/Refactor with a durable qualified completion.
 Unknown behavioral obligations, invalid provenance, compound split exhaustion and

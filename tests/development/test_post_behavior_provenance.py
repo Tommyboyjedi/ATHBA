@@ -16,7 +16,7 @@ SOURCE = "Keep the implementation dependency-free and in memory."
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["naming", "refactoring"])
-async def test_post_behavior_candidates_reach_real_storage_and_reject_opaque_effects(tmp_path, monkeypatch, phase):
+async def test_post_behavior_candidates_retain_unproven_storage_and_complete_qualified(tmp_path, monkeypatch, phase):
     state_root, root, entry, baseline = seeded_delivery(tmp_path)
     features = StrictTddFeatureRepository(state_root / "features")
     feature = features.load(PROJECT)
@@ -25,11 +25,13 @@ async def test_post_behavior_candidates_reach_real_storage_and_reject_opaque_eff
         items=[*keeper.checklist.items, SpecificationChecklistItem(
             "memory", "Keep the implementation in memory.", "constraint", "required",
             "Keep the implementation ... in memory.", "in memory")])
-    features.save(replace(feature, gatekeeper_payload=replace(keeper, checklist=checklist).to_dict(),
+    contract = dict(feature.contract_payload)
+    contract["requirement_source"] = checklist.requirement_text
+    features.save(replace(feature, contract_payload=contract, gatekeeper_payload=replace(keeper, checklist=checklist).to_dict(),
         final_reconciliation=(*feature.final_reconciliation, {"checklist_ref": "memory", "answer": "YES"})))
     assessment = ("LegacyCounter -> SumCounter" if phase == "naming" else
         "YES\nobjective: Replace duplicated accumulation with one sum calculation.\nreason: Removes an identical loop.")
-    responses = (["NO"] if phase == "refactoring" else []) + [assessment, gatekeeper_yes()]
+    responses = (["NO"] if phase == "refactoring" else []) + [assessment, gatekeeper_yes()] + (["NO", "NO"] if phase == "naming" else ["NO"])
     gateway, calls = configured_gateway(monkeypatch, responses)
     import core.development.python_specification_evidence as evidence
     observed = []
@@ -45,13 +47,15 @@ async def test_post_behavior_candidates_reach_real_storage_and_reject_opaque_eff
         state = await PostBehaviorCompositionFactory().build(request).advance(PROJECT)
         if state.terminal:
             break
-    # Provenance only opens evidence assessment. Existing opaque-operator policy
-    # rejects these loop/sum implementations; neither candidate may be promoted.
-    assert state.status == PostBehaviorStatus.BLOCKED
+    # The adapter still cannot prove loop/sum effects. Its NO/unsupported record
+    # remains retained while behavior-preserving promotion completes qualified.
+    assert state.status == PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE
+    assert state.unproven_assurance
     assert len(observed) == len(execution.calls) == 1
-    assert len(calls) == (2 if phase == "naming" else 3)
+    assert len(calls) == 4
     assert not responses
-    assert state.behaviorally_accepted_revision == state.current_post_behavior_revision == baseline
+    assert state.behaviorally_accepted_revision == baseline
+    assert state.current_post_behavior_revision != baseline
     records = [item["payload"] for item in evidence_records(state_root)
                if item["kind"] == "specification_reconciliation"]
     assert len(records) == 1

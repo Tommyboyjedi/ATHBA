@@ -13,6 +13,7 @@ class ObligationModality(str, Enum):
 
 class EvidencePolicy(str, Enum):
     BEHAVIORAL = "accepted_tests"
+    DOMAIN = "input_domain"
     DEPENDENCY = "dependency_free"
     STORAGE = "no_storage"
     PUBLIC_SURFACE = "forbidden_public_surface"

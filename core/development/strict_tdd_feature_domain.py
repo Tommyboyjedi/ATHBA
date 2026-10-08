@@ -18,6 +18,7 @@ class StrictTddFeatureStatus(str, Enum):
     RUNNING = "running"
     BLOCKED = "blocked"
     COMPLETED = "completed"
+    COMPLETED_WITH_UNPROVEN_ASSURANCE = "completed_with_unproven_assurance"
 
 
 def _text(value: object, label: str) -> str:

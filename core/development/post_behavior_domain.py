@@ -2,6 +2,8 @@
 from __future__ import annotations
 from core.execution.rack_ai_reservation_state import RackAiReservationState
 
+from core.development.assurance_completion import AssuranceGap
+
 from dataclasses import dataclass, field
 from enum import Enum
 import re
@@ -25,6 +27,7 @@ class PostBehaviorStatus(str, Enum):
     REFACTOR_VALIDATION_PENDING = "REFACTOR_VALIDATION_PENDING"
     REFACTOR_COMPLETE = "REFACTOR_COMPLETE"
     POST_BEHAVIOR_COMPLETE = "POST_BEHAVIOR_COMPLETE"
+    POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE = "POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE"
     BLOCKED = "BLOCKED"
 
 
@@ -70,9 +73,12 @@ class ValidationEvidence:
     passed: bool
     evidence_refs: tuple[str, ...]
     diagnostic: str = ""
+    unproven_assurance: tuple[AssuranceGap, ...] = ()
 
     def __post_init__(self) -> None:
         _revision(self.revision)
+        if any(gap.revision != self.revision for gap in self.unproven_assurance):
+            raise ValueError("assurance confidence must concern the exact validation revision")
         if type(self.passed) is not bool or not self.evidence_refs or any(not ref for ref in self.evidence_refs):
             raise ValueError("validation requires a boolean result and retained evidence")
 
@@ -205,8 +211,15 @@ class PostBehaviorState:
         return self.entry.delivery_id
 
     @property
+    def unproven_assurance(self) -> tuple[AssuranceGap, ...]:
+        for item in reversed(self.passes):
+            if item.outcome == PostBehaviorOutcome.PROMOTED and item.gatekeeper is not None:
+                return item.gatekeeper.unproven_assurance
+        return self.entry.gatekeeper_evidence.unproven_assurance
+
+    @property
     def terminal(self) -> bool:
-        return self.status in {PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.BLOCKED}
+        return self.status in {PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE, PostBehaviorStatus.BLOCKED}
 
 
 def _revision(value: str) -> None:
@@ -246,6 +259,10 @@ def _validate_state(state: PostBehaviorState) -> None:
     if state.status == PostBehaviorStatus.BLOCKED and state.terminal_reason is None:
         raise ValueError("blocked post-behavior state requires a recorded reason")
 
+    if state.status == PostBehaviorStatus.POST_BEHAVIOR_COMPLETE and state.unproven_assurance:
+        raise ValueError("unproven assurance requires qualified completion")
+    if state.status == PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE and not state.unproven_assurance:
+        raise ValueError("qualified completion requires retained unproven assurance")
     _validate_phase(state, naming_complete)
 
 
@@ -260,7 +277,7 @@ def _validate_phase(state: PostBehaviorState, naming_complete: bool) -> None:
     refactor_statuses = {
         PostBehaviorStatus.REFACTOR_ASSESSMENT_PENDING, PostBehaviorStatus.REFACTOR_CHANGE_PENDING,
         PostBehaviorStatus.REFACTOR_VALIDATION_PENDING, PostBehaviorStatus.REFACTOR_COMPLETE,
-        PostBehaviorStatus.POST_BEHAVIOR_COMPLETE,
+        PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE,
     }
     if state.status in refactor_statuses and not naming_complete:
         raise ValueError("refactoring state requires completed naming reconciliation")
@@ -279,7 +296,7 @@ def _validate_phase(state: PostBehaviorState, naming_complete: bool) -> None:
         raise ValueError("change and validation states require an affirmative durable decision")
     if state.status == PostBehaviorStatus.NAMING_COMPLETE and not naming_complete:
         raise ValueError("naming completion requires naming NO")
-    if state.status in {PostBehaviorStatus.REFACTOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE}:
+    if state.status in {PostBehaviorStatus.REFACTOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE}:
         if (not state.passes or state.passes[-1].phase != PostBehaviorPhase.REFACTORING
                 or state.passes[-1].outcome not in {PostBehaviorOutcome.NO_CHANGE, PostBehaviorOutcome.BOUNDED_STOP}
                 or state.terminal_reason != state.passes[-1].stop_reason or state.active_pass is not None):

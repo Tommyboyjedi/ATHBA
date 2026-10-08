@@ -270,7 +270,8 @@ async def test_restart_at_every_persisted_transition_does_not_replay_work(tmp_pa
         lifecycle.start(entry())
         state = await lifecycle.advance("delivery-1")
     assert {item for item in PostBehaviorStatus if item not in {
-        PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.BLOCKED}} <= seen
+        PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE,
+        PostBehaviorStatus.BLOCKED}} <= seen
     assert [item[0] for item in scripted.calls].count("mutation") == 2
     assert [item[0] for item in scripted.calls].count("naming") == 2
     assert [item[0] for item in scripted.calls].count("refactor") == 2

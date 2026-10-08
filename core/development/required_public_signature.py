@@ -73,3 +73,12 @@ def _mandatory_declarations(source: str) -> Iterator[re.Match[str]]:
         if explicit_modality(context) in {ObligationModality.NON_GOAL, ObligationModality.FORBIDDEN}:
             continue
         yield match
+
+@dataclass(frozen=True)
+class SignatureAssurance:
+    violations: tuple[str, ...] = ()
+    unsupported: tuple[str, ...] = ()
+
+    @property
+    def findings(self) -> tuple[str, ...]:
+        return self.violations + self.unsupported

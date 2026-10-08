@@ -55,7 +55,7 @@ def test_mixed_final_routing_preserves_completed_work_and_original_checklist(tmp
 
     monkeypatch.setattr(fixture.Reasoning, "reason", reason)
     factory: Any = fixture.Factory(log, counts)
-    code = 2 if unsupported else 0
+    code = 0
     assert main(fixture.args("start", state, evidence)[:-2], factory) == code
     capsys.readouterr()
     current = features.load("toggle-project")
@@ -72,7 +72,7 @@ def test_mixed_final_routing_preserves_completed_work_and_original_checklist(tmp
     assert all(record["accepted_test_names"] == [] for record in results[1:])
     assert all(record["evidence_status"] == "covered_by_engineering_policy" for record in results[3:6])
     if unsupported:
-        assert current.blocked_reason == "specification_gatekeeper_failed"
+        assert current.blocked_reason is None
         assert results[-1]["evidence_status"] == "unsupported_evidence_policy"
     replay: Any = fixture.Factory(log, counts)
     assert main(fixture.args("resume", state, evidence)[:-2], replay) == code
