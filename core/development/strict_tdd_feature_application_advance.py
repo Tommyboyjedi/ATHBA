@@ -371,7 +371,7 @@ def _result_for(
         None if nested is None else nested.frontier_index,
         state.canonical_development_base if nested is None else nested.canonical_sha,
         state.working_revision if nested is None else nested.working_sha,
-        (len(state.completed_behaviors),) if nested is None else (len(state.completed_behaviors), *nested.retry_counts),
+        _retry_counts(state, nested),
         _pending_action(state) if nested is None or replan_pending(state) or repair_pending(state) else nested.pending_action,
     )
     path = StrictTddTransitionPath(
@@ -402,6 +402,16 @@ def _result_for(
         path,
         project_disposition,
     )
+
+
+
+def _retry_counts(state: StrictTddFeatureState, nested: TransitionFingerprint | None) -> tuple[int, ...]:
+    counts = (len(state.completed_behaviors),)
+    if nested is not None:
+        return (*counts, *nested.retry_counts)
+    if replan_pending(state):
+        return (*counts, int(state.behavior_replans[-1].correction_attempted))
+    return counts
 
 
 def _pending_action(state: StrictTddFeatureState) -> str:
