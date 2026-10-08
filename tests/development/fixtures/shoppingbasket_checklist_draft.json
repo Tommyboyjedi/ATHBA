@@ -1,0 +1,88 @@
+{
+  "requirement_text": "Provide a ShoppingBasket class in shopping_basket.py. A new basket is empty. Calling add_item(name, price) adds one item with a non-negative integer price. Calling item_count() returns the number of items. Calling total_price() returns the sum of all item prices. Adding bread for 3 and milk for 2 must produce an item count of 2 and a total price of 5. Keep all state in memory and use no external dependencies.",
+  "draft": {
+    "items": [
+      {
+        "kind": "behavior",
+        "modality": "required",
+        "obligation_type": "observable_behavior",
+        "ref": "REQ-001",
+        "source_quote": "Provide a ShoppingBasket class in shopping_basket.py",
+        "subject": "ShoppingBasket class",
+        "text": "The system must provide a ShoppingBasket class within the shopping_basket.py file."
+      },
+      {
+        "kind": "invariant",
+        "modality": "required",
+        "obligation_type": "invariant",
+        "ref": "REQ-002",
+        "source_quote": "A new basket is empty",
+        "subject": "new basket is empty",
+        "text": "A newly instantiated ShoppingBasket must be empty."
+      },
+      {
+        "kind": "behavior",
+        "modality": "required",
+        "obligation_type": "observable_behavior",
+        "ref": "REQ-003",
+        "source_quote": "Calling add_item(name, price) adds one item",
+        "subject": "adds one item",
+        "text": "The add_item(name, price) method must add one item to the basket."
+      },
+      {
+        "kind": "constraint",
+        "modality": "required",
+        "obligation_type": "precondition",
+        "ref": "REQ-004",
+        "source_quote": "non-negative integer price",
+        "subject": "non-negative integer price",
+        "text": "The price provided to add_item must be a non-negative integer."
+      },
+      {
+        "kind": "behavior",
+        "modality": "required",
+        "obligation_type": "observable_behavior",
+        "ref": "REQ-005",
+        "source_quote": "Calling item_count() returns the number of items",
+        "subject": "returns the number of items",
+        "text": "The item_count() method must return the total number of items in the basket."
+      },
+      {
+        "kind": "behavior",
+        "modality": "required",
+        "obligation_type": "observable_behavior",
+        "ref": "REQ-006",
+        "source_quote": "Calling total_price() returns the sum of all item prices",
+        "subject": "returns the sum of all item prices",
+        "text": "The total_price() method must return the sum of all item prices in the basket."
+      },
+      {
+        "kind": "behavior",
+        "modality": "required",
+        "obligation_type": "observable_behavior",
+        "ref": "REQ-007",
+        "source_quote": "Adding bread for 3 and milk for 2 must produce an item count of 2 and a total price of 5",
+        "subject": "item count of 2 and a total price of 5",
+        "text": "Adding bread for 3 and milk for 2 must result in an item count of 2 and a total price of 5."
+      },
+      {
+        "kind": "quality",
+        "modality": "required",
+        "obligation_type": "mechanical_assurance",
+        "ref": "REQ-008",
+        "source_quote": "Keep all state in memory",
+        "subject": "Keep all state in memory",
+        "text": "All basket state must be maintained in memory."
+      },
+      {
+        "kind": "quality",
+        "modality": "required",
+        "obligation_type": "mechanical_assurance",
+        "ref": "REQ-009",
+        "source_quote": "use no external dependencies",
+        "subject": "use no external dependencies",
+        "text": "The implementation must not use any external dependencies."
+      }
+    ]
+  }
+}
