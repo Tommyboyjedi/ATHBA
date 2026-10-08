@@ -25,6 +25,7 @@ class EvidenceStatus(str, Enum):
     NOT_REQUIRED = "not_required"
     ENGINEERING_COVERED = "covered_by_engineering_policy"
     DOMAIN = "caller_precondition"
+    NAMING = "deferred_to_naming"
 
 
 @dataclass(frozen=True)
@@ -46,7 +47,7 @@ class EvidenceResult:
 
     def to_record(self, item: ChecklistItem) -> dict[str, object]:
         answer = "YES" if self.status == EvidenceStatus.PASS else "NO"
-        if self.status in {EvidenceStatus.NOT_REQUIRED, EvidenceStatus.ENGINEERING_COVERED, EvidenceStatus.DOMAIN}:
+        if self.status in {EvidenceStatus.NOT_REQUIRED, EvidenceStatus.ENGINEERING_COVERED, EvidenceStatus.DOMAIN, EvidenceStatus.NAMING}:
             answer = "NOT_APPLICABLE"
         return {"checklist_ref": item.ref, "answer": answer,
                 "accepted_test_names": [], "rationale": "; ".join(self.details),
@@ -117,6 +118,8 @@ class EvidencePolicyRouter:
         if modality == ObligationModality.REQUIRED:
             if item.obligation_type == ObligationType.PRECONDITION.value:
                 policy = EvidencePolicy.DOMAIN
+            elif item.obligation_type == ObligationType.NAMING.value:
+                policy = EvidencePolicy.NAMING
             elif item.obligation_type == ObligationType.BEHAVIOR.value:
                 policy = EvidencePolicy.BEHAVIORAL
         if policy != EvidencePolicy.UNSUPPORTED and modality == ObligationModality.FORBIDDEN and re.search(r"\bexpose\b|\bimplement\b|\bexist\b", quote.lower()):

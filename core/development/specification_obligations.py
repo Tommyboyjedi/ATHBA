@@ -14,6 +14,7 @@ class ObligationModality(str, Enum):
 class EvidencePolicy(str, Enum):
     BEHAVIORAL = "accepted_tests"
     DOMAIN = "input_domain"
+    NAMING = "post_behavior_naming"
     DEPENDENCY = "dependency_free"
     STORAGE = "no_storage"
     PUBLIC_SURFACE = "forbidden_public_surface"

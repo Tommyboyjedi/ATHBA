@@ -116,7 +116,9 @@ def test_naming_rejects_multiple_invented_or_wrapped_mapping(answer):
 
 
 def test_assessor_no_and_single_refactor_objective():
-    assert parse_naming_decision("NO", naming_input()) == NamingDecision()
+    compliant = replace(naming_input(), production=replace(production(),
+        files=(RevisionFile("subject.py", SOURCE.replace("old_name", "exact_name")),)))
+    assert parse_naming_decision("NO", compliant) == NamingDecision()
     assert parse_refactor_decision("NO") == RefactorDecision()
     assert parse_refactor_decision("YES\nobjective: Remove duplicate computation.\nreason: Avoid repeated work.") == (
         RefactorDecision(RefactorOpportunity("Remove duplicate computation.", "Avoid repeated work."))
@@ -520,7 +522,9 @@ async def test_naming_prompt_limits_mismatch_to_missing_required_identifier(loca
 @pytest.mark.asyncio
 async def test_naming_prompt_output_identifiers_have_no_trailing_punctuation(local_provider, monkeypatch):
     gateway, calls = reasoner(local_provider, monkeypatch, "NO")
-    await NamingAssessor(gateway).reason(naming_input())
+    compliant = replace(naming_input(), production=replace(production(),
+        files=(RevisionFile("subject.py", SOURCE.replace("old_name", "exact_name")),)))
+    await NamingAssessor(gateway).reason(compliant)
     instruction = calls[0].prompt.rsplit("\n", 1)[0]
     output = instruction.split("Return exactly either:\n", 1)[1].split("\nDo not add", 1)[0]
     assert output == (

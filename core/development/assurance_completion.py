@@ -54,7 +54,7 @@ def assess_completion(authority: CompletionAuthority) -> CompletionAssessment:
         return CompletionAssessment(False)
     gaps = []
     for record in active:
-        if reconciliation_satisfied((record,)) or domain_covered(record, authority.original_source):
+        if reconciliation_satisfied((record,)) or delegated_covered(record, authority.original_source):
             continue
         gap = unproven_gap(record, authority.original_source)
         if gap is None:
@@ -92,11 +92,13 @@ def unproven_gap(record: dict[str, object], source: str) -> AssuranceGap | None:
     except (ValueError, KeyError, TypeError):
         return None
 
-def domain_covered(record: dict[str, object], source: str) -> bool:
-    if (record.get("answer") != "NOT_APPLICABLE"
-            or record.get("evidence_policy") != EvidencePolicy.DOMAIN.value
-            or record.get("evidence_status") != EvidenceStatus.DOMAIN.value
-            or record.get("findings") != []):
+def delegated_covered(record: dict[str, object], source: str) -> bool:
+    statuses = {EvidencePolicy.DOMAIN.value: EvidenceStatus.DOMAIN.value,
+                EvidencePolicy.NAMING.value: EvidenceStatus.NAMING.value}
+    policy = record.get("evidence_policy")
+    if (record.get("answer") != "NOT_APPLICABLE" or not isinstance(policy, str)
+            or policy not in statuses or record.get("evidence_status") != statuses[policy]
+            or record.get("findings") != [] or record.get("status") or record.get("blocked_reason")):
         return False
     payload = record.get("source_item")
     if not isinstance(payload, dict):
@@ -104,6 +106,6 @@ def domain_covered(record: dict[str, object], source: str) -> bool:
     try:
         item = SpecificationChecklistItem.from_dict(payload)
         return (item.ref == record.get("checklist_ref") and bool(item.source_quote)
-                and EvidencePolicyRouter().route_source(item, source).policy == EvidencePolicy.DOMAIN)
+                and EvidencePolicyRouter().route_source(item, source).policy.value == policy)
     except (ValueError, KeyError, TypeError):
         return False

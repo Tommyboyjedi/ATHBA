@@ -28,7 +28,11 @@ def production_signature_assurance(source: str, signatures: tuple[RequiredPublic
         definitions = [node for body in bodies for node in body
                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == item.name]
         if complete and len(definitions) != 1:
-            failed.append(f"{SIGNATURE_MISMATCH}: required operation {item.source_quote} is missing or ambiguous")
+            unknown.append(f"{SIGNATURE_MISMATCH}: source-spelled declaration {item.source_quote} is unresolved; Naming or declaration resolution required")
+        if len(definitions) > 1:
+            if not complete:
+                unknown.append(f"{SIGNATURE_MISMATCH}: {item.source_quote} has ambiguous declarations")
+            continue
         for node in definitions:
             args = node.args
             names = tuple(arg.arg for arg in args.posonlyargs + args.args)

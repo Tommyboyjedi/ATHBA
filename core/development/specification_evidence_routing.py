@@ -47,6 +47,10 @@ class RoutedChecklistReconciler:
             return EvidenceResult(EvidenceStatus.UNSUPPORTED, EvidencePolicy.UNSUPPORTED,
                                   self.catalog.semantic_revision,
                                   ("source provenance mismatch", str(error))).to_record(item)
+        if decision.policy == EvidencePolicy.NAMING:
+            return EvidenceResult(EvidenceStatus.NAMING, EvidencePolicy.NAMING,
+                self.catalog.semantic_revision,
+                ("Explicit lexical authority is retained for post-behavior Naming; not behavioral or assurance proof.",)).to_record(item)
         if decision.policy == EvidencePolicy.DOMAIN:
             return EvidenceResult(EvidenceStatus.DOMAIN, EvidencePolicy.DOMAIN,
                 self.catalog.semantic_revision,
