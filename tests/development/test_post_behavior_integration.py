@@ -253,6 +253,11 @@ async def test_real_git_full_regression_existing_gatekeeper_and_restart_chain(tm
 
 @pytest.mark.asyncio
 async def test_real_composition_no_work_keeps_original_baseline(tmp_path, monkeypatch):
+    # NO is valid only for an already naming-compliant accepted fixture.
+    import sys
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "SOURCE", SOURCE.replace("LegacyCounter", "SumCounter"))
+    monkeypatch.setattr(module, "TEST", TEST.replace("LegacyCounter", "SumCounter"))
     state_root, root, _, baseline = seeded_delivery(tmp_path)
     gateway, calls = configured_gateway(monkeypatch, ["NO", "NO"])
     execution = GenericGitExecution(root, tmp_path)

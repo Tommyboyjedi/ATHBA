@@ -229,6 +229,11 @@ def parse_naming_decision(raw: str, request: NamingAssessmentInput) -> NamingDec
             raise ValueError("explicit parameter naming mismatch remains")
         if missing_signature_names(ParameterNamingInspection(request.production.files, request.material.required_signatures)):
             raise ValueError("explicit operation naming mismatch remains")
+        scoped_names = {name for item in request.material.required_signatures
+                        for name in (item.owner, item.name, *item.parameters) if name is not None}
+        if (set(request.material.required_identifiers) - scoped_names
+                - set(declared_identifier_names(request.production.files))):
+            raise ValueError("explicit identifier naming mismatch remains")
         return NamingDecision()
     match = re.fullmatch(
         rf"YES\ncurrent_name: ({IDENTIFIER_PATTERN})\nrequired_name: ({IDENTIFIER_PATTERN})",

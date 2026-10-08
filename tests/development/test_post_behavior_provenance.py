@@ -17,6 +17,11 @@ SOURCE = "Keep the implementation dependency-free and in memory."
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["naming", "refactoring"])
 async def test_post_behavior_candidates_retain_unproven_storage_and_complete_qualified(tmp_path, monkeypatch, phase):
+    if phase == "refactoring":
+        # This lane declares Naming NO; seed a naming-compliant fixture.
+        import tests.development.test_post_behavior_integration as fixture
+        monkeypatch.setattr(fixture, "SOURCE", fixture.SOURCE.replace("LegacyCounter", "SumCounter"))
+        monkeypatch.setattr(fixture, "TEST", fixture.TEST.replace("LegacyCounter", "SumCounter"))
     state_root, root, entry, baseline = seeded_delivery(tmp_path)
     features = StrictTddFeatureRepository(state_root / "features")
     feature = features.load(PROJECT)
@@ -41,7 +46,7 @@ async def test_post_behavior_candidates_retain_unproven_storage_and_complete_qua
         return original(trees)
     monkeypatch.setattr(evidence, "storage_findings", storage)
     execution = GenericGitExecution(root, tmp_path)
-    execution.refactored_source = REFACTORED.replace("SumCounter", "LegacyCounter")
+    execution.refactored_source = REFACTORED if phase == "refactoring" else REFACTORED.replace("SumCounter", "LegacyCounter")
     request = PostBehaviorCompositionRequest(state_root, PROJECT, gateway, execution)
     for _ in range(30):
         state = await PostBehaviorCompositionFactory().build(request).advance(PROJECT)

@@ -118,9 +118,11 @@ def test_missing_original_operation_can_only_be_closed_in_naming():
     from core.development.feature_signature_evidence import signature_evidence
     source="Provide a Basket class. Calling add(name, price) adds an item."
     code="class Basket:\n    def insert(self,item_id,cost):\n        return item_id,cost\n"
-    snap=snapshot("accepted",code)
+    snap=snapshot("a"*40,code)
     evidence=signature_evidence(source,snap,"python")
-    assert evidence["answer"]=="YES"  # Bounded call-shape check is not Naming.
+    assert evidence["answer"]=="NO" and evidence["evidence_status"]=="unsupported_evidence_policy"
+    from core.development.assurance_completion import CompletionAuthority, assess_completion
+    assert assess_completion(CompletionAuthority(({"answer":"YES"},evidence),source)).behaviorally_complete
     material=NamingMaterial(source,("Basket","add","name","price"),required_signatures(source))
     focused=PythonProductionSlice().derive(SliceRequest(snapshot("entry",""),snap))
     with pytest.raises(ValueError,match="operation"):
