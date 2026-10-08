@@ -286,7 +286,10 @@ class BehaviorRepairService:
         if candidate is None or state.regression.status != REGRESSION_CLEAR:
             raise ValueError("behavior repair promotion requires a regression-clear candidate")
         _promote_canonical_revision(request, candidate)
-        promoted = replace(state, development_base_revision=candidate, candidate_chain_revision=candidate)
+        promoted = replace(
+            state, development_base_revision=candidate, candidate_chain_revision=candidate,
+            completion=replace(state.completion, completed_revision=candidate),
+        )
         self.state_store.save(promoted)
         return BehaviorRepairOutcome(promoted, "behavior_repair_promoted")
 

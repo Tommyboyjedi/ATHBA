@@ -31,6 +31,7 @@ class MicrocycleTransitionKind(str, Enum):
     BEHAVIOR_REVIEW_APPROVED = "behavior_review_approved"
     BEHAVIOR_REVIEW_REPAIR_REQUIRED = "behavior_review_repair_required"
     BEHAVIOR_REPAIR_SUBMITTED = "behavior_repair_submitted"
+    BEHAVIOR_REPAIR_CANDIDATE_REJECTED = "behavior_repair_candidate_rejected"
     BEHAVIOR_REPAIR_VERIFIED = "behavior_repair_verified"
     BEHAVIOR_REPAIR_REGRESSION_CLEAR = "behavior_repair_regression_clear"
     BEHAVIOR_REPLAN_REQUIRED = "behavior_replan_required"

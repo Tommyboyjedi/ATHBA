@@ -96,8 +96,12 @@ class TestScenarioDraft:
     scenario_rationale: str = "not yet supplied"
     source_requirement_refs: tuple[str, ...] = ()
     required_signatures: tuple[RequiredPublicSignature, ...] = ()
+    behavior_summary: str = ""
+    expected_result: str = ""
 
     def __post_init__(self) -> None:
+        if self.behavior_summary or self.expected_result:
+            _texts((self.behavior_summary, self.expected_result), "selected behavior authority")
         _texts((self.scenario_id, self.behavior_ref, self.language_id, self.source, self.canonical_test_identity, self.test_path, self.scenario_rationale), "draft fields")
         _texts(self.source_requirement_refs, "draft source requirement refs")
 
@@ -116,6 +120,8 @@ class TestScenarioDraft:
             scenario_rationale=str(value.get("scenario_rationale", "not yet supplied")),
             source_requirement_refs=tuple(str(item) for item in value.get("source_requirement_refs", ())),
             required_signatures=tuple(RequiredPublicSignature.from_dict(item) for item in value.get("required_signatures", ())),
+            behavior_summary=str(value.get("behavior_summary", "")),
+            expected_result=str(value.get("expected_result", "")),
         )
 
 

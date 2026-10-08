@@ -716,6 +716,7 @@ def _prepare_candidate(
         request.scenario_id, request.ticket.step_id, request.language_id,
         canonical.source, request.ticket.test_name, request.allowed_test_path,
         "awaiting independent scenario intent review", request.source_requirement_refs, request.required_signatures,
+        behavior_summary=request.ticket.focused_behavior, expected_result=request.ticket.expected_result,
     )
     return ScenarioCandidatePreparation(candidate, assessment, analysis, draft)
 

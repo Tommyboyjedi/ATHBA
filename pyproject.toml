@@ -42,6 +42,10 @@ python_version = "3.14"
 files = [
   "scripts/run_pr30_post_behavior_proof.py",
   "core/development/post_behavior_test_context.py",
+  "core/development/behavior_review_material.py",
+  "core/development/git_behavior_review_material.py",
+  "core/development/behavior_completion.py",
+  "core/development/provider_behavior_reviewer.py",
   "core/development/post_behavior_adapters.py",
   "core/development/post_behavior_assessment.py",
   "core/development/parameter_naming.py",
