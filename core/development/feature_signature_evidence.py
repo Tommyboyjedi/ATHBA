@@ -10,20 +10,24 @@ def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id
     signatures = required_signatures(source)
     if not signatures:
         return None
-    findings: list[str] = []
+    failed, unknown = [], []
     adapter = signature_adapter(language_id)
     if adapter is None:
-        findings.append("required public signature has no language evidence adapter")
+        unknown.append("required public signature has no language evidence adapter")
     else:
         try:
-            findings.extend(adapter.verify_signature_snapshot(snapshot, signatures))
+            proof = adapter.signature_assurance(snapshot, signatures)
+            failed.extend(proof.violations)
+            unknown.extend(proof.unsupported)
         except SyntaxError:
-            findings.append("required public signature cannot be proven from malformed source")
+            unknown.append("required public signature cannot be proven from malformed source")
     if not snapshot.complete:
-        findings.append("required public signature snapshot is incomplete")
+        unknown.append("required public signature snapshot is incomplete")
+    findings = failed + unknown
     return {
         "checklist_ref": "source-required-public-signatures", "answer": "NO" if findings else "YES",
         "accepted_test_names": [], "evidence_policy": "source_public_signature",
+        "evidence_status": "fail" if failed else "unsupported_evidence_policy" if unknown else "pass",
         "revision": snapshot.revision, "findings": findings,
         "rationale": "Existing source-bound call shapes checked at the canonical revision; lexical identifiers reconcile in Naming.",
         "required_signatures": [item.to_dict() for item in signatures],

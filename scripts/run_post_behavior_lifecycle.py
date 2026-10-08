@@ -22,7 +22,7 @@ async def execute(arguments) -> int:
         arguments.state_root, arguments.project_id, gateway))
     state = await lifecycle.run(arguments.project_id)
     print(json.dumps(PostBehaviorStateCodec.encode(state), sort_keys=True, indent=2))
-    return 0 if state.status == PostBehaviorStatus.POST_BEHAVIOR_COMPLETE else 2
+    return 0 if state.status in {PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE} else 2
 
 
 def main() -> int:

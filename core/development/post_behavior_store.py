@@ -8,6 +8,7 @@ from typing import Any
 
 from core.atomic_json_file import read_json_file, write_json_atomically
 from core.filesystem_policy import resolve_identifier_path
+from core.development.assurance_completion import AssuranceGap
 from core.development.post_behavior_assessment import (
     IdentifierRename, NamingDecision, RefactorDecision, RefactorOpportunity,
 )
@@ -23,7 +24,8 @@ from core.development.workspace_attempt_policy import WorkspaceAttemptState
 def _validation(value: dict[str, Any] | None) -> ValidationEvidence | None:
     if value is None:
         return None
-    return ValidationEvidence(**{**value, "evidence_refs": tuple(value["evidence_refs"])})
+    return ValidationEvidence(**{**value, "evidence_refs": tuple(value["evidence_refs"]),
+        "unproven_assurance": tuple(AssuranceGap(**item) for item in value.get("unproven_assurance", ()))})
 
 
 def _assessment(value: dict[str, Any] | None) -> PostBehaviorAssessment | None:

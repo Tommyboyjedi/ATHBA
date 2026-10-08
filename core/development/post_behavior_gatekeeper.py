@@ -19,7 +19,7 @@ from core.development.reconciliation_progress import (
     ChecklistItemProgress, ReconciliationJournal, ReconciliationJournalRequest, evidence_digest,
 )
 from core.development.specification_domain import SpecificationGatekeeperRunState, SpecificationChecklistItem
-from core.development.specification_evidence_policy import reconciliation_satisfied
+from core.development.assurance_completion import CompletionAuthority, assess_completion
 from core.development.specification_evidence_routing import RoutedChecklistReconciler, required_source_subjects
 from core.development.specification_reconciliation import ChecklistItemReconciler, GitAcceptedTestCatalog
 from core.execution.reasoning_gateway import ReasoningGateway
@@ -85,4 +85,6 @@ class PostBehaviorGatekeeper:
             "revision": revision, "behavioral_baseline": baseline,
             "authority_digest": state.entry.behavioral_authority_digest, "results": results,
             "original_accepted_tests": [item.to_dict() for item in deps.delivery.accepted_tests]})
-        return ValidationEvidence(revision, reconciliation_satisfied(tuple(results)), (ref,))
+        confidence = assess_completion(CompletionAuthority(tuple(results), keeper.checklist.requirement_text))
+        return ValidationEvidence(revision, confidence.behaviorally_complete, (ref,),
+            unproven_assurance=confidence.unproven_assurance)

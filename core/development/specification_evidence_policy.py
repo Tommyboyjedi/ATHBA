@@ -6,7 +6,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol
 
-from core.development.required_public_signature import SignatureInspection, RequiredPublicSignature
+from core.development.source_obligation_semantics import ObligationType
+from core.development.required_public_signature import SignatureInspection, RequiredPublicSignature, SignatureAssurance
 from core.development.microcycle_domain import LanguageAdapterDescriptor
 from core.development.specification_domain import SourceRequirementClause, SpecificationChecklistItem
 from core.development.specification_obligations import EvidencePolicy, ObligationModality, explicit_modality
@@ -23,6 +24,7 @@ class EvidenceStatus(str, Enum):
     UNSUPPORTED = "unsupported_evidence_policy"
     NOT_REQUIRED = "not_required"
     ENGINEERING_COVERED = "covered_by_engineering_policy"
+    DOMAIN = "caller_precondition"
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,7 @@ class EvidenceResult:
 
     def to_record(self, item: ChecklistItem) -> dict[str, object]:
         answer = "YES" if self.status == EvidenceStatus.PASS else "NO"
-        if self.status in {EvidenceStatus.NOT_REQUIRED, EvidenceStatus.ENGINEERING_COVERED}:
+        if self.status in {EvidenceStatus.NOT_REQUIRED, EvidenceStatus.ENGINEERING_COVERED, EvidenceStatus.DOMAIN}:
             answer = "NOT_APPLICABLE"
         return {"checklist_ref": item.ref, "answer": answer,
                 "accepted_test_names": [], "rationale": "; ".join(self.details),
@@ -70,6 +72,7 @@ class SpecificationSnapshot:
 class SpecificationEvidenceAdapter(Protocol):
     descriptor: LanguageAdapterDescriptor
 
+    def signature_assurance(self, snapshot: SpecificationSnapshot, signatures: tuple[RequiredPublicSignature, ...]) -> SignatureAssurance: ...
     def verify(self, decision: EvidenceDecision, snapshot: SpecificationSnapshot) -> EvidenceResult: ...
     def verify_public_signatures(self, request: SignatureInspection) -> tuple[str, ...]: ...
     def verify_scenario_signatures(self, request: SignatureInspection) -> tuple[str, ...]: ...
@@ -111,6 +114,11 @@ class EvidencePolicyRouter:
         modality = explicit_modality(quote) or ObligationModality(getattr(item, "modality", "required"))
         subject = (getattr(item, "subject", "") or item.text).lower()
         policy = _policy(item.kind, modality, subject)
+        if modality == ObligationModality.REQUIRED:
+            if item.obligation_type == ObligationType.PRECONDITION.value:
+                policy = EvidencePolicy.DOMAIN
+            elif item.obligation_type == ObligationType.BEHAVIOR.value:
+                policy = EvidencePolicy.BEHAVIORAL
         if policy != EvidencePolicy.UNSUPPORTED and modality == ObligationModality.FORBIDDEN and re.search(r"\bexpose\b|\bimplement\b|\bexist\b", quote.lower()):
             policy = EvidencePolicy.PUBLIC_SURFACE
         return EvidenceDecision(policy, subject, modality, bool(re.search(r"\boptional\b", quote.lower())))

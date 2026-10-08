@@ -103,10 +103,12 @@ class PostBehaviorTransitionDispatch:
         return self._milestone()
 
     def _milestone(self) -> PostBehaviorState:
+        completion = (PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE
+            if self.journal.state.unproven_assurance else PostBehaviorStatus.POST_BEHAVIOR_COMPLETE)
         transitions = (
             (PostBehaviorStatus.BEHAVIOR_GATEKEEPER_ACCEPTED, PostBehaviorStatus.NAMING_ASSESSMENT_PENDING),
             (PostBehaviorStatus.NAMING_COMPLETE, PostBehaviorStatus.REFACTOR_ASSESSMENT_PENDING),
-            (PostBehaviorStatus.REFACTOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE),
+            (PostBehaviorStatus.REFACTOR_COMPLETE, completion),
         )
         for current, following in transitions:
             if self.journal.state.status == current:

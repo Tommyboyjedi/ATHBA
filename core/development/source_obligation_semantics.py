@@ -107,13 +107,19 @@ def validate_planned_clauses(clauses: list[SourceRequirementClause], source: str
         if not clause.source_quote or not clause.subject:
             raise ValueError(f"new source clause requires grounded source_quote and subject: {clause.ref}")
         clause.source_context(source)
+        behavioral = clause.obligation_type in {ObligationType.BEHAVIOR.value, ObligationType.INVARIANT.value,
+            ObligationType.ERROR_BEHAVIOR.value, ObligationType.PRECONDITION.value}
+        if behavioral and clause.evidence_kind != "test":
+            raise ValueError("observable/domain source clauses require the behavioral evidence channel: " + clause.ref)
+        if not behavioral and clause.evidence_kind == "test":
+            raise ValueError("assurance/naming source clauses cannot require a behavioral RED: " + clause.ref)
 
 def validate_contract_authority(contract: BehaviorContract) -> None:
     """Validate a new semantic proposal, not historical malformed repair evidence."""
     for requirement in contract.observable_requirements:
         validate_behavior_authority(contract, requirement)
         clauses = [c for c in contract.source_clauses if c.ref in requirement.source_refs]
-        if not any(c.evidence_kind == "test" and c.obligation_type != ObligationType.PRECONDITION.value
+        if not any(c.evidence_kind == "test" and c.obligation_type in {ObligationType.BEHAVIOR.value, ObligationType.ERROR_BEHAVIOR.value, ObligationType.INVARIANT.value}
                    for c in clauses):
             raise ValueError("observable requirements must include at least one test-evidence source clause: "
                              + requirement.ref)

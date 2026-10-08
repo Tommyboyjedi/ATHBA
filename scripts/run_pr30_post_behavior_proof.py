@@ -123,7 +123,7 @@ def predeclare(arguments: ProofInput, composition: StrictTddLiveRunComposition) 
 
 
 def observe(state: PostBehaviorState, scope: ProofScope) -> ProofReport:
-    if state.status != PostBehaviorStatus.POST_BEHAVIOR_COMPLETE:
+    if state.status not in {PostBehaviorStatus.POST_BEHAVIOR_COMPLETE, PostBehaviorStatus.POST_BEHAVIOR_COMPLETE_WITH_UNPROVEN_ASSURANCE}:
         return ProofReport(ProofStatus.BLOCKED, state.diagnostic or str(state.terminal_reason),
                            state.behaviorally_accepted_revision, state.current_post_behavior_revision)
     naming = tuple(item for item in state.passes if item.phase == PostBehaviorPhase.NAMING

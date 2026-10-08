@@ -47,6 +47,10 @@ class RoutedChecklistReconciler:
             return EvidenceResult(EvidenceStatus.UNSUPPORTED, EvidencePolicy.UNSUPPORTED,
                                   self.catalog.semantic_revision,
                                   ("source provenance mismatch", str(error))).to_record(item)
+        if decision.policy == EvidencePolicy.DOMAIN:
+            return EvidenceResult(EvidenceStatus.DOMAIN, EvidencePolicy.DOMAIN,
+                self.catalog.semantic_revision,
+                ("Caller input domain; behavior outside it is unspecified unless separately required.",)).to_record(item)
         if decision.policy == EvidencePolicy.ENGINEERING:
             return EvidenceResult(
                 EvidenceStatus.ENGINEERING_COVERED, EvidencePolicy.ENGINEERING,

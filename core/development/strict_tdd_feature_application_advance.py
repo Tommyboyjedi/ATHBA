@@ -1,7 +1,7 @@
 """One-persisted-transition feature application and its compatibility loop."""
 from __future__ import annotations
 
-from core.development.specification_evidence_policy import reconciliation_satisfied
+from core.development.assurance_completion import CompletionAuthority, assess_completion
 from core.development.strict_tdd_feature_execution import canonical_test_node_for
 
 from dataclasses import replace
@@ -71,7 +71,7 @@ async def advance(
         return await _persist_contract(service, request, project)
     if state.status == StrictTddFeatureStatus.PLANNING.value:
         return await _persist_checklist(service, state, project)
-    if state.status == StrictTddFeatureStatus.COMPLETED.value:
+    if state.status in {StrictTddFeatureStatus.COMPLETED.value, StrictTddFeatureStatus.COMPLETED_WITH_UNPROVEN_ASSURANCE.value}:
         return _result_for(FeatureTransitionKind.FEATURE_COMPLETED, state, project)
     if state.status == StrictTddFeatureStatus.BLOCKED.value:
         return _result_for(FeatureTransitionKind.BLOCKED, state, project, state.blocked_reason)
@@ -98,7 +98,14 @@ async def advance(
                 raise incompatible("completed reconciliation differs from durable progress")
         except ReconciliationFailure as error:
             return _reconciliation_blocked(service, state, project, error)
-    completed = replace(state, status=StrictTddFeatureStatus.COMPLETED.value)
+    confidence = assess_completion(CompletionAuthority(state.final_reconciliation, contract.requirement_source))
+    if not confidence.behaviorally_complete:
+        blocked = replace(state, status=StrictTddFeatureStatus.BLOCKED.value,
+                          blocked_reason="specification_gatekeeper_failed")
+        service.states.save(blocked)
+        return _result_for(FeatureTransitionKind.BLOCKED, blocked, project, blocked.blocked_reason)
+    completed = replace(state, status=(StrictTddFeatureStatus.COMPLETED.value if confidence.fully_proven
+        else StrictTddFeatureStatus.COMPLETED_WITH_UNPROVEN_ASSURANCE.value))
     service.states.save(completed)
     return _result_for(FeatureTransitionKind.FEATURE_COMPLETED, completed, project)
 
@@ -187,7 +194,7 @@ async def _reconcile(
         )
     except ReconciliationFailure as error:
         return _reconciliation_blocked(service, state, project, error)
-    all_yes = reconciliation_satisfied(reconciliation)
+    all_yes = assess_completion(CompletionAuthority(reconciliation, contract.requirement_source)).behaviorally_complete
     updated = replace(
         state,
         status=StrictTddFeatureStatus.RUNNING.value if all_yes else StrictTddFeatureStatus.BLOCKED.value,

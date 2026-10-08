@@ -11,7 +11,7 @@ from core.development.post_behavior_git import PostBehaviorGit
 from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
 from core.development.reconciliation_progress import evidence_digest
 from core.development.specification_domain import SpecificationGatekeeperRunState
-from core.development.specification_evidence_policy import reconciliation_satisfied
+from core.development.assurance_completion import CompletionAuthority, assess_completion
 from core.development.specification_reconciliation import (
     AcceptedTestEvidence, CompletedMicrocycleEvidenceCollector, GitAcceptedTestCatalog,
 )
@@ -37,9 +37,13 @@ class AcceptedBehavioralDeliveryLoader:
         project = ProjectEnvironmentService(self.state_root / "projects").repo.load(project_id)
         if feature is None or project is None:
             raise ValueError("existing behavioral feature and project state required")
-        if feature.status != StrictTddFeatureStatus.COMPLETED.value:
+        if feature.status not in {StrictTddFeatureStatus.COMPLETED.value, StrictTddFeatureStatus.COMPLETED_WITH_UNPROVEN_ASSURANCE.value}:
             raise ValueError("post-behavior requires completed behavioral delivery")
-        if not reconciliation_satisfied(feature.final_reconciliation):
+        contract = BehaviorContract.from_dict(dict(feature.contract_payload or {}))
+        confidence = assess_completion(CompletionAuthority(feature.final_reconciliation, contract.requirement_source))
+        expected = (StrictTddFeatureStatus.COMPLETED.value if confidence.fully_proven
+                    else StrictTddFeatureStatus.COMPLETED_WITH_UNPROVEN_ASSURANCE.value)
+        if feature.status != expected or not confidence.behaviorally_complete:
             raise ValueError("post-behavior requires final Specification Gatekeeper acceptance")
         if not feature.behavioral_entry_revision or not feature.canonical_development_base:
             raise ValueError("behavioral entry revision was not durably recorded")
@@ -47,6 +51,8 @@ class AcceptedBehavioralDeliveryLoader:
             raise ValueError("behavioral execution is still active")
         contract = BehaviorContract.from_dict(dict(feature.contract_payload or {}))
         checklist = SpecificationGatekeeperRunState.from_dict(dict(feature.gatekeeper_payload or {}))
+        if checklist.checklist.requirement_text != contract.requirement_source:
+            raise ValueError("post-behavior requires complete original source authority")
         recorded = {str(item.get("checklist_ref")) for item in feature.final_reconciliation}
         if not set(checklist.checklist.item_refs()).issubset(recorded):
             raise ValueError("final Gatekeeper evidence omits checklist authority")
@@ -68,5 +74,6 @@ class AcceptedBehavioralDeliveryLoader:
                                   "tests": [item.to_dict() for item in accepted]})
         entry = PostBehaviorEntry(project_id, feature.behavioral_entry_revision,
             feature.canonical_development_base, tuple(contract.production_paths), digest,
-            ValidationEvidence(feature.canonical_development_base, True, (f"behavioral-authority:{digest}",)))
+            ValidationEvidence(feature.canonical_development_base, True, (f"behavioral-authority:{digest}",),
+                unproven_assurance=confidence.unproven_assurance))
         return AcceptedBehavioralDelivery(entry, project, feature, contract, tuple(accepted))
