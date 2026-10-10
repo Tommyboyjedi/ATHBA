@@ -111,10 +111,12 @@ def test_signature_lexical_difference_passes_and_shape_difference_violates():
 def test_unsupported_declaration_is_not_a_proven_signature_violation():
     source = "Provide a Counter class. Calling add(amount) adds a value."
     snapshot = SpecificationSnapshot(REVISION, (RevisionFile("counter.py",
-        "from dataclasses import dataclass\\n@dataclass\\nclass Counter:\\n    def add(self, value): return value\\n"),))
+        "from dataclasses import dataclass\n@dataclass\nclass Counter:\n    def add(self, value): return value\n"),))
     entry = signature_evidence(source, snapshot, "python")
     assert entry["answer"] == "NO" and entry["evidence_status"] == "unsupported_evidence_policy"
-    assert assess_completion(CompletionAuthority((entry,), source)).unproven_assurance
+    result = assess_completion(CompletionAuthority((entry,), source))
+    assert not result.behaviorally_complete
+    assert not result.unproven_assurance
 
 
 def test_unproven_assurance_is_language_neutral_and_does_not_expand_container_analysis():

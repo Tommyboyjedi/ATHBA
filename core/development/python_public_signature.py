@@ -13,7 +13,7 @@ def production_signature_findings(source: str, signatures: tuple[RequiredPublicS
 def production_signature_assurance(source: str, signatures: tuple[RequiredPublicSignature, ...], complete: bool = False) -> SignatureAssurance:
     """Same bounded declaration inspection; unknown mechanics are not violations."""
     tree = ast.parse(source)
-    failed, unknown = [], []
+    failed, unknown, deferred = [], [], []
     dynamic = any(isinstance(node, ast.Name) and node.id in DYNAMIC_SURFACE for node in ast.walk(tree))
     for item in signatures:
         owners = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == item.owner]
@@ -21,17 +21,17 @@ def production_signature_assurance(source: str, signatures: tuple[RequiredPublic
             isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.attr == item.name
             or isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id == item.owner
             for node in ast.walk(tree))
-        uncertain = dynamic or mutations or any(owner.bases or owner.keywords or owner.decorator_list for owner in owners)
+        uncertain = dynamic or mutations or len(owners) > 1 or any(
+            owner.bases or owner.keywords or owner.decorator_list for owner in owners)
         if uncertain:
             unknown.append(f"{SIGNATURE_MISMATCH}: {item.source_quote} has an unsupported dynamic declaration")
         bodies = [owner.body for owner in owners] if item.owner else [tree.body]
         definitions = [node for body in bodies for node in body
                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == item.name]
-        if complete and len(definitions) != 1:
-            unknown.append(f"{SIGNATURE_MISMATCH}: source-spelled declaration {item.source_quote} is unresolved; Naming or declaration resolution required")
+        if not definitions and complete and not uncertain:
+            deferred.append(item)
         if len(definitions) > 1:
-            if not complete:
-                unknown.append(f"{SIGNATURE_MISMATCH}: {item.source_quote} has ambiguous declarations")
+            unknown.append(f"{SIGNATURE_MISMATCH}: {item.source_quote} has ambiguous declarations")
             continue
         for node in definitions:
             args = node.args
@@ -44,7 +44,7 @@ def production_signature_assurance(source: str, signatures: tuple[RequiredPublic
             elif (not receiver_valid or len(names) != len(item.parameters) or args.defaults or args.kwonlyargs
                   or args.vararg or args.kwarg or args.posonlyargs):
                 failed.append(f"{SIGNATURE_MISMATCH}: {item.source_quote}; observed {ast.unparse(node.args)}")
-    return SignatureAssurance(tuple(failed), tuple(unknown))
+    return SignatureAssurance(tuple(failed), tuple(unknown), tuple(deferred))
 
 
 def scenario_signature_findings(source: str, signatures: tuple[RequiredPublicSignature, ...]) -> tuple[str, ...]:
