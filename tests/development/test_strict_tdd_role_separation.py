@@ -1,4 +1,8 @@
 """Strict role boundaries and later source-grounded lexical reconciliation."""
+from core.development.python_parameter_naming import PythonParameterNaming
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
+from core.development.python_test_material import PythonTestMaterial
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -36,7 +40,7 @@ def test_developer_task_has_no_source_signature_authority_or_revision_essay():
     diagnostic = SimpleNamespace(kind="collection_failure",message="ImportError: absent",facts=())
     packet = DeveloperFrontierRequest("project","widget.py",artifact,SimpleNamespace(diagnostic=diagnostic),
         "red","base",1,required_signatures("Calling future_api(secret_name) changes another behavior."))
-    unit = DeveloperFrontierWorkUnitFactory().build(packet)
+    unit = DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()).build(packet)
     payload = json.loads(unit.objective)
     assert "required_signatures" not in payload
     assert "secret_name" not in unit.objective
@@ -100,8 +104,8 @@ def test_naming_no_cannot_hide_explicit_parameter_mismatch():
     base=snapshot("accepted")
     focused=PythonProductionSlice().derive(SliceRequest(snapshot("entry",""),base))
     with pytest.raises(ValueError,match="parameter"):
-        parse_naming_decision("NO",NamingAssessmentInput(material,focused))
-    assert parse_naming_decision("cost -> price",NamingAssessmentInput(material,focused)).rename.required_name=="price"
+        parse_naming_decision("NO",NamingAssessmentInput(material,focused, parameter_naming=PythonParameterNaming()))
+    assert parse_naming_decision("cost -> price",NamingAssessmentInput(material,focused, parameter_naming=PythonParameterNaming())).rename.required_name=="price"
 
 def test_named_call_and_value_semantics_expose_quantity_drift_without_name_comparison():
     fixture=json.loads((__import__("pathlib").Path(__file__).parent/"fixtures/campaign_shopping_basket.json").read_text())
@@ -119,15 +123,15 @@ def test_missing_original_operation_can_only_be_closed_in_naming():
     source="Provide a Basket class. Calling add(name, price) adds an item."
     code="class Basket:\n    def insert(self,item_id,cost):\n        return item_id,cost\n"
     snap=snapshot("a"*40,code)
-    evidence=signature_evidence(source,snap,"python")
+    evidence=signature_evidence(source,snap,PythonSpecificationEvidenceAdapter())
     assert evidence["answer"]=="NOT_APPLICABLE" and evidence["evidence_status"]=="deferred_to_naming"
     from core.development.assurance_completion import CompletionAuthority, assess_completion
     assert assess_completion(CompletionAuthority(({"answer":"YES"},evidence),source)).behaviorally_complete
     material=NamingMaterial(source,("Basket","add","name","price"),required_signatures(source))
     focused=PythonProductionSlice().derive(SliceRequest(snapshot("entry",""),snap))
     with pytest.raises(ValueError,match="operation"):
-        parse_naming_decision("NO",NamingAssessmentInput(material,focused))
-    assert parse_naming_decision("insert -> add",NamingAssessmentInput(material,focused)).rename
+        parse_naming_decision("NO",NamingAssessmentInput(material,focused, parameter_naming=PythonParameterNaming()))
+    assert parse_naming_decision("insert -> add",NamingAssessmentInput(material,focused, parameter_naming=PythonParameterNaming())).rename
 
 @pytest.mark.parametrize("test",[
     "from app import Basket\ndef test_one():\n    b=Basket()\n    alias=b.add\n    assert alias('x',cost=3)\n",
@@ -172,10 +176,10 @@ def test_interaction_bindings_are_scoped_to_selected_behavior():
 def test_parameter_lexical_mismatch_does_not_fail_pre_naming_gatekeeper_shape():
     from core.development.feature_signature_evidence import signature_evidence
     source="Provide a Basket class. Calling add(name, price) adds an item."
-    assert signature_evidence(source,snapshot("accepted"),"python")["answer"]=="YES"
+    assert signature_evidence(source,snapshot("accepted"),PythonSpecificationEvidenceAdapter())["answer"]=="YES"
 
 def test_signature_gatekeeper_evidence_is_stable_across_durable_json_roundtrip():
     from core.development.feature_signature_evidence import signature_evidence
     source="Provide a Basket class. Calling add(name, price) adds an item."
-    evidence=signature_evidence(source,snapshot("accepted"),"python")
+    evidence=signature_evidence(source,snapshot("accepted"),PythonSpecificationEvidenceAdapter())
     assert evidence == json.loads(json.dumps(evidence))

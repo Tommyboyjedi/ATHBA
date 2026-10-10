@@ -3,6 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from core.development.python_parameter_naming import PythonParameterNaming
+from core.development.post_behavior_authority import PythonPostBehaviorAuthority
+from core.development.post_behavior_slice import PythonProductionSlice
+from core.development.python_test_material import PythonTestMaterial
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
 
 from core.development.post_behavior_adapters import (
     PostBehaviorAssessors, PostBehaviorAssessorDependencies, PostBehaviorMutation,
@@ -58,7 +64,7 @@ class PostBehaviorCompositionFactory:
     """Wire existing provider, regression, Gatekeeper and generic execution capabilities."""
 
     def build(self, request: PostBehaviorCompositionRequest) -> PostBehaviorLifecycle:
-        delivery = AcceptedBehavioralDeliveryLoader(request.state_root).load(request.project_id)
+        delivery = AcceptedBehavioralDeliveryLoader(request.state_root, PythonTestMaterial()).load(request.project_id)
         repository = PostBehaviorStateRepository(request.state_root / "post-behavior")
         evidence = PostBehaviorEvidenceStore(repository.root / request.project_id / "evidence")
         reservation = None
@@ -80,15 +86,16 @@ class PostBehaviorCompositionFactory:
             )
         local = LocalOnlyPostBehaviorReasoning(request.reasoning, PostBehaviorReasoningRecorder(evidence))
         git = PostBehaviorGit(Path(delivery.project.repository_root))
-        source = PostBehaviorSource(git)
-        authority = PostBehaviorCandidateAuthority(source)
+        source = PostBehaviorSource(git, PythonProductionSlice())
+        authority = PostBehaviorCandidateAuthority(source, PythonPostBehaviorAuthority())
         ports = PostBehaviorPorts(
-            PostBehaviorAssessors(PostBehaviorAssessorDependencies(delivery, source, local, evidence)),
+            PostBehaviorAssessors(PostBehaviorAssessorDependencies(delivery, source, local, evidence, PythonParameterNaming())),
             PostBehaviorMutation(PostBehaviorMutationDependencies(delivery, source,
                 execution,
                 evidence)),
             PostBehaviorValidators(PostBehaviorTestValidation(delivery, authority, evidence),
-                PostBehaviorGatekeeper(PostBehaviorGatekeeperDependencies(delivery, authority, evidence, local))),
+                PostBehaviorGatekeeper(PostBehaviorGatekeeperDependencies(delivery, authority, evidence, local,
+                    PythonTestMaterial(), SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))))),
             PostBehaviorPromotion(ProjectEnvironmentService(request.state_root / "projects"), git))
         lifecycle = PostBehaviorLifecycle(repository, ports)
         current = lifecycle.start(delivery.entry)

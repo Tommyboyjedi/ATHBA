@@ -1,4 +1,7 @@
 """Real RunningTotal source uses ordinary grounded checklist split routing."""
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
+from core.development.python_test_material import PythonTestMaterial
 import json
 from dataclasses import replace
 
@@ -86,7 +89,7 @@ async def test_real_completed_reconciliation_splits_mechanical_parent(fixture, m
     from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
     from tests.development.test_test_evidence_reconciliation import _contract
     monkeypatch.setattr(CompletedFeatureReconciler, "_state", lambda self, identifier: SimpleNamespace(model=SimpleNamespace(language_id="python")))
-    reconciler = CompletedFeatureReconciler(root, MicrocycleStateRepo(root / "microcycles"), gateway)
+    reconciler = CompletedFeatureReconciler(root, MicrocycleStateRepo(root / "microcycles"), gateway, test_material=PythonTestMaterial(), evidence_adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
     result = await reconciler.reconcile(FeatureReconciliationRequest(
         _contract(), (SimpleNamespace(scenario_id="completed"),), SpecificationGatekeeperRunState(checklist).to_dict(), revision))
     assert result[0]["status"] == "superseded"

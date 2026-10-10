@@ -1,4 +1,5 @@
 """Standalone current-behavior authoring, independent of accumulated tests."""
+from core.development.python_test_material import PythonTestMaterial
 import json
 import subprocess
 from dataclasses import replace
@@ -28,7 +29,7 @@ def isolated_request():
 
 
 def unit_for(value):
-    return ScenarioDraftWorkUnitFactory().build(ScenarioDraftWorkUnitRequest(value, 1, None))
+    return ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial()).build(ScenarioDraftWorkUnitRequest(value, 1, None))
 
 
 def test_authoring_scope_is_a_standalone_identity_owned_artifact():
@@ -119,13 +120,15 @@ def test_production_builder_uses_new_artifact_but_resumes_legacy_path(monkeypatc
     value = request("catalog")
     behavior = SimpleNamespace(source_refs=("SRC-CATALOG",))
     feature = SimpleNamespace(behavior=behavior, contract=SimpleNamespace(source_clauses=()),
-        project=SimpleNamespace(repository_root="/tmp/unused"), canonical_development_base="a" * 40)
+        project=SimpleNamespace(repository_root="/tmp/unused", runtime=SimpleNamespace(kind="python")), canonical_development_base="a" * 40)
     monkeypatch.setattr(advance, "_ticket_for", lambda _request: value.ticket)
     monkeypatch.setattr(advance, "_facts", lambda *_args: value.repository_facts)
     monkeypatch.setattr(advance, "_source_requirement_evidence", lambda _request: ())
     monkeypatch.setattr(advance, "_semantic_annotations", lambda *_args: ())
     store = MemoryStateStore()
-    executor = SimpleNamespace(drafting=SimpleNamespace(state_store=store))
+    from core.development.python_pytest_adapter import PythonPytestAdapter
+    executor = SimpleNamespace(drafting=SimpleNamespace(state_store=store,
+        adapter_catalog=SimpleNamespace(for_language=lambda _: PythonPytestAdapter())))
     fresh = _scenario_draft_request(executor, feature, value.scenario_id)
     assert fresh.authoring_path == draft_artifact_path(value.scenario_id, value.allowed_test_path)
     state_service, *_ = components([], [], {}, store)
@@ -171,7 +174,7 @@ async def test_real_git_candidate_freezes_only_new_test_and_preserves_accumulate
     frozen = result.state.approved_microcycle
     artifact = PythonPytestAdapter().materialise_final_test(
         FinalTestMaterialisationRequest(frozen.model, frozen.fragments, base))
-    materialiser = GitFrontierMaterialiser()
+    materialiser = GitFrontierMaterialiser(test_material=PythonTestMaterial())
     merged = materialiser.materialise(FrontierCandidateRequest(artifact, root, value.allowed_test_path))
     try:
         source = (merged.project_root / value.allowed_test_path).read_text()
@@ -190,9 +193,12 @@ async def test_canonical_test_write_is_not_admitted_as_draft_candidate():
         policy_evidence=ExecutionPolicyEvidence([value.authoring_path], [value.allowed_test_path]))
     service, gateway, reasoning, reader = components([execution], [], {"b" * 40: candidate("catalog")})
     outcome = await service.draft(value, binding())
-    assert not outcome.approved
+    assert outcome.state.status == "scenario_harness_failure"
+    assert outcome.state.attempts == ()
+    assert "mechanical_authority" in outcome.state.harness_failure_evidence.message
     assert not reasoning.requests
     assert not reader.calls
+    assert service.state_store.load(value.scenario_id) == outcome.state
 
 
 @pytest.mark.asyncio

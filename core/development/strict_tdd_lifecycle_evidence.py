@@ -26,12 +26,9 @@ class StrictTddLifecycleEventKind(str, Enum):
     BEHAVIOR_CONTRACT_COMPLETED = 'behavior_contract_completed'
     BEHAVIOR_SELECTED = 'behavior_selected'
     BEHAVIOR_REPLAN_REQUIRED = 'behavior_replan_required'
-    BEHAVIOR_REPAIR_REQUIRED = "behavior_repair_required"
-    BEHAVIOR_REPAIR_RECEIVED = "behavior_repair_received"
-    BEHAVIOR_REPAIR_APPLIED = "behavior_repair_applied"
     BEHAVIOR_SPLIT_RECEIVED = 'behavior_split_received'
     BEHAVIOR_SPLIT = 'behavior_split'
-    BEHAVIOR_UNSPLITTABLE = 'behavior_unsplittable'
+    ATOMISATION_FAILED = 'behavior_atomisation_not_produced'
     SCENARIO_DRAFTING_STARTED = 'scenario_drafting_started'
     SCENARIO_DRAFTING_COMPLETED = 'scenario_drafting_completed'
     SCENARIO_INTENT_STARTED = 'scenario_intent_started'
@@ -52,7 +49,6 @@ class StrictTddLifecycleEventKind(str, Enum):
     BEHAVIOR_REPAIR_COMPLETED = 'behavior_repair_completed'
     BEHAVIOR_COMPLETED = 'behavior_completed'
     RECONCILIATION_STARTED = 'reconciliation_started'
-    SPECIFICATION_REPAIR_PLANNED = 'specification_repair_planned'
     RECONCILIATION_COMPLETED = 'reconciliation_completed'
     FEATURE_COMPLETED = 'feature_completed'
     FEATURE_BLOCKED = 'feature_blocked'

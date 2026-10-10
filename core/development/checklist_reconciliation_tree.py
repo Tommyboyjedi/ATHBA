@@ -7,7 +7,7 @@ from core.execution.provider_reasoning_gateway import wait_for_reasoning
 from dataclasses import dataclass, replace
 
 from core.development.checklist_split_progress import (
-    ChecklistSplitAncestry, MAX_CHECKLIST_SPLIT_DEPTH, UNSPLITTABLE_REASON, split_structure,
+    ChecklistSplitAncestry, MAX_CHECKLIST_SPLIT_DEPTH, MECHANICAL_SPLIT_FAILED_REASON, split_structure,
 )
 from core.development.reconciliation_progress import (
     ChecklistItemProgress, ChecklistSplitProgress, IndividualEvidenceProgress,
@@ -67,8 +67,8 @@ class ChecklistNodeCheckpoint:
                        "response_attempts": [item.to_dict() for item in split.attempts]})
         if split.disposition == "exhausted":
             record.update({"status": "split_correction_exhausted", "blocked_reason": "specification_split_correction_exhausted"})
-        elif split.disposition == "unsplittable":
-            record.update({"status": "unsplittable", "blocked_reason": UNSPLITTABLE_REASON})
+        elif split.disposition == "not_produced":
+            record.update({"status": "not_produced", "blocked_reason": MECHANICAL_SPLIT_FAILED_REASON})
         else:
             record.update({"status": "superseded", "child_refs": [child.ref for child in split.children]})
         self.save(replace(self.state, result=record, split=split, pending_call=PendingReconciliationCall.NONE))
@@ -96,7 +96,7 @@ class ChecklistReconciliationTree:
                 checkpoint.attempts, checkpoint.before_test))
             checkpoint.result(record)
         record = dict(checkpoint.state.result or {})
-        if ((decision.policy != EvidencePolicy.BEHAVIORAL and not mechanical_compound(context.item))
+        if (decision.policy == EvidencePolicy.BEHAVIORAL or not mechanical_compound(context.item)
                 or record.get("answer") != "NO"):
             return [record]
         if checkpoint.state.split is None:
@@ -115,7 +115,7 @@ class ChecklistReconciliationTree:
 
     async def _split(self, context: ChecklistTreeContext, checkpoint: ChecklistNodeCheckpoint) -> None:
         if len(context.ancestry.items) >= MAX_CHECKLIST_SPLIT_DEPTH:
-            checkpoint.split(ChecklistSplitProgress("unsplittable", "Checklist split depth limit reached.",
+            checkpoint.split(ChecklistSplitProgress("exhausted", "Mechanical checklist split depth budget reached; not atomicity.",
                                                    rejection_reason="split_depth_exhausted"))
             return
         item = context.item
@@ -132,7 +132,7 @@ class ChecklistReconciliationTree:
             raise
         occupied = {entry.item.ref for entry in self.journal.items} | set(self.journal.request.root_refs)
         if any(child.ref in occupied for child in split.children):
-            checkpoint.split(ChecklistSplitProgress("unsplittable", split.rationale,
+            checkpoint.split(ChecklistSplitProgress("exhausted", split.rationale,
                 attempted_response=split.attempted_response, rejection_reason="child_ref_collision"))
             return
         checkpoint.split(ChecklistSplitProgress(split.disposition, split.rationale, split.children,
@@ -150,6 +150,8 @@ def validate_persisted_tree(journal: ReconciliationJournal, roots: list[Specific
         if identity != (entry.item, entry.ancestry):
             raise incompatible("persisted reconciliation tree identity changed")
         if entry.split is not None:
+            if not mechanical_compound(entry.item):
+                raise incompatible("legacy behavioral checklist split requires explicit migration")
             for index, child in enumerate(entry.split.children, 1):
                 if child.ref != f"{entry.item.ref}-S{index:03d}" or child.ref in expected:
                     raise incompatible("persisted split child identity changed")

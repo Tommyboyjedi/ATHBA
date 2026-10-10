@@ -1,8 +1,11 @@
 """Language-neutral assurance confidence never becomes invented proof."""
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
 from dataclasses import replace
 import json
 from pathlib import Path
 
+from core.development.python_test_material import PythonTestMaterial
 import pytest
 
 from core.development.assurance_completion import CompletionAuthority, assess_completion, AssuranceGap
@@ -101,8 +104,8 @@ def test_signature_lexical_difference_passes_and_shape_difference_violates():
     source = "Calling add(amount) adds a value."
     def snapshot(code):
         return SpecificationSnapshot(REVISION, (RevisionFile("component.py", code),))
-    good = signature_evidence(source, snapshot("def add(value): return value"), "python")
-    bad = signature_evidence(source, snapshot("def add(value, other=0): return value"), "python")
+    good = signature_evidence(source, snapshot("def add(value): return value"), PythonSpecificationEvidenceAdapter())
+    bad = signature_evidence(source, snapshot("def add(value, other=0): return value"), PythonSpecificationEvidenceAdapter())
     assert good["answer"] == "YES"
     assert bad["answer"] == "NO" and bad["evidence_status"] == "fail"
     assert not assess_completion(CompletionAuthority((bad,), source)).behaviorally_complete
@@ -112,7 +115,7 @@ def test_unsupported_declaration_is_not_a_proven_signature_violation():
     source = "Provide a Counter class. Calling add(amount) adds a value."
     snapshot = SpecificationSnapshot(REVISION, (RevisionFile("counter.py",
         "from dataclasses import dataclass\n@dataclass\nclass Counter:\n    def add(self, value): return value\n"),))
-    entry = signature_evidence(source, snapshot, "python")
+    entry = signature_evidence(source, snapshot, PythonSpecificationEvidenceAdapter())
     assert entry["answer"] == "NO" and entry["evidence_status"] == "unsupported_evidence_policy"
     result = assess_completion(CompletionAuthority((entry,), source))
     assert not result.behaviorally_complete
@@ -163,13 +166,13 @@ def test_actual_delivery_loader_accepts_only_source_grounded_qualified_state(tmp
     feature = replace(feature, status="completed_with_unproven_assurance", contract_payload=data,
         gatekeeper_payload=keeper, final_reconciliation=(*feature.final_reconciliation, entry))
     repo.save(feature)
-    accepted = AcceptedBehavioralDeliveryLoader(state_root).load(PROJECT)
+    accepted = AcceptedBehavioralDeliveryLoader(state_root, PythonTestMaterial()).load(PROJECT)
     assert accepted.entry.gatekeeper_evidence.unproven_assurance[0].checklist_ref == "M"
     assert accepted.contract.requirement_source == data["requirement_source"]
     repo.save(replace(feature, final_reconciliation=(*feature.final_reconciliation[:-1],
         {**entry, "evidence_status": "fail"})))
     with pytest.raises(ValueError, match="Gatekeeper"):
-        AcceptedBehavioralDeliveryLoader(state_root).load(PROJECT)
+        AcceptedBehavioralDeliveryLoader(state_root, PythonTestMaterial()).load(PROJECT)
 
 def test_positive_persistence_cannot_be_deduced_as_static_absence():
     from core.development.source_obligation_semantics import validate_planned_clauses

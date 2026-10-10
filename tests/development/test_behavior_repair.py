@@ -1,3 +1,5 @@
+from core.development.python_test_material import PythonTestMaterial
+from core.development.behavior_repair import BehaviorRepairWorkUnitFactory
 from dataclasses import replace
 from pathlib import Path
 
@@ -96,7 +98,7 @@ async def test_behavior_repair_is_production_only_then_regressed_and_ready_for_r
     store, gateway, runtime = Store(), Gateway(), Runtime()
     candidates = CandidateRepository(tmp_path, {"repair": "class Widget:\n    pass\n"})
     service = BehaviorRepairService(
-        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(runtime))
+        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(runtime), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
     outcome = await service.repair(request(tmp_path, reviewed_state()))
@@ -122,7 +124,7 @@ async def test_repair_candidate_rejection_keeps_same_behavior_incomplete(tmp_pat
     store, gateway = Store(), Gateway(False)
     candidates = CandidateRepository(tmp_path, {"base": ""})
     service = BehaviorRepairService(
-        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(Runtime()))
+        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(Runtime()), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
     outcome = await service.repair(request(tmp_path, reviewed_state()))
@@ -138,7 +140,7 @@ async def test_behavior_repair_cap_survives_restart_and_forbids_attempt_five(tmp
     store, gateway = Store(), Gateway(False)
     candidates = CandidateRepository(tmp_path, {"base": ""})
     service = BehaviorRepairService(
-        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(Runtime()))
+        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(Runtime()), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     state = reviewed_state()
 
@@ -169,7 +171,7 @@ async def test_resume_after_accepted_candidate_regresses_without_a_second_develo
     store, gateway, runtime = Store(), Gateway(), Runtime()
     candidates = CandidateRepository(tmp_path, {"repair": "class Widget:\n    pass\n"})
     service = BehaviorRepairService(
-        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(runtime))
+        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(runtime), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
     outcome = await service.repair(request(tmp_path, state))
@@ -184,7 +186,7 @@ async def test_behavior_repair_submission_regression_and_promotion_are_isolated(
     store, gateway, runtime = Store(), Gateway(), Runtime()
     candidates = CandidateRepository(tmp_path, {"repair": "class Widget:\n    pass\n"})
     service = BehaviorRepairService(
-        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(runtime))
+        BehaviorRepairDependencies(store, candidates, gateway, DeterministicRegressionService(runtime), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
     submitted = await service.submit(request(tmp_path, reviewed_state()))

@@ -18,6 +18,9 @@ class PythonPytestRuntime:
     def red_command(self, test_name: str) -> list[str]:
         return [self.python_executable, "-B", "scripts/assert_test_fails.py", test_name]
 
+    def test_command(self, target: str) -> list[str]:
+        return self.pytest_command(target)
+
     def pytest_command(self, target: str) -> list[str]:
         return [
             self.python_executable,

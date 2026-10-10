@@ -63,7 +63,7 @@ class ChecklistSplitProgress:
     attempts: tuple[ChecklistAtomizationAttempt, ...] = ()
 
     def __post_init__(self) -> None:
-        if (self.disposition not in {"split", "unsplittable", "exhausted"} or not self.rationale.strip()
+        if (self.disposition not in {"split", "not_produced", "exhausted"} or not self.rationale.strip()
                 or (self.disposition == "split" and len(self.children) < 2)
                 or (self.disposition != "split" and self.children)):
             raise ValueError("invalid persisted checklist split")

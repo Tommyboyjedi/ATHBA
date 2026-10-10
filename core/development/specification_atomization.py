@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.development.mechanical_checklist_split import validate_mechanical_children
+from core.development.mechanical_checklist_split import mechanical_compound, validate_mechanical_children
 
 import json
 import re
@@ -63,14 +63,14 @@ class ChecklistSplitResponse:
     attempts: tuple[ChecklistAtomizationAttempt, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.disposition not in {"split", "unsplittable", "exhausted"}:
-            raise ValueError("checklist split disposition must be split, unsplittable or exhausted")
+        if self.disposition not in {"split", "not_produced", "exhausted"}:
+            raise ValueError("checklist split disposition must be split, not_produced or exhausted")
         if not self.rationale.strip():
             raise ValueError("checklist split rationale is required")
         if self.disposition == "split" and len(self.children) < 2:
             raise ValueError("checklist split requires at least two children")
         if self.disposition != "split" and self.children:
-            raise ValueError("unsplittable checklist split cannot contain children")
+            raise ValueError("not_produced checklist split cannot contain children")
 
 
 class SpecificationChecklistPlanner:
@@ -103,6 +103,10 @@ class SpecificationChecklistPlanner:
         return ChecklistAtomizationResult(checklist, (ChecklistAtomizationAttempt(result.text),))
 
     async def split_item(self, request: ChecklistSplitRequest) -> ChecklistSplitResponse:
+        parent = SpecificationChecklistItem(request.parent_ref, request.parent_text, request.parent_kind,
+            request.parent_modality, request.parent_source_quote, request.parent_subject)
+        if not mechanical_compound(parent):
+            raise ValueError("behavioral atomisation belongs exclusively to Behavioral Planner")
         result = await self.gateway.reason(_split_reasoning_request(request))
         try:
             split = _decode_split(request, result.text)
@@ -134,7 +138,7 @@ def _decode_split(request: ChecklistSplitRequest, response: str) -> ChecklistSpl
     disposition, rationale = payload.get("disposition"), payload.get("rationale")
     if not isinstance(disposition, str) or not isinstance(rationale, str):
         raise ValueError("checklist split requires disposition and rationale")
-    if disposition == "unsplittable":
+    if disposition == "not_produced":
         return ChecklistSplitResponse(disposition, rationale, attempted_response=response)
     raw_children = payload.get("children")
     if disposition != "split" or not isinstance(raw_children, list):
@@ -362,7 +366,7 @@ def _split_reasoning_request(request: ChecklistSplitRequest) -> ReasoningRequest
                        "subject": request.parent_subject},
             "individual_test_no_results": list(request.individual_no_results),
             "final_trusted_revision": request.final_revision,
-            "question": "Split this unresolved checklist item into two or more smaller independent specification obligations that together preserve the parent.",
+            "question": "Partition this compound mechanical assurance into independently verifiable conjuncts; do not split behavior.",
             "required_output": _split_output_schema(),
             "rules": _split_rules(),
             "output_rules": [
@@ -398,7 +402,7 @@ def _split_repair_request(
             "rules": _split_rules(),
             "repair_rules": [
                 "correct every contract violation visible in the invalid draft, not only the single validation error reported",
-                "if no valid grounded split is possible, return disposition=unsplittable with a precise rationale",
+                "if no valid grounded split is possible, return disposition=not_produced with a precise rationale",
                 "do not weaken provenance, ordered-source citation, kind, or modality rules to make a split pass",
             ],
             "output_rules": [
@@ -414,7 +418,7 @@ def _split_repair_request(
 
 def _split_output_schema() -> dict[str, object]:
     return {
-        "disposition": "split|unsplittable",
+        "disposition": "split|not_produced",
         "rationale": "string",
         "children": [{
             "text": "string",
@@ -433,7 +437,7 @@ def _split_rules() -> list[str]:
         "do not inspect production code",
         "do not add obligations",
         "preserve modality unless the parent was itself invalid",
-        "return unsplittable if no grounded progress is possible",
+        "return not_produced if no grounded progress is possible",
         "each split child must be one semantic obligation from the parent item",
         "split children together must preserve the parent item without adding new requirements",
         "for a compound mechanical constraint, partition every conjunct exactly once; keep kind, modality, and the same complete parent source_quote; each child needs an independent bounded policy",

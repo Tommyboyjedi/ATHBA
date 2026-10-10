@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from core.development.feature_signature_evidence import signature_evidence
+from core.development.test_material import TestMaterialAdapter, require_test_material
+from core.development.specification_reconciliation import TestCatalogRevision
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
 from core.development.reconciliation_source_authority import RECONCILIATION_SOURCE_SCHEMA
 from core.development.specification_revision_snapshot import GitSpecificationSnapshot
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from core.development.checklist_reconciliation_tree import (
@@ -32,6 +35,8 @@ class PostBehaviorGatekeeperDependencies:
     authority: PostBehaviorCandidateAuthority
     evidence: PostBehaviorEvidenceStore
     reasoning: ReasoningGateway
+    test_material: TestMaterialAdapter | None = None
+    evidence_adapters: SpecificationEvidenceAdapters = field(default_factory=lambda: SpecificationEvidenceAdapters(()))
 
 
 class PostBehaviorGatekeeper:
@@ -49,13 +54,13 @@ class PostBehaviorGatekeeper:
         revision = active.candidate.revision
         baseline = state.behaviorally_accepted_revision
         root = Path(deps.delivery.project.repository_root)
-        original = GitAcceptedTestCatalog(root, baseline)
+        original = GitAcceptedTestCatalog(root, TestCatalogRevision(baseline, require_test_material(deps.test_material)))
         if any(original.verified_source(item) is None for item in deps.delivery.accepted_tests):
             raise ValueError("original accepted test evidence is not preserved at behavioral baseline")
         # The complete exact-rename/refactor chain was mechanically verified above.
         # Original semantic SHAs remain in the immutable delivery/evidence manifest.
         accepted = [replace(item, semantic_revision=revision) for item in deps.delivery.accepted_tests]
-        catalog = GitAcceptedTestCatalog(root, revision)
+        catalog = GitAcceptedTestCatalog(root, TestCatalogRevision(revision, require_test_material(deps.test_material)))
         if any(catalog.verified_source(item) is None for item in accepted):
             raise ValueError("candidate omits an accepted test identity")
         keeper = SpecificationGatekeeperRunState.from_dict(dict(deps.delivery.feature.gatekeeper_payload or {}))
@@ -72,14 +77,14 @@ class PostBehaviorGatekeeper:
         roots = [SpecificationChecklistItem.from_dict(item.to_dict()) for item in keeper.checklist.items]
         validate_persisted_tree(journal, roots)
         tree = ChecklistReconciliationTree(journal, deps.reasoning)
-        reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(deps.reasoning, catalog), catalog)
+        reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(deps.reasoning, catalog), catalog, deps.evidence_adapters)
         results = []
         for item in roots:
             context = ChecklistTreeContext(reconciler, keeper.checklist.project_id,
                 keeper.checklist.requirement_text, accepted, deps.delivery.project.runtime.kind,
                 required_source_subjects(keeper.checklist), revision, item)
             results.extend(await tree.reconcile(context))
-        functional_api = signature_evidence(keeper.checklist.requirement_text, GitSpecificationSnapshot(root).read(revision), deps.delivery.project.runtime.kind)
+        functional_api = signature_evidence(keeper.checklist.requirement_text, GitSpecificationSnapshot(root).read(revision), deps.evidence_adapters.for_language(deps.delivery.project.runtime.kind))
         if functional_api is not None:
             results.append(functional_api)
         ref = deps.evidence.record("specification_reconciliation", {

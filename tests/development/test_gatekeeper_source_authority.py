@@ -1,4 +1,6 @@
 """Original source reaches independent proof review, never behavioral authors."""
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
 import json
 
 import pytest
@@ -43,8 +45,8 @@ def response(answer="NO"):
 async def test_routed_proof_call_preserves_full_original_source_and_selected_authority():
     gateway = FakeReasoningGateway([response()])
     catalog = VerifiedCatalog()
-    result = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog).reconcile(
-        RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(1)]))
+    result = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))).reconcile(
+        RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(1)], language_id="python"))
     assert result["answer"] == "NO"
     prompt = json.loads(gateway.requests[0].prompt)
     assert prompt["specification_authority"]["original_source"] == SOURCE
@@ -57,8 +59,8 @@ async def test_routed_proof_call_preserves_full_original_source_and_selected_aut
 async def test_original_authority_survives_each_independent_accepted_test_call():
     gateway = FakeReasoningGateway([response(), response()])
     catalog = VerifiedCatalog()
-    await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog).reconcile(
-        RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(2), accepted(1)]))
+    await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))).reconcile(
+        RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(2), accepted(1)], language_id="python"))
     assert len(gateway.requests) == 2
     for request in gateway.requests:
         prompt = json.loads(request.prompt)
@@ -83,8 +85,8 @@ async def test_format_correction_preserves_the_decision_without_reinterpreting_s
     previous = fence + "json  \n" + json.dumps(response()) + "\n" + fence
     gateway = RawGateway([previous, json.dumps(response())])
     catalog = VerifiedCatalog()
-    result = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog).reconcile(
-        RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(1)]))
+    result = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))).reconcile(
+        RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(1)], language_id="python"))
     assert len(gateway.requests) == 2
     assert json.loads(gateway.requests[0].prompt)["specification_authority"]["original_source"] == SOURCE
     repair = json.loads(gateway.requests[1].prompt)
@@ -112,19 +114,19 @@ async def test_same_source_resume_reuses_proof_but_changed_source_cannot_reuse_y
         "answer": "YES", "selected_test_names": [accepted(1).test_name], "rationale": "Controlled proof."}])
     catalog = VerifiedCatalog()
     progress = []
-    result = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog).reconcile(
+    result = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))).reconcile(
         RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(1)],
-            checkpoint=lambda value: progress.append(value)))
+            checkpoint=lambda value: progress.append(value), language_id="python"))
     saved = progress[-1]
     restored = SpecificationChecklistItem.from_dict(json.loads(json.dumps(source_item().to_dict())))
     resumed_gateway = FakeReasoningGateway([])
-    reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(resumed_gateway, catalog), catalog)
+    reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(resumed_gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
     same = await reconciler.reconcile(RoutedChecklistRequest("project", restored, SOURCE,
-        [accepted(1)], progress=saved))
+        [accepted(1)], progress=saved, language_id="python"))
     assert same == result and not resumed_gateway.requests
     with pytest.raises(ReconciliationFailure, match="identity"):
         await reconciler.reconcile(RoutedChecklistRequest("project", restored,
-            SOURCE + " Deletion is not required.", [accepted(1)], progress=saved))
+            SOURCE + " Deletion is not required.", [accepted(1)], progress=saved, language_id="python"))
     assert not resumed_gateway.requests
 
 
@@ -141,8 +143,8 @@ async def test_legacy_cached_yes_without_source_authority_cannot_bypass_new_revi
         checkpoint=lambda value: progress.append(value)))
     resumed = FakeReasoningGateway([])
     with pytest.raises(ReconciliationFailure, match="identity"):
-        await RoutedChecklistReconciler(ChecklistItemReconciler(resumed, catalog), catalog).reconcile(
-            RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(1)], progress=progress[-1]))
+        await RoutedChecklistReconciler(ChecklistItemReconciler(resumed, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))).reconcile(
+            RoutedChecklistRequest("project", source_item(), SOURCE, [accepted(1)], progress=progress[-1], language_id="python"))
     assert not resumed.requests
 
 
@@ -153,8 +155,8 @@ async def test_existing_typed_source_clause_preserves_the_same_authority():
         QUOTE, "adds exactly one entry")
     gateway = FakeReasoningGateway([response()])
     catalog = VerifiedCatalog()
-    await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog).reconcile(
-        RoutedChecklistRequest("project", clause, SOURCE, [accepted(1)]))
+    await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))).reconcile(
+        RoutedChecklistRequest("project", clause, SOURCE, [accepted(1)], language_id="python"))
     authority = json.loads(gateway.requests[0].prompt)["specification_authority"]
     assert authority["original_source"] == SOURCE
     assert authority["selected_item"] == clause.to_dict()

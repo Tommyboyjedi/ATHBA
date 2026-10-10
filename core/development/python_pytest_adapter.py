@@ -923,6 +923,7 @@ class PythonApiExpressionDescriber:
 
 
 class PythonPytestAdapter:
+    framework_id = "pytest"
     descriptor = LanguageAdapterDescriptor("python-pytest", PYTEST_ADAPTER_VERSION, PYTHON_LANGUAGE_ID)
 
     def parse_scenario(self, request: ScenarioParseRequest) -> ScenarioModel:

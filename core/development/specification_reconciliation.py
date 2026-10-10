@@ -1,10 +1,10 @@
 """Reconcile an independent checklist only against accepted TDD test evidence."""
 
 from __future__ import annotations
+from core.development.test_material import TestMaterialAdapter, TestSourceRequest, require_test_material
 from core.execution.rack_ai_runtime import RackAiResourceWait
 from core.execution.provider_reasoning_gateway import wait_for_reasoning
 
-import ast
 import hashlib
 import json
 import subprocess
@@ -93,12 +93,19 @@ class ChecklistReconciliationRequest:
                 raise ValueError("Gatekeeper selected item differs from source authority")
 
 
+@dataclass(frozen=True)
+class TestCatalogRevision:
+    revision: str
+    test_material: TestMaterialAdapter
+
+
 class GitAcceptedTestCatalog:
     """Read final test identities from a semantically approved repository revision."""
 
-    def __init__(self, repository_root: str | Path, semantic_revision: str):
+    def __init__(self, repository_root: str | Path, authority: TestCatalogRevision):
         self.repository_root = Path(repository_root)
-        self.semantic_revision = semantic_revision
+        self.semantic_revision = authority.revision
+        self.test_material = authority.test_material
 
     def contains(self, evidence: AcceptedTestEvidence) -> bool:
         return self.verified_source(evidence) is not None
@@ -119,8 +126,9 @@ class GitAcceptedTestCatalog:
         return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
     def _test_source(self, revision: str, test_name: str) -> str | None:
-        path, separator, function = test_name.partition("::")
-        if not separator or not path or not function or "::" in function:
+        try:
+            path = self.test_material.test_path(test_name)
+        except ValueError:
             return None
         normalized = PurePosixPath(path)
         if normalized.is_absolute() or ".." in normalized.parts:
@@ -129,15 +137,7 @@ class GitAcceptedTestCatalog:
             source = self._git("show", f"{revision}:{normalized.as_posix()}")
         except subprocess.CalledProcessError:
             return None
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            return None
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function:
-                segment = ast.get_source_segment(source, node)
-                return None if segment is None else segment.strip()
-        return None
+        return self.test_material.extract(TestSourceRequest(source, test_name))
 
     def _git(self, *args: str) -> str:
         return subprocess.run(

@@ -1,4 +1,6 @@
 """Source-mandated call shape cannot be replaced by model-owned defaults."""
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
 import json
 from pathlib import Path
 
@@ -78,27 +80,6 @@ def test_generic_explicit_notation_without_example_argument_inference():
     assert [(item.owner, item.name, item.parameters) for item in values] == [("Counter", "increment", ("delta",))]
     assert required_signatures("A cart can hold a name and a price.") == ()
 
-def test_public_candidate_accepted_by_executor_is_rejected_before_promotion(tmp_path):
-    import subprocess
-    from core.development.signature_candidate_validation import SignatureCandidateContext, validate_signature_candidate
-    from core.execution.work_unit_gateway import WorkUnitExecutionResult
-    root = tmp_path / "repository"
-    root.mkdir()
-    def git(*args):
-        return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
-    git("init", "-q")
-    (root / "shopping_basket.py").write_text(FIXTURE["production_source"])
-    git("add", ".")
-    git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "wrong signature")
-    revision = git("rev-parse", "HEAD")
-    result = WorkUnitExecutionResult("work", True, "checks_passed", accepted_revision=revision,
-                                     evidence_location="public-work-evidence")
-    rejected = validate_signature_candidate(SignatureCandidateContext(root, "shopping_basket.py",
-        required_signatures(FIXTURE["contract"]["requirement_source"]), "python"), result)
-    assert not rejected.accepted and rejected.accepted_revision is None
-    assert revision in rejected.error
-    assert rejected.evidence_location == result.evidence_location
-    assert git("rev-parse", "HEAD") == revision
 
 
 def test_legacy_signature_authority_roundtrips_without_entering_semantic_review():
@@ -121,10 +102,10 @@ def test_final_api_shape_checks_wrong_defaults_without_lexical_rejection():
     from core.development.specification_evidence_policy import RevisionFile, SpecificationSnapshot
     source = FIXTURE["contract"]["requirement_source"]
     for implementation in [FIXTURE["production_source"]]:
-        evidence = signature_evidence(source, SpecificationSnapshot("revision", (RevisionFile("shopping_basket.py", implementation),)), "python")
+        evidence = signature_evidence(source, SpecificationSnapshot("revision", (RevisionFile("shopping_basket.py", implementation),)), PythonSpecificationEvidenceAdapter())
         assert evidence["answer"] == "NO"
     correct = "class ShoppingBasket:\n    def add_item(self, name, price):\n        pass\n    def item_count(self):\n        return 0\n    def total_price(self):\n        return 0\n"
-    assert signature_evidence(source, SpecificationSnapshot("revision", (RevisionFile("shopping_basket.py", correct),)), "python")["answer"] == "YES"
+    assert signature_evidence(source, SpecificationSnapshot("revision", (RevisionFile("shopping_basket.py", correct),)), PythonSpecificationEvidenceAdapter())["answer"] == "YES"
 
 
 @pytest.mark.asyncio
@@ -145,11 +126,6 @@ async def test_source_deduction_omission_uses_existing_single_repair():
     assert "add_item(name, price)" in result.clauses[0].text
 
 
-def test_generic_signature_validation_fails_closed_for_unregistered_language():
-    from core.development.public_signature_validation import production_signature_findings
-    from core.development.required_public_signature import SignatureInspection
-    signatures = required_signatures("Calling add_item(name, price) adds an item.")
-    assert production_signature_findings(SignatureInspection("anything", signatures), "unsupported")
 
 
 def test_generic_contract_module_has_no_target_language_parser():

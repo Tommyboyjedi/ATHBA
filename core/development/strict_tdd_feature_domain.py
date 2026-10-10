@@ -8,9 +8,7 @@ from hashlib import sha256
 from typing import Any
 
 from core.development.reconciliation_response import ReconciliationFailure
-from core.development.gatekeeper_repair_domain import SpecificationRepairRecord
 from core.development.behavior_replan_domain import BehaviorReplanRecord
-from core.development.behavior_requirement_repair_domain import BehaviorRepairRecord
 from core.development.specification_domain import ChecklistAtomizationAttempt
 
 
@@ -102,9 +100,8 @@ class StrictTddFeatureState:
     behavior_replans: tuple[BehaviorReplanRecord, ...] = ()
     reconciliation_progress: tuple[dict[str, object], ...] = ()
     atomization_failure: tuple[ChecklistAtomizationAttempt, ...] = ()
-    behavior_repairs: tuple[BehaviorRepairRecord, ...] = ()
     behavioral_entry_revision: str | None = None
-    specification_repairs: tuple[SpecificationRepairRecord, ...] = ()
+    reconciliation_history: tuple[dict[str, object], ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -124,8 +121,6 @@ class StrictTddFeatureState:
         return {
             **asdict(self),
             "behavior_replans": [item.to_dict() for item in self.behavior_replans],
-            "behavior_repairs": [item.to_dict() for item in self.behavior_repairs],
-            "specification_repairs": [item.to_dict() for item in self.specification_repairs],
             "reconciliation_failure": None if self.reconciliation_failure is None else self.reconciliation_failure.to_dict(),
             "completed_behaviors": [asdict(item) for item in self.completed_behaviors],
             "atomization_failure": [item.to_dict() for item in self.atomization_failure],
@@ -133,6 +128,8 @@ class StrictTddFeatureState:
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "StrictTddFeatureState":
+        if payload.get("behavior_repairs") or payload.get("specification_repairs"):
+            raise ValueError("legacy semantic recovery state requires explicit migration")
         completed = tuple(
             CompletedBehaviorReference(
                 str(item["behavior_ref"]), str(item["scenario_id"]),
@@ -154,9 +151,8 @@ class StrictTddFeatureState:
             tuple(BehaviorReplanRecord.from_dict(item) for item in payload.get("behavior_replans", ())),
             tuple(dict(item) for item in payload.get("reconciliation_progress", ())),
             tuple(ChecklistAtomizationAttempt.from_dict(dict(item)) for item in payload.get("atomization_failure", ())),
-            tuple(BehaviorRepairRecord.from_dict(item) for item in payload.get("behavior_repairs", ())),
             payload.get("behavioral_entry_revision"),
-            tuple(SpecificationRepairRecord.from_dict(item) for item in payload.get("specification_repairs", ())),
+            tuple(dict(item) for item in payload.get("reconciliation_history", ())),
         )
 
 

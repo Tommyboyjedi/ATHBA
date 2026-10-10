@@ -11,6 +11,7 @@ from core.development.scenario_drafting_domain import ScenarioDraftRunState
 from core.development.behavior_contract_coordinator import BehaviorContractPlanner, ContractPlanningRequest
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
 from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
+from core.development.project_environment_lifecycle import ProjectLoadDisposition
 from core.development.specification_assessment import GatekeeperStateRequest, SpecificationGatekeeper
 from core.development.strict_tdd_feature_domain import (
     CompletedBehaviorReference,
@@ -73,6 +74,12 @@ class FeatureReconciler(Protocol):
 
 
 @dataclass(frozen=True)
+class FeatureProjectPreparation:
+    project_id: str
+    production_paths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class StrictTddFeatureDependencies:
     environment: ProjectEnvironmentService
     state_repository: StrictTddFeatureRepository
@@ -81,6 +88,7 @@ class StrictTddFeatureDependencies:
     scenarios: FeatureScenarioExecutor
     reconciler: FeatureReconciler
     replan_policy: BehaviorReplanPolicy = field(default_factory=BehaviorReplanPolicy)
+    prepare_project: Callable[[FeatureProjectPreparation], ProjectLoadDisposition] | None = None
 
 
 class StrictTddFeatureApplicationService:
@@ -94,6 +102,12 @@ class StrictTddFeatureApplicationService:
         self.scenarios = dependencies.scenarios
         self.reconciler = dependencies.reconciler
         self.replan_policy = dependencies.replan_policy
+        self.project_preparer = dependencies.prepare_project
+
+    def prepare_project(self, request: FeatureProjectPreparation) -> ProjectLoadDisposition:
+        if self.project_preparer is None:
+            raise ValueError("project preparation capability is not configured")
+        return self.project_preparer(request)
 
     async def run(self, request: StrictTddFeatureRequest) -> StrictTddFeatureResult:
         from core.development.strict_tdd_feature_application_advance import StrictTddFeatureRunLoop

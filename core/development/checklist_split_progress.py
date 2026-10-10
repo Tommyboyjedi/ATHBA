@@ -8,7 +8,7 @@ import unicodedata
 from core.development.specification_domain import SpecificationChecklistItem
 
 MAX_CHECKLIST_SPLIT_DEPTH = 16
-UNSPLITTABLE_REASON = "specification_gatekeeper_unsplittable"
+MECHANICAL_SPLIT_FAILED_REASON = "mechanical_checklist_split_not_produced"
 
 
 def normalized(value: str) -> str:
