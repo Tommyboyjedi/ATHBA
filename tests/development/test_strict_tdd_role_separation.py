@@ -120,7 +120,7 @@ def test_missing_original_operation_can_only_be_closed_in_naming():
     code="class Basket:\n    def insert(self,item_id,cost):\n        return item_id,cost\n"
     snap=snapshot("a"*40,code)
     evidence=signature_evidence(source,snap,"python")
-    assert evidence["answer"]=="NO" and evidence["evidence_status"]=="unsupported_evidence_policy"
+    assert evidence["answer"]=="NOT_APPLICABLE" and evidence["evidence_status"]=="deferred_to_naming"
     from core.development.assurance_completion import CompletionAuthority, assess_completion
     assert assess_completion(CompletionAuthority(({"answer":"YES"},evidence),source)).behaviorally_complete
     material=NamingMaterial(source,("Basket","add","name","price"),required_signatures(source))

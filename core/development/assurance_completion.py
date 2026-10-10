@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import re
 
-from core.development.required_public_signature import RequiredPublicSignature, required_signatures
+from core.development.signature_completion_authority import naming_signature_deferred
 from core.development.source_obligation_semantics import ObligationType
 from core.development.specification_domain import SpecificationChecklistItem
 from core.development.specification_evidence_policy import EvidencePolicyRouter, EvidenceStatus, reconciliation_satisfied
@@ -68,31 +68,25 @@ def unproven_gap(record: dict[str, object], source: str) -> AssuranceGap | None:
             or record.get("status") or record.get("blocked_reason")):
         return None
     try:
-        if record.get("evidence_policy") == "source_public_signature":
-            entries = record.get("required_signatures")
-            if not isinstance(entries, list) or any(not isinstance(item, dict) for item in entries):
-                return None
-            declared = tuple(RequiredPublicSignature.from_dict(item) for item in entries)
-            if not declared or declared != required_signatures(source):
-                return None
-        else:
-            payload = record.get("source_item")
-            if not isinstance(payload, dict):
-                return None
-            item = SpecificationChecklistItem.from_dict(payload)
-            decision = EvidencePolicyRouter().route_source(item, source)
-            if (item.ref != record.get("checklist_ref") or not item.source_quote
-                    or item.obligation_type not in {ObligationType.MECHANICAL.value, ObligationType.NON_PERSISTENCE.value}
-                    or decision.policy.value != record.get("evidence_policy")
-                    or decision.policy not in {EvidencePolicy.DEPENDENCY, EvidencePolicy.STORAGE,
-                                               EvidencePolicy.QUALITY, EvidencePolicy.PUBLIC_SURFACE}):
-                return None
+        payload = record.get("source_item")
+        if not isinstance(payload, dict):
+            return None
+        item = SpecificationChecklistItem.from_dict(payload)
+        decision = EvidencePolicyRouter().route_source(item, source)
+        if (item.ref != record.get("checklist_ref") or not item.source_quote
+                or item.obligation_type not in {ObligationType.MECHANICAL.value, ObligationType.NON_PERSISTENCE.value}
+                or decision.policy.value != record.get("evidence_policy")
+                or decision.policy not in {EvidencePolicy.DEPENDENCY, EvidencePolicy.STORAGE,
+                                           EvidencePolicy.QUALITY, EvidencePolicy.PUBLIC_SURFACE}):
+            return None
         return AssuranceGap(str(record["checklist_ref"]), str(record["evidence_policy"]),
                             str(record["revision"]), str(record["rationale"]))
     except (ValueError, KeyError, TypeError):
         return None
 
 def delegated_covered(record: dict[str, object], source: str) -> bool:
+    if record.get("evidence_policy") == "source_public_signature":
+        return naming_signature_deferred(record, source)
     statuses = {EvidencePolicy.DOMAIN.value: EvidenceStatus.DOMAIN.value,
                 EvidencePolicy.NAMING.value: EvidenceStatus.NAMING.value}
     policy = record.get("evidence_policy")

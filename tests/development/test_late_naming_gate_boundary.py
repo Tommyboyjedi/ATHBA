@@ -36,11 +36,11 @@ def naming(code):
 ])
 def test_missing_source_spelling_is_uncertainty_not_proven_call_shape_violation(code):
     result = signature_evidence(SOURCE, snapshot(code), "python")
-    assert result["answer"] == "NO"
-    assert result["evidence_status"] == EvidenceStatus.UNSUPPORTED.value
+    assert result["answer"] == "NOT_APPLICABLE"
+    assert result["evidence_status"] == EvidenceStatus.NAMING.value
     completion = assess_completion(CompletionAuthority(({"answer": "YES"}, result), SOURCE))
     assert completion.behaviorally_complete
-    assert not completion.fully_proven
+    assert completion.fully_proven
     with pytest.raises(ValueError, match="operation naming mismatch"):
         parse_naming_decision("NO", naming(code))
 

@@ -79,7 +79,10 @@ def _mandatory_declarations(source: str) -> Iterator[re.Match[str]]:
 class SignatureAssurance:
     violations: tuple[str, ...] = ()
     unsupported: tuple[str, ...] = ()
+    deferred_to_naming: tuple[RequiredPublicSignature, ...] = ()
 
     @property
     def findings(self) -> tuple[str, ...]:
-        return self.violations + self.unsupported
+        deferred = tuple(f"{SIGNATURE_MISMATCH}: source-spelled declaration {item.source_quote} requires Naming resolution"
+                         for item in self.deferred_to_naming)
+        return self.violations + self.unsupported + deferred
