@@ -1,4 +1,5 @@
 """Evidence-level tests for PR30 model and generic execution boundaries."""
+from core.development.python_parameter_naming import PythonParameterNaming
 from dataclasses import asdict, replace
 import json
 
@@ -48,7 +49,7 @@ def production():
 
 
 def naming_input():
-    return NamingAssessmentInput(NamingMaterial(REQUIRED, ("exact_name",)), production())
+    return NamingAssessmentInput(NamingMaterial(REQUIRED, ("exact_name",)), production(), parameter_naming=PythonParameterNaming())
 
 
 def reasoner(provider, monkeypatch, response):
@@ -474,7 +475,7 @@ def test_rename_expands_only_resolved_consumer_references_and_preserves_other_co
         )},
     ]
     assert "SENTINEL" not in request.objective
-    unchanged_input = NamingAssessmentInput(NamingMaterial(REQUIRED, ("exact_name",)), focused)
+    unchanged_input = NamingAssessmentInput(NamingMaterial(REQUIRED, ("exact_name",)), focused, parameter_naming=PythonParameterNaming())
     assert unchanged_input.production is focused
     refactor = PostBehaviorWorkspaceRequests().refactor(value, RefactorOpportunity("Simplify the calculation.", "Avoid duplication."))
     assert refactor.allowed_writable_paths == ("subject.py", "other.py")
@@ -543,7 +544,7 @@ def test_naming_parser_rejects_punctuation_after_required_total(suffix):
         NamingMaterial("The callable must be named total.", ("total",)),
         replace(production(), files=(RevisionFile("subject.py",
             "def get_total():\n    return 0\n"),)),
-    )
+    parameter_naming=PythonParameterNaming())
     valid = "YES\ncurrent_name: get_total\nrequired_name: total"
     assert parse_naming_decision(valid, request).rename == IdentifierRename("get_total", "total")
     with pytest.raises(ValueError, match="NO or exactly one mapping"):

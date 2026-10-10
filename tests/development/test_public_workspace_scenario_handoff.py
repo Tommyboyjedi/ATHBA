@@ -1,4 +1,7 @@
 from __future__ import annotations
+from core.development.scenario_drafting import ScenarioDraftWorkUnitFactory
+from core.development.python_test_material import PythonTestMaterial
+
 
 import json
 import subprocess
@@ -257,7 +260,7 @@ def _service(tmp_path: Path, runtime: PublicRuntime, root: Path, state_store, re
             LanguageAdapterCatalog((PythonPytestAdapter(),)),
             GitCandidateScenarioSourceReader(root),
             state_store,
-        )
+        work_units=ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     return service, reservation, reasoning
 

@@ -1,4 +1,7 @@
 """Pre-fix regressions for completed-behavior review material and bounded repair."""
+from core.development.python_test_material import PythonTestMaterial
+from core.development.strict_microcycle import DeveloperFrontierWorkUnitFactory, RegressionRepairWorkUnitFactory
+from core.development.behavior_repair import BehaviorRepairWorkUnitFactory
 from dataclasses import replace
 import json
 from types import SimpleNamespace
@@ -9,7 +12,7 @@ async def test_approved_scenario_retains_only_selected_behavior_authority_for_re
     from tests.development.test_scenario_drafting import components, request, binding, accepted, candidate, approval
     req=request("catalog")
     service, _, _, _=components(
-        [accepted("scenario-catalog--scenario-draft-1","candidate","change")],
+        [accepted("catalog-ticket--scenario-draft-1","candidate","change")],
         [approval("SRC-CATALOG")], {"candidate":candidate("catalog")})
     outcome=await service.draft(req,binding())
     draft=outcome.state.approved_microcycle.scenario_draft
@@ -42,8 +45,8 @@ async def test_normal_repair_transition_preserves_four_attempt_bound_and_resume(
     from core.development.strict_microcycle import StrictMicrocycleService,StrictMicrocycleDependencies
     store=MemoryStore();gateway=Gateway(False);candidates=CandidateRepository(tmp_path,{"base":""})
     regression=DeterministicRegressionService(Runtime())
-    repair=BehaviorRepairService(BehaviorRepairDependencies(store,candidates,gateway,regression))
-    service=StrictMicrocycleService(StrictMicrocycleDependencies(store,candidates,gateway,LanguageAdapterCatalog((PythonPytestAdapter(),)),regression,behavior_repair=repair))
+    repair=BehaviorRepairService(BehaviorRepairDependencies(store,candidates,gateway,regression, factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial())))
+    service=StrictMicrocycleService(StrictMicrocycleDependencies(store,candidates,gateway,LanguageAdapterCatalog((PythonPytestAdapter(),)),regression,behavior_repair=repair, developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial())))
     state=replace(reviewed_state(),pending_action=MicrocyclePendingAction.SUBMIT_BEHAVIOR_REPAIR.value)
     store.save(state);seen=[]
     for attempt in range(1,5):
@@ -69,7 +72,7 @@ def test_repair_promotion_updates_completed_revision_before_rereview(tmp_path):
     state=reviewed_state()
     state=replace(state,behavior_review=replace(state.behavior_review,repair=replace(state.behavior_review.repair,current_candidate_revision="repair")),
                   candidate_chain_revision="repair")
-    service=BehaviorRepairService(BehaviorRepairDependencies(Store(),CandidateRepository(tmp_path,{}),Gateway(),DeterministicRegressionService(Runtime())))
+    service=BehaviorRepairService(BehaviorRepairDependencies(Store(),CandidateRepository(tmp_path,{}),Gateway(),DeterministicRegressionService(Runtime()), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial())))
     outcome=service.promote(request(tmp_path,state))
     assert outcome.state.completion.completed_revision=="repair"
 
@@ -131,7 +134,7 @@ async def test_normal_review_transition_supplies_immutable_current_material_and_
     service=StrictMicrocycleService(StrictMicrocycleDependencies(store,CandidateRepository(tmp_path,{}),Gateway([]),
         LanguageAdapterCatalog((PythonPytestAdapter(),)),regression(),
         behavior_completion=BehaviorCompletionService(BehaviorCompletionDependencies(reviewer)),
-        behavior_production_reader=GitBehaviorProductionReader()))
+        behavior_production_reader=GitBehaviorProductionReader(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial())))
     await service.advance(request(tmp_path,start))
     req=reviewer.requests[0]
     assert req.behavior_summary=="One selected behavior" and req.expected_result=="One expected result"

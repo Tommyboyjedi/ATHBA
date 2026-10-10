@@ -1,3 +1,5 @@
+from core.development.scenario_drafting import ScenarioDraftWorkUnitFactory
+from core.development.python_test_material import PythonTestMaterial
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -150,7 +152,7 @@ def test_semantic_annotations_are_additive_to_tester_payload():
         "total", "invoke", "RunningTotal.total() -> int", "int"
     )
     annotated = replace(base, semantic_annotations=(annotation,))
-    factory = ScenarioDraftWorkUnitFactory()
+    factory = ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial())
 
     base_payload = json.loads(
         factory.build(ScenarioDraftWorkUnitRequest(base, 1, None)).objective
@@ -242,7 +244,7 @@ def components(results, responses, sources, store=None):
         LanguageAdapterCatalog((PythonPytestAdapter(),)),
         reader,
         store or MemoryStateStore(),
-    )
+    work_units=ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial()))
     return ScenarioDraftingService(dependencies), gateway, reasoning, reader
 
 
@@ -1369,41 +1371,22 @@ async def test_pre_intent_unsafe_or_wrong_path_has_typed_feedback(test_path, fee
 
 
 @pytest.mark.asyncio
-async def test_pre_intent_out_of_scope_edit_stays_blocked_after_resume_and_repairs_from_trusted_base():
+async def test_pre_intent_out_of_scope_edit_fails_closed_durably_without_semantic_repair():
     from core.execution.work_unit_gateway import ExecutionPolicyEvidence
-
     result = replace(
         accepted("catalog-ticket--scenario-draft-1", "b" * 40, "outside"),
         policy_evidence=ExecutionPolicyEvidence(
-            ["tests/test_catalog.py"], ["tests/test_catalog.py", "catalog.py"],
-        ),
-    )
-    service, gateway, reasoning, reader = components(
-        [result, accepted("catalog-ticket--scenario-draft-2", "c" * 40, "repair")],
-        [approval("SRC-CATALOG")], {"c" * 40: plain_catalog_candidate()},
-    )
+            ["tests/test_catalog.py"], ["tests/test_catalog.py", "catalog.py"]))
+    service, gateway, reasoning, reader = components([result], [], {})
     rejected = await service.submit_candidate(request("catalog"), binding())
-    attempt = rejected.state.attempts[0]
-    assert attempt.status == "candidate_invalid"
-    assert attempt.candidate_assessment.issues[0].code == "unusable_artifact"
-    assert "outside the permitted test path" in attempt.feedback
-    assert attempt.feedback == attempt.candidate_assessment.repair_feedback()
+    assert rejected.state.status == "scenario_harness_failure"
+    assert rejected.state.attempts == ()
+    assert "mechanical_authority" in rejected.state.harness_failure_evidence.message
     service.state_store.save(ScenarioDraftRunState.from_dict(rejected.state.to_dict()))
-    blocked = await service.review_intent(request("catalog"))
-    assert blocked.state.approved_microcycle is None
-    assert reasoning.requests == []
-    assert reader.calls == []
-    await service.submit_candidate(request("catalog"), binding())
-    assert gateway.calls[1][1].base_sha == request("catalog").development_base_revision
-    persisted = service.state_store.load(request("catalog").scenario_id).attempts[1]
-    assert persisted.repair_base_sha == gateway.calls[1][1].base_sha
-    assert persisted.repair_base_ref == gateway.calls[1][1].base_ref
-    assert json.loads(gateway.calls[1][0].objective)["repair_feedback"] == attempt.feedback
-    repaired = await service.review_intent(request("catalog"))
-    assert repaired.approved
-    assert len(repaired.state.attempts) == 2
-    assert len(reasoning.requests) == 1
-
+    resumed = await service.submit_candidate(request("catalog"), binding())
+    assert resumed.state == rejected.state and not resumed.submitted_attempt
+    assert len(gateway.calls) == 1
+    assert reasoning.requests == [] and reader.calls == []
 
 @pytest.mark.asyncio
 async def test_pre_intent_dependency_patch_is_not_a_product_mock_from_incidental_text():

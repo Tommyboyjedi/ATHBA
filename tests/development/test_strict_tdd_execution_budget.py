@@ -1,3 +1,4 @@
+from core.development.python_test_material import PythonTestMaterial
 import pytest
 from dataclasses import replace
 
@@ -58,7 +59,7 @@ def test_production_policy_uses_only_typed_work_kind_defaults():
 
 
 def test_scenario_factory_selects_draft_then_repair_budget_and_rack_request():
-    factory = ScenarioDraftWorkUnitFactory()
+    factory = ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial())
     first = factory.build(ScenarioDraftWorkUnitRequest(_request(), 1, None))
     repair = factory.build(
         ScenarioDraftWorkUnitRequest(
@@ -89,7 +90,7 @@ def test_generic_work_unit_retains_900_second_fallback():
 
 
 def test_scenario_workspace_identity_is_scoped_to_its_persisted_scenario():
-    factory = ScenarioDraftWorkUnitFactory()
+    factory = ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial())
     first_request = replace(_request(), scenario_id="project-alpha--REQ-001")
     second_request = replace(_request(), scenario_id="project-beta--REQ-001")
 

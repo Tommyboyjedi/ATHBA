@@ -1,3 +1,4 @@
+from core.development.python_test_runtime import PythonPytestRuntime
 import json
 from dataclasses import replace
 
@@ -990,7 +991,7 @@ async def test_coordinator_blocks_completion_until_checklist_is_proven():
         ),
         review_material_provider=StaticReviewMaterialProvider("review"),
         gatekeeper=SpecificationGatekeeper(gateway),
-    )
+     runtime=PythonPytestRuntime())
 
     result = await coordinator.run_contract(contract())
 
@@ -1069,7 +1070,7 @@ async def test_coordinator_can_reenter_tdd_lane_for_targeted_gap():
         review_material_provider=StaticReviewMaterialProvider("review"),
         gatekeeper=SpecificationGatekeeper(gateway),
         gap_adapter=SpecificationGapTddAdapter(),
-    )
+     runtime=PythonPytestRuntime())
 
     result = await coordinator.run_contract(contract())
 
@@ -1117,7 +1118,7 @@ async def test_untraceable_executable_gap_blocks_before_ordinary_tdd():
         review_material_provider=StaticReviewMaterialProvider("unused"),
         gatekeeper=SpecificationGatekeeper(gateway),
         gap_adapter=SpecificationGapTddAdapter(),
-    )
+     runtime=PythonPytestRuntime())
 
     result = await coordinator.run_contract(contract())
 

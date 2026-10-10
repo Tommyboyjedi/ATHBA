@@ -1,3 +1,7 @@
+from core.development.specification_reconciliation import TestCatalogRevision
+from core.development.python_test_material import PythonTestMaterial
+from core.development.strict_microcycle import DeveloperFrontierWorkUnitFactory, RegressionRepairWorkUnitFactory
+from core.development.behavior_repair import BehaviorRepairWorkUnitFactory
 import ast
 import json
 import subprocess
@@ -182,7 +186,7 @@ async def test_generic_microcycle_exposes_one_frontier_at_a_time_and_persists_re
     )
     gateway = Gateway(["type", "method", "green"])
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
     outcome = await service.run(request(tmp_path, initial_state()))
@@ -227,12 +231,12 @@ async def test_invalid_syntax_never_reaches_developer(tmp_path):
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = Gateway([])
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: InvalidAdapter()})(), regression())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: InvalidAdapter()})(), regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
     outcome = await service.run(request(tmp_path, initial_state()))
 
-    assert outcome.status == BoundaryOutcome.INVALID_TEST_SYNTAX.value
+    assert outcome.status == "replan_required"
     assert gateway.units == []
     assert outcome.state.boundary_evidence[-1].outcome == BoundaryOutcome.INVALID_TEST_SYNTAX.value
 
@@ -243,7 +247,7 @@ async def test_developer_attempt_cap_is_durable_across_restarts(tmp_path):
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = Gateway([None, None, None, None])
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     value = request(tmp_path, initial_state())
 
@@ -263,7 +267,7 @@ async def test_reconciled_jcode_timeout_consumes_one_developer_attempt(tmp_path)
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = TimeoutGateway()
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     value = request(tmp_path, initial_state())
 
@@ -282,7 +286,7 @@ async def test_timeout_attempt_one_resubmits_attempt_two_for_same_frontier(tmp_p
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = TimeoutGateway()
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     value = request(tmp_path, initial_state())
 
@@ -303,7 +307,7 @@ async def test_four_reconciled_timeouts_exhaust_without_fifth_attempt(tmp_path):
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = TimeoutGateway()
     service = StrictMicrocycleService(
-        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression())
+        StrictMicrocycleDependencies(store, candidates, gateway, type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(), regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     value = request(tmp_path, initial_state())
 
@@ -337,7 +341,7 @@ def test_git_materialiser_commits_only_the_complete_authorised_test_artifact(tmp
     fragments = adapter.fragment_scenario(type("Request", (), {"model": model})())
     frontier = ScenarioFrontier("git-scenario", 0, fragments[0].fragment_id, (fragments[0].fragment_id,))
     artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(model, fragments, frontier, base))
-    materialiser = GitFrontierMaterialiser()
+    materialiser = GitFrontierMaterialiser(test_material=PythonTestMaterial())
 
     candidate = materialiser.materialise(type("Request", (), {"artifact": artifact, "repository_root": root, "test_path": "tests/test_widget.py"})())
 
@@ -367,7 +371,7 @@ async def test_regression_repair_is_bounded_to_new_failures_and_reruns_full_suit
             gateway,
             type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
             DeterministicRegressionService(runtime),
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     state = initial_state()
     assessment = BoundaryAssessment(
@@ -415,7 +419,7 @@ async def test_development_base_does_not_advance_until_deterministic_regression_
             Gateway(["type"]),
             type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
             DeterministicRegressionService(FailingSuiteRuntime()),
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
     outcome = await service.run(request(tmp_path, initial_state()))
@@ -454,7 +458,7 @@ async def test_completed_behavior_repair_is_regressed_then_reviewed_again_before
     ])
     completion = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer))
     repair = BehaviorRepairService(
-        BehaviorRepairDependencies(store, candidates, gateway, regression())
+        BehaviorRepairDependencies(store, candidates, gateway, regression(), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     service = StrictMicrocycleService(
         StrictMicrocycleDependencies(
@@ -465,7 +469,7 @@ async def test_completed_behavior_repair_is_regressed_then_reviewed_again_before
             regression(),
             behavior_completion=completion,
             behavior_repair=repair,
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     state = replace(
         initial_state(),
@@ -505,7 +509,7 @@ async def test_replan_is_durable_and_never_submits_a_developer_repair(tmp_path):
     ])
     completion = BehaviorCompletionService(BehaviorCompletionDependencies(reviewer))
     repair = BehaviorRepairService(
-        BehaviorRepairDependencies(store, candidates, gateway, regression())
+        BehaviorRepairDependencies(store, candidates, gateway, regression(), factory=BehaviorRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     service = StrictMicrocycleService(
         StrictMicrocycleDependencies(
@@ -516,7 +520,7 @@ async def test_replan_is_durable_and_never_submits_a_developer_repair(tmp_path):
             regression(),
             behavior_completion=completion,
             behavior_repair=repair,
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     state = replace(
         initial_state(),
@@ -557,7 +561,7 @@ async def test_manual_advances_isolate_normal_microcycle_effects(tmp_path):
             Gateway(["type", "method", "green"]),
             type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
             DeterministicRegressionService(runtime),
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     results = []
     value = request(tmp_path, initial_state())
@@ -603,7 +607,7 @@ async def test_regression_repair_submission_regression_and_promotion_are_isolate
             gateway,
             type("Catalog", (), {"for_language": lambda self, _language: PythonPytestAdapter()})(),
             DeterministicRegressionService(runtime),
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     state = replace(
         initial_state(),
@@ -662,7 +666,7 @@ async def test_missing_member_red_transition_is_fragment_independent(tmp_path, m
         store, candidates, gateway,
         type("Catalog", (), {"for_language": lambda self, language: PythonPytestAdapter()})(),
         regression(),
-    ))
+    developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial())))
     initial = await service.advance(request(tmp_path, state))
     assert initial.kind == MicrocycleTransitionKind.STATE_INITIALISED
     result = await service.advance(request(tmp_path, state))
@@ -700,7 +704,7 @@ async def test_active_runtime_failure_red_routes_to_developer_packet(tmp_path, m
         store, candidates, gateway,
         type("Catalog", (), {"for_language": lambda self, language: PythonPytestAdapter()})(),
         regression(),
-    ))
+    developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial())))
 
     initial = await service.advance(request(tmp_path, state))
     assert initial.kind == MicrocycleTransitionKind.STATE_INITIALISED
@@ -757,7 +761,7 @@ async def test_invalid_probe_blocks_microcycle_without_progression(tmp_path, mon
         store, candidates, gateway,
         type("Catalog", (), {"for_language": lambda self, language: PythonPytestAdapter()})(),
         DeterministicRegressionService(regression_runtime),
-    ))
+    developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial())))
     initial = initial_state()
     outcome = await service.run(request(tmp_path, initial))
     saved = store.load(initial.scenario_draft.scenario_id)
@@ -796,7 +800,7 @@ def test_git_materialiser_preserves_completed_behavior_tests_across_scenarios(tm
     run(root, "add", ".")
     run(root, "commit", "-qm", "base")
     adapter = PythonPytestAdapter()
-    materialiser = GitFrontierMaterialiser()
+    materialiser = GitFrontierMaterialiser(test_material=PythonTestMaterial())
 
     def test_body(source, name):
         module = ast.parse(source)
@@ -843,7 +847,7 @@ def test_git_materialiser_preserves_completed_behavior_tests_across_scenarios(tm
     completed = subprocess.run([sys.executable, "-m", "pytest", "-q", "tests/test_widget.py"], cwd=third.project_root, capture_output=True, text=True)
     assert completed.returncode == 0 and "3 passed" in completed.stdout
     evidence = AcceptedTestEvidence("tests/test_widget.py::test_REQ_001", "tests/test_widget.py", "REQ-001", ["REQ-001"], first_revision, first_revision)
-    assert GitAcceptedTestCatalog(root, third.candidate_revision).contains(evidence)
+    assert GitAcceptedTestCatalog(root, TestCatalogRevision(third.candidate_revision, PythonTestMaterial())).contains(evidence)
     materialiser.cleanup(third)
 
 
@@ -858,7 +862,7 @@ async def test_resource_wait_does_not_consume_coder_attempt(tmp_path, monkeypatc
     monkeypatch.setattr(gateway, "execute", waiting)
     service = StrictMicrocycleService(StrictMicrocycleDependencies(
         store, candidates, gateway,
-        type("Catalog", (), {"for_language": lambda self, _: PythonPytestAdapter()})(), regression()))
+        type("Catalog", (), {"for_language": lambda self, _: PythonPytestAdapter()})(), regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial())))
     for _ in range(2):
         with pytest.raises(RackAiResourceWait):
             await service.run(request(tmp_path, initial_state()))

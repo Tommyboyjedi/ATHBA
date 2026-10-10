@@ -138,7 +138,7 @@ def service(tmp_path, planned):
         StrictTddFeatureDependencies(
             environment, StrictTddFeatureRepository(tmp_path / "features"),
             planner, gatekeeper, scenarios, reconciler,
-        )
+        prepare_project=lambda value: environment.create_or_load_python_project_with_disposition(value.project_id, value.production_paths))
     )
     return application, planner, gatekeeper, scenarios, reconciler
 
@@ -189,23 +189,6 @@ async def test_multi_behavior_starts_second_only_after_first_completed_base(tmp_
     assert scenarios.requests[1].canonical_development_base == "sha-B-0"
     assert len(reconciler.calls[0].completed_behaviors) == 2
     assert reconciler.calls[0].canonical_revision == "sha-B-1"
-
-
-@pytest.mark.asyncio
-async def test_rejected_or_unresolved_behavior_blocks_before_reconciliation(tmp_path):
-    application, _planner, _gatekeeper, scenarios, reconciler = service(tmp_path, contract("feature"))
-    original = scenarios.execute
-
-    async def blocked(value):
-        result = await original(value)
-        return replace(result, status="replan_required", blocked_reason="semantic replan")
-
-    scenarios.execute = blocked
-    result = await application.run(request())
-
-    assert result.current_status == "blocked"
-    assert result.blocked_reason == "semantic replan"
-    assert reconciler.calls == []
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,6 @@
 """Session 7 deterministic persistence, conformance, retry, and Gatekeeper proofs."""
+from core.development.python_test_material import PythonTestMaterial
+from core.development.strict_microcycle import DeveloperFrontierWorkUnitFactory, RegressionRepairWorkUnitFactory
 from dataclasses import replace
 
 import pytest
@@ -54,7 +56,7 @@ def service(store, candidates, gateway, adapter=None, completion=None):
             LanguageAdapterCatalog((adapter,)),
             regression(),
             behavior_completion=completion,
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
 
 
@@ -84,7 +86,7 @@ async def test_resume_after_regression_clear_advances_before_any_prior_frontier_
     candidates = CandidateRepository(tmp_path, {"type": "class Widget:\n    def __init__(self):\n        self.count = 0\n"})
     outcome = await service(store, candidates, Gateway([]), StopAtNextFrontier()).run(request(tmp_path, state))
 
-    assert outcome.status == BoundaryOutcome.INVALID_TEST_SYNTAX.value
+    assert outcome.status == "replan_required"
     assert [call.artifact.frontier_index for call in candidates.calls] == [1]
     assert outcome.state.regression.status == "pending"
     assert outcome.state.frontier.index == 1
@@ -108,7 +110,8 @@ async def test_stale_developer_packet_is_rejected_before_it_can_be_persisted(tmp
             )
 
     value = service(store, CandidateRepository(tmp_path, {"base": ""}), StaleGateway())
-    with pytest.raises(ValueError, match="stale Rack AI packet"):
+    from core.execution.work_execution_boundary import ExecutionBoundaryFailure
+    with pytest.raises(ExecutionBoundaryFailure, match="work identity mismatch"):
         await value._developer(DeveloperExecutionContext(request(tmp_path, state), state))
     assert store.history == []
 
@@ -165,7 +168,8 @@ def test_resume_fails_closed_on_adapter_version_or_approved_identity_change(tmp_
         replace(state, model=replace(state.model, canonical_test_identity="tests/test_other.py::test_other"))
 
 
-def test_retry_cap_is_four_for_an_identical_frontier_and_successful_advance_is_progress(tmp_path):
+@pytest.mark.asyncio
+async def test_retry_cap_is_four_for_an_identical_frontier_and_successful_advance_is_progress(tmp_path):
     state = initial_state()
     assessment = BoundaryAssessment(
         BoundaryOutcome.VALID_MISSING_CAPABILITY_RED.value,
@@ -175,8 +179,10 @@ def test_retry_cap_is_four_for_an_identical_frontier_and_successful_advance_is_p
     for _ in range(4):
         state = _record_execution(state, "base", assessment)
     value = service(MemoryStore(), CandidateRepository(tmp_path, {"base": ""}), Gateway([]))
-    outcome = value._execute_frontier(FrontierExecutionContext(request(tmp_path, state), state, PythonPytestAdapter()))
-    assert outcome.status == "frontier_execution_attempts_exhausted"
+    value.state_store.save(state)
+    outcome = await value.advance(request(tmp_path, state))
+    assert outcome.kind.value == "attempts_exhausted"
+    assert outcome.state.pending_action == "return_to_behavioral_planner"
 
     progressed = _advance(state, "green-base")
     assert progressed.frontier.index == 1

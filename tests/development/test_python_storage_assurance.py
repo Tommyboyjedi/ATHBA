@@ -1,4 +1,8 @@
 """Decorator opacity is a visible assurance limit, never a blanket unknown bypass."""
+from core.development.specification_reconciliation import TestCatalogRevision
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
+from core.development.python_test_material import PythonTestMaterial
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -126,13 +130,13 @@ async def test_final_gatekeeper_warning_survives_disk_reload_and_final_report_pa
     source = json.loads(FIXTURE.read_text())["source"]
     (repo / "reservation_book.py").write_text(source)
     revision = _commit_all(repo, "recorded decorated accessor")
-    catalog = GitAcceptedTestCatalog(repo, revision)
+    catalog = GitAcceptedTestCatalog(repo, TestCatalogRevision(revision, PythonTestMaterial()))
     gateway = FakeReasoningGateway([])
-    reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
+    reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
     original = "Keep the implementation dependency-free and in memory."
     item = SpecificationChecklistItem("memory", "Keep the implementation in memory.",
         "constraint", "required", "Keep the implementation ... in memory", "in memory")
-    record = await reconciler.reconcile(RoutedChecklistRequest("project-one", item, original, []))
+    record = await reconciler.reconcile(RoutedChecklistRequest("project-one", item, original, [], language_id="python"))
     assert record["answer"] == "YES"
     assert record["evidence_policy"] == "no_storage"
     assert record["rationale"] == ASSURANCE

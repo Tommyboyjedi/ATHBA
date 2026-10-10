@@ -1,5 +1,6 @@
 """Deterministic strict-TDD frontier materialisation and narrow GREEN execution."""
 from __future__ import annotations
+from core.execution.work_execution_boundary import ExecutionBoundaryRequest, assert_execution_boundary
 
 from core.development.required_public_signature import RequiredPublicSignature
 
@@ -23,11 +24,7 @@ from core.development.deterministic_regression import (
     REGRESSION_CLEAR,
 )
 from core.development.microcycle_revision_service import MicrocycleRevisionLifecycle
-from core.development.python_pytest_adapter import (
-    PYTHON_PYTEST_ADAPTER_ID,
-    PythonPytestModuleMergeRequest,
-    PythonPytestModuleMerger,
-)
+from core.development.test_material import TestMaterialAdapter, TestModuleMergeRequest, require_test_material
 from core.development.microcycle_revision_state import (
     RevisionBindingRequest,
     RevisionCompletionRequest,
@@ -90,7 +87,13 @@ class MicrocycleStateStore(Protocol):
 class GitFrontierMaterialiser:
     """Writes one generated test artifact into a detached, disposable Git worktree."""
 
+    def __init__(self, test_material: TestMaterialAdapter | None = None):
+        self.test_material = test_material
+
     def materialise(self, request: FrontierCandidateRequest) -> FrontierCandidate:
+        tools = require_test_material(self.test_material)
+        if request.artifact.adapter_id != tools.adapter_id:
+            raise ValueError("frontier material has no configured language capability")
         root = request.repository_root.resolve()
         test_path = _safe_test_path(root, request.test_path)
         worktree = Path(tempfile.mkdtemp(prefix="athba-frontier-")).resolve()
@@ -99,7 +102,9 @@ class GitFrontierMaterialiser:
         try:
             target = _safe_test_path(worktree, request.test_path)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(_materialised_test_source(target, request.artifact), encoding="utf-8")
+            target.write_text(tools.merge(TestModuleMergeRequest(
+                target.read_text(encoding="utf-8") if target.exists() else "",
+                request.artifact.complete_source, request.artifact.canonical_test_identity)), encoding="utf-8")
             _git(worktree, "add", "--", request.test_path)
             changed = tuple(line for line in _git(worktree, "diff", "--cached", "--name-only").splitlines() if line)
             if changed not in {(request.test_path,), ()}:
@@ -118,20 +123,6 @@ class GitFrontierMaterialiser:
     def cleanup(self, candidate: FrontierCandidate) -> None:
         _discard_worktree(candidate.repository_root, candidate.project_root)
 
-def _materialised_test_source(target: Path, artifact: MaterialisedTestArtifact) -> str:
-    if artifact.adapter_id != PYTHON_PYTEST_ADAPTER_ID:
-        return artifact.complete_source
-    trusted = target.read_text(encoding="utf-8") if target.exists() else ""
-    return PythonPytestModuleMerger().merge(
-        PythonPytestModuleMergeRequest(
-            trusted,
-            artifact.complete_source,
-            artifact.canonical_test_identity,
-        )
-    )
-
-
-
 @dataclass(frozen=True)
 class DeveloperFrontierRequest:
     project_id: str
@@ -148,6 +139,7 @@ class DeveloperFrontierRequest:
 class DeveloperFrontierWorkUnitFactory:
     """Creates a Developer packet containing only one accepted frontier."""
 
+    test_material: TestMaterialAdapter | None = None
     budget_policy: StrictTddExecutionBudgetPolicy = field(
         default_factory=StrictTddExecutionBudgetPolicy
     )
@@ -170,7 +162,7 @@ class DeveloperFrontierWorkUnitFactory:
             objective=objective,
             allowed_paths=[request.production_path],
             acceptance=AcceptanceContract(
-                [[sys.executable, "-m", "pytest", "-q", request.artifact.canonical_test_identity]],
+                [require_test_material(self.test_material).acceptance_command(request.artifact.canonical_test_identity)],
                 required_artifacts=[request.production_path],
             ),
             max_implementation_attempts=1,
@@ -189,6 +181,7 @@ class DeveloperFrontierWorkUnitFactory:
 class RegressionRepairWorkUnitFactory:
     """Limits Developer repair context to the current frontier and new regressions."""
 
+    test_material: TestMaterialAdapter | None = None
     budget_policy: StrictTddExecutionBudgetPolicy = field(
         default_factory=StrictTddExecutionBudgetPolicy
     )
@@ -202,8 +195,8 @@ class RegressionRepairWorkUnitFactory:
             "newly_failing_prior_tests": failing_nodes,
             "production_path": request.production_path,
         }, sort_keys=True)
-        commands = [[sys.executable, "-m", "pytest", "-q", request.artifact.canonical_test_identity]]
-        commands.extend([[sys.executable, "-m", "pytest", "-q", node] for node in failing_nodes])
+        commands = [require_test_material(self.test_material).acceptance_command(request.artifact.canonical_test_identity)]
+        commands.extend([require_test_material(self.test_material).acceptance_command(node) for node in failing_nodes])
         return DevelopmentWorkUnit(
             id=identifier,
             project_id=request.project_id,
@@ -306,7 +299,9 @@ class RegressionRepairService:
             state.retry_counts.regression + 1,
             state.scenario_draft.required_signatures,
         )
-        result = await self.gateway.execute(self.factory.build(packet, failing), _working_binding(request, base))
+        unit = self.factory.build(packet, failing)
+        result = await self.gateway.execute(unit, _working_binding(request, base))
+        assert_execution_boundary(ExecutionBoundaryRequest(unit, result))
         updated = replace(
             state,
             retry_counts=replace(state.retry_counts, regression=state.retry_counts.regression + 1),
@@ -416,51 +411,6 @@ class StrictMicrocycleService:
     async def advance(self, request: StrictMicrocycleRequest):
         from core.development.strict_microcycle_advance import advance
         return await advance(self, request)
-    def _execute_frontier(self, context: FrontierExecutionContext) -> StrictMicrocycleOutcome:
-        request, state, adapter = context.request, context.state, context.adapter
-        base = state.candidate_chain_revision or state.development_base_revision
-        counts = _counts_for(state, base)
-        if counts.executions >= MAX_MICROCYCLE_ATTEMPTS:
-            return StrictMicrocycleOutcome(state, "frontier_execution_attempts_exhausted")
-        artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, base))
-        candidate = self.candidates.materialise(FrontierCandidateRequest(artifact, request.repository_root, state.model.test_path))
-        try:
-            diagnostic = adapter.execute_frontier(FrontierExecutionRequest(candidate.artifact, str(candidate.project_root), state.model.test_path, request.production_path))
-            diagnostic = replace(diagnostic, message=_workspace_relative_diagnostic(
-                diagnostic.message, candidate.project_root,
-            ))
-            prior = BoundaryOutcome.GREEN.value if state.frontier.index else None
-            assessment = adapter.classify_boundary(BoundaryClassificationRequest(diagnostic, candidate.artifact, state.fragments[state.frontier.index], prior))
-            state = _record_execution(state, base, assessment)
-            if assessment.outcome == BoundaryOutcome.GREEN.value:
-                _advance_working_revision(request, candidate.candidate_revision, RevisionTransitionKind.FRONTIER_ACCEPTED.value, None)
-                regression = self.regression.run(
-                    DeterministicRegressionRequest(
-                        candidate.project_root,
-                        state.regression.command,
-                        candidate.artifact.canonical_test_identity,
-                        request.prior_completed_test_nodes,
-                        request.include_accepted_regression_suite,
-                    )
-                )
-                state = replace(state, regression=regression.state(state.regression.command))
-                if regression.status == REGRESSION_CLEAR:
-                    _promote_canonical_revision(request, candidate.candidate_revision, None)
-                    state = replace(
-                        state,
-                        candidate_chain_revision=candidate.candidate_revision,
-                        development_base_revision=candidate.candidate_revision,
-                    )
-                self.state_store.save(state)
-                return StrictMicrocycleOutcome(state, "green" if regression.status == REGRESSION_CLEAR else regression.status)
-            if assessment.outcome in _VALID_RED_OUTCOMES:
-                _advance_working_revision(request, candidate.candidate_revision, RevisionTransitionKind.FRONTIER_ACCEPTED.value, None)
-                state = replace(state, current_accepted_red_revision=candidate.candidate_revision)
-            self.state_store.save(state)
-            return StrictMicrocycleOutcome(state, assessment.outcome)
-        finally:
-            self.candidates.cleanup(candidate)
-
     async def _developer(self, context: DeveloperExecutionContext) -> tuple[MicrocycleState, StrictMicrocycleOutcome]:
         request, state = context.request, context.state
         red = state.current_accepted_red_revision
@@ -480,6 +430,7 @@ class StrictMicrocycleService:
         )
         work_unit = self.developer_factory.build(packet)
         result = await self.gateway.execute(work_unit, _working_binding(request, red))
+        assert_execution_boundary(ExecutionBoundaryRequest(work_unit, result))
         if result.work_unit_id != work_unit.id:
             raise ValueError("stale Rack AI packet does not match the active Developer frontier")
         state = _record_developer(state, red, result)
@@ -493,95 +444,6 @@ class StrictMicrocycleService:
         return state, StrictMicrocycleOutcome(state, "advanced", 1)
 
 
-
-
-@dataclass(frozen=True)
-class CompletedBehaviorRoute:
-    state: MicrocycleState
-    outcome: StrictMicrocycleOutcome
-
-
-@dataclass(frozen=True)
-class CompletedBehaviorRouteRequest:
-    microcycle: StrictMicrocycleRequest
-    state: MicrocycleState
-    adapter: LanguageTestAdapter
-    completion: BehaviorCompletionService | None
-    behavior_repair: BehaviorRepairService | None
-    regression_repair: RegressionRepairService
-    state_store: MicrocycleStateStore
-
-
-async def _route_completed_behavior(request: CompletedBehaviorRouteRequest) -> CompletedBehaviorRoute:
-    state = request.state
-    review = state.behavior_review
-    progress = review.repair
-    if request.behavior_repair is not None and progress.current_candidate_revision:
-        if state.regression.status == ACCUMULATED_REGRESSION:
-            state, repair = await request.regression_repair.repair(
-                RegressionRepairContext(request.microcycle, state, request.adapter)
-            )
-            if repair.status != "green":
-                return CompletedBehaviorRoute(state, repair)
-            state = _record_repair_regression(state)
-            request.state_store.save(state)
-            return CompletedBehaviorRoute(state, StrictMicrocycleOutcome(state, "continue", repair.developer_submissions))
-        if progress.regression is not None and progress.regression.status != REGRESSION_CLEAR:
-            result = await request.behavior_repair.repair(
-                _behavior_repair_request(request.microcycle, state, request.adapter)
-            )
-            status = "continue" if result.status == "behavior_repair_regression_clear" else result.status
-            return CompletedBehaviorRoute(result.state, StrictMicrocycleOutcome(result.state, status, result.developer_submissions))
-    reviewed = await _complete_behavior(request.completion, request.state_store, state, 0)
-    if reviewed.status != REPAIR_REQUIRED or request.behavior_repair is None:
-        return CompletedBehaviorRoute(reviewed.state, reviewed)
-    repaired = await request.behavior_repair.repair(
-        _behavior_repair_request(request.microcycle, reviewed.state, request.adapter)
-    )
-    status = "continue" if repaired.status == "behavior_repair_regression_clear" else repaired.status
-    return CompletedBehaviorRoute(repaired.state, StrictMicrocycleOutcome(repaired.state, status, repaired.developer_submissions))
-
-
-def _behavior_repair_request(
-    request: StrictMicrocycleRequest,
-    state: MicrocycleState,
-    adapter: LanguageTestAdapter,
-) -> BehaviorRepairRequest:
-    return BehaviorRepairRequest(
-        request.project_id,
-        request.production_path,
-        request.repository_root,
-        request.repository_binding,
-        state,
-        adapter,
-        request.prior_completed_test_nodes,
-        request.include_accepted_regression_suite,
-        request.revision_lifecycle,
-        request.revision_binding_request,
-    )
-
-
-def _record_repair_regression(state: MicrocycleState) -> MicrocycleState:
-    repair = replace(
-        state.behavior_review.repair,
-        current_candidate_revision=state.development_base_revision,
-        regression=state.regression,
-    )
-    return replace(state, behavior_review=replace(state.behavior_review, repair=repair))
-
-
-async def _complete_behavior(
-    behavior_completion: BehaviorCompletionService | None,
-    state_store: MicrocycleStateStore,
-    state: MicrocycleState,
-    submitted: int,
-) -> StrictMicrocycleOutcome:
-    if behavior_completion is None:
-        return StrictMicrocycleOutcome(state, "scenario_complete", submitted)
-    state = await behavior_completion.complete(BehaviorCompletionCommand(state, persist=state_store.save))
-    state_store.save(state)
-    status = "behavior_complete" if state.completion.status == "behavior_complete" else state.behavior_review.verdict
-    return StrictMicrocycleOutcome(state, status, submitted)
 
 
 def _load_state(

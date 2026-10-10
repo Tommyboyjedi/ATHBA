@@ -1,4 +1,8 @@
 """Fake-only qualification of modality and canonical deterministic evidence."""
+from core.development.specification_reconciliation import TestCatalogRevision
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
+from core.development.python_test_material import PythonTestMaterial
 import json
 from dataclasses import replace
 
@@ -174,16 +178,16 @@ def test_dynamic_surface_cannot_prove_an_explicit_absence():
 async def test_router_calls_no_llm_for_deterministic_item_and_reads_only_canonical_revision(tmp_path):
     revision = _repository(tmp_path)
     gateway = FakeReasoningGateway([])
-    catalog = GitAcceptedTestCatalog(tmp_path, revision)
-    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
+    catalog = GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))
+    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
     obligation = item("Component must be dependency-free.", subject="dependency-free", kind="quality")
     (tmp_path / "reservation_book.py").write_text("import requests\n")
-    record = await routed.reconcile(RoutedChecklistRequest("p", obligation, obligation.text, []))
+    record = await routed.reconcile(RoutedChecklistRequest("p", obligation, obligation.text, [], language_id="python"))
     assert record["answer"] == "YES" and record["revision"] == revision
     assert not gateway.requests
     final = _commit_all(tmp_path, "add dependency")
-    catalog = GitAcceptedTestCatalog(tmp_path, final)
-    record = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog).reconcile(RoutedChecklistRequest("p", obligation, obligation.text, []))
+    catalog = GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(final, PythonTestMaterial()))
+    record = await RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))).reconcile(RoutedChecklistRequest("p", obligation, obligation.text, [], language_id="python"))
     assert record["answer"] == "NO" and not gateway.requests
 
 
@@ -198,11 +202,11 @@ async def test_behavioral_reconciliation_semantics_and_accepted_test_bodies_unch
     response = {"answer": answer, "selected_test_names": names, "rationale": "semantic judgment unchanged"}
     original_gateway = FakeReasoningGateway([response])
     routed_gateway = FakeReasoningGateway([response])
-    catalog = GitAcceptedTestCatalog(tmp_path, revision)
+    catalog = GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))
     text = "Publishing under an existing signal name replaces the current value."
     obligation = item(text, kind="behavior")
-    routed = RoutedChecklistReconciler(ChecklistItemReconciler(routed_gateway, catalog), catalog)
-    record = await routed.reconcile(RoutedChecklistRequest("p", obligation, text, accepted))
+    routed = RoutedChecklistReconciler(ChecklistItemReconciler(routed_gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
+    record = await routed.reconcile(RoutedChecklistRequest("p", obligation, text, accepted, language_id="python"))
     from core.development.specification_reconciliation import ChecklistReconciliationRequest
     from core.development.reconciliation_source_authority import ChecklistSourceAuthority
     original = await ChecklistItemReconciler(original_gateway, catalog).reconcile(
@@ -219,11 +223,11 @@ async def test_behavioral_reconciliation_semantics_and_accepted_test_bodies_unch
 async def test_canonical_snapshot_failure_and_ungrounded_static_claim_fail_closed(tmp_path):
     assert not GitSpecificationSnapshot(tmp_path).read("invalid").complete
     revision = _repository(tmp_path)
-    catalog = GitAcceptedTestCatalog(tmp_path, revision)
+    catalog = GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))
     gateway = FakeReasoningGateway([])
-    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
+    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
     obligation = item("Component must be dependency-free.", subject="dependency-free", kind="quality")
-    record = await routed.reconcile(RoutedChecklistRequest("p", obligation, "Only publishing was requested.", []))
+    record = await routed.reconcile(RoutedChecklistRequest("p", obligation, "Only publishing was requested.", [], language_id="python"))
     assert record["evidence_status"] == "unsupported_evidence_policy"
     assert record["answer"] == "NO" and not gateway.requests
 
@@ -302,13 +306,13 @@ async def test_known_engineering_quality_is_traceable_nonblocking_and_never_sema
     obligation = checklist.items[0]
     assert EvidencePolicyRouter().route(obligation).policy == EvidencePolicy.ENGINEERING
     gateway = FakeReasoningGateway([])
-    catalog = GitAcceptedTestCatalog(tmp_path, "a" * 40)
+    catalog = GitAcceptedTestCatalog(tmp_path, TestCatalogRevision("a" * 40, PythonTestMaterial()))
 
     def forbidden_inspection(*args):
         raise AssertionError("Engineering-policy delegation must not inspect source or run static proof")
 
     monkeypatch.setattr(GitSpecificationSnapshot, "read", forbidden_inspection)
-    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
+    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
     record = await routed.reconcile(RoutedChecklistRequest("p", obligation, wording, [], language_id="unknown"))
     assert record["answer"] == "NOT_APPLICABLE"
     assert record["evidence_policy"] == "engineering_policy"
@@ -377,9 +381,9 @@ async def test_compound_quality_keeps_dependency_failure_independent(tmp_path):
     (tmp_path / "reservation_book.py").write_text("import requests\n")
     revision = _commit_all(tmp_path, "external dependency")
     gateway = FakeReasoningGateway([])
-    catalog = GitAcceptedTestCatalog(tmp_path, revision)
-    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
-    records = tuple([await routed.reconcile(RoutedChecklistRequest("p", fact, wording, [])) for fact in checklist.items])
+    catalog = GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))
+    routed = RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
+    records = tuple([await routed.reconcile(RoutedChecklistRequest("p", fact, wording, [], language_id="python")) for fact in checklist.items])
     assert [record["evidence_policy"] for record in records] == ["engineering_policy", "engineering_policy", "dependency_free"]
     assert [record["answer"] for record in records] == ["NOT_APPLICABLE", "NOT_APPLICABLE", "NO"]
     assert reconciliation_satisfied(records[:2])
