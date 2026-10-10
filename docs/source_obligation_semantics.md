@@ -31,3 +31,9 @@ remain; no new language-specific application semantics are added.
 Public evidence records and final lifecycle distinguish qualified completion from
 complete specification proof. Exact accepted tests, revision and write protections
 remain mandatory throughout post-behavior processing.
+
+A known unmet public call-shape obligation may return from final reconciliation
+to one bounded supplemental TDD frontier. This uses existing original signature
+authority and an exact selected source clause. It neither invents invalid-value
+rejection behavior nor treats a lexical mismatch as a functional defect.
+Unproven assurance does not authorize such a behavioral repair.

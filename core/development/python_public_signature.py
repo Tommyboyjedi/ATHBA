@@ -13,7 +13,7 @@ def production_signature_findings(source: str, signatures: tuple[RequiredPublicS
 def production_signature_assurance(source: str, signatures: tuple[RequiredPublicSignature, ...], complete: bool = False) -> SignatureAssurance:
     """Same bounded declaration inspection; unknown mechanics are not violations."""
     tree = ast.parse(source)
-    failed, unknown, deferred = [], [], []
+    failed, unknown, deferred, violated = [], [], [], []
     dynamic = any(isinstance(node, ast.Name) and node.id in DYNAMIC_SURFACE for node in ast.walk(tree))
     for item in signatures:
         owners = [node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == item.owner]
@@ -44,7 +44,8 @@ def production_signature_assurance(source: str, signatures: tuple[RequiredPublic
             elif (not receiver_valid or len(names) != len(item.parameters) or args.defaults or args.kwonlyargs
                   or args.vararg or args.kwarg or args.posonlyargs):
                 failed.append(f"{SIGNATURE_MISMATCH}: {item.source_quote}; observed {ast.unparse(node.args)}")
-    return SignatureAssurance(tuple(failed), tuple(unknown), tuple(deferred))
+                violated.append(item)
+    return SignatureAssurance(tuple(failed), tuple(unknown), tuple(deferred), tuple(violated))
 
 
 def scenario_signature_findings(source: str, signatures: tuple[RequiredPublicSignature, ...]) -> tuple[str, ...]:

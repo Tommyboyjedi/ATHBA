@@ -52,6 +52,7 @@ class StrictTddLifecycleEventKind(str, Enum):
     BEHAVIOR_REPAIR_COMPLETED = 'behavior_repair_completed'
     BEHAVIOR_COMPLETED = 'behavior_completed'
     RECONCILIATION_STARTED = 'reconciliation_started'
+    SPECIFICATION_REPAIR_PLANNED = 'specification_repair_planned'
     RECONCILIATION_COMPLETED = 'reconciliation_completed'
     FEATURE_COMPLETED = 'feature_completed'
     FEATURE_BLOCKED = 'feature_blocked'

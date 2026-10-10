@@ -215,6 +215,7 @@ _FEATURE_EVENTS = {
     FeatureTransitionKind.BEHAVIOR_SELECTED: StrictTddLifecycleEventKind.BEHAVIOR_SELECTED,
     FeatureTransitionKind.SCENARIO_ADVANCED: StrictTddLifecycleEventKind.SCENARIO_DRAFTING_COMPLETED,
     FeatureTransitionKind.BEHAVIOR_RECORDED: StrictTddLifecycleEventKind.BEHAVIOR_COMPLETED,
+    FeatureTransitionKind.SPECIFICATION_REPAIR_PLANNED: StrictTddLifecycleEventKind.SPECIFICATION_REPAIR_PLANNED,
     FeatureTransitionKind.RECONCILIATION_COMPLETED: StrictTddLifecycleEventKind.RECONCILIATION_COMPLETED,
     FeatureTransitionKind.FEATURE_COMPLETED: StrictTddLifecycleEventKind.FEATURE_COMPLETED,
     FeatureTransitionKind.BLOCKED: StrictTddLifecycleEventKind.FEATURE_BLOCKED,
