@@ -68,6 +68,7 @@ class FeatureTransitionKind(str, Enum):
     BEHAVIOR_REPLAN_REQUIRED = "behavior_replan_required"
     BEHAVIOR_SPLIT_RECEIVED = "behavior_split_received"
     BEHAVIOR_SPLIT = "behavior_split"
+    SPECIFICATION_REPAIR_PLANNED = "specification_repair_planned"
     RECONCILIATION_COMPLETED = "reconciliation_completed"
     FEATURE_COMPLETED = "feature_completed"
     BLOCKED = "blocked"
@@ -103,6 +104,7 @@ class StrictTddTransitionPath:
             FeatureTransitionKind.GATEKEEPER_PERSISTED,
             FeatureTransitionKind.BEHAVIOR_SELECTED,
             FeatureTransitionKind.BEHAVIOR_RECORDED,
+            FeatureTransitionKind.SPECIFICATION_REPAIR_PLANNED,
             FeatureTransitionKind.RECONCILIATION_COMPLETED,
             FeatureTransitionKind.FEATURE_COMPLETED,
         } and (self.scenario_kind is not None or self.microcycle_kind is not None):

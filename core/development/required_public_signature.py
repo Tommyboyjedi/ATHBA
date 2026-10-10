@@ -80,6 +80,7 @@ class SignatureAssurance:
     violations: tuple[str, ...] = ()
     unsupported: tuple[str, ...] = ()
     deferred_to_naming: tuple[RequiredPublicSignature, ...] = ()
+    violated_signatures: tuple[RequiredPublicSignature, ...] = ()
 
     @property
     def findings(self) -> tuple[str, ...]:

@@ -10,7 +10,7 @@ def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id
     signatures = required_signatures(source)
     if not signatures:
         return None
-    failed, unknown, deferred = [], [], []
+    failed, unknown, deferred, violated = [], [], [], []
     adapter = signature_adapter(language_id)
     if adapter is None:
         unknown.append("required public signature has no language evidence adapter")
@@ -20,6 +20,7 @@ def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id
             failed.extend(proof.violations)
             unknown.extend(proof.unsupported)
             deferred.extend(proof.deferred_to_naming)
+            violated.extend(proof.violated_signatures)
         except SyntaxError:
             unknown.append("required public signature cannot be proven from malformed source")
     if not snapshot.complete:
@@ -34,4 +35,8 @@ def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id
         "rationale": "Existing source-bound call shapes checked at the canonical revision; lexical identifiers reconcile in Naming.",
         "required_signatures": [item.to_dict() for item in signatures],
         "deferred_signatures": [item.to_dict() for item in deferred],
+        "signature_gap_schema": "athba/source-call-shape-gap/v1",
+        "snapshot_complete": snapshot.complete,
+        "failed_signatures": [item.to_dict() for item in violated],
+        "unsupported_findings": unknown,
     }

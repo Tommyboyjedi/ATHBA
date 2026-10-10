@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.development.assurance_completion import CompletionAuthority, assess_completion
+from core.development.gatekeeper_signature_frontier import SignatureRepairContext, advance_signature_repair
 from core.development.strict_tdd_feature_execution import canonical_test_node_for
 
 from dataclasses import replace
@@ -100,6 +101,9 @@ async def advance(
             return _reconciliation_blocked(service, state, project, error)
     confidence = assess_completion(CompletionAuthority(state.final_reconciliation, contract.requirement_source))
     if not confidence.behaviorally_complete:
+        repair = advance_signature_repair(service, SignatureRepairContext(state, project))
+        if repair is not None:
+            return repair
         blocked = replace(state, status=StrictTddFeatureStatus.BLOCKED.value,
                           blocked_reason="specification_gatekeeper_failed")
         service.states.save(blocked)
@@ -201,6 +205,11 @@ async def _reconcile(
         blocked_reason=None if all_yes else "specification_gatekeeper_failed",
         final_reconciliation=reconciliation,
     )
+    if not all_yes:
+        repair = advance_signature_repair(service, SignatureRepairContext(
+            replace(updated, status=StrictTddFeatureStatus.RUNNING.value, blocked_reason=None), project, True))
+        if repair is not None:
+            return repair
     service.states.save(updated)
     if not all_yes:
         return _result_for(

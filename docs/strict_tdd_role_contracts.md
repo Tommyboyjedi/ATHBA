@@ -54,3 +54,26 @@ selected item. Reconciliation journals and individual cached results lacking thi
 interpretation authority fail closed when reconciliation resumes rather than
 being silently reused or resubmitted. Tester and
 Developer receive no additional context.
+
+## Bounded final call-shape gaps
+
+When all accepted behaviors pass but independent final reconciliation finds a
+known functional source call-shape violation, ATHBA may append one small
+supplemental obligation for that original source operation. The existing language
+adapter reports the exact violated source signature; core validates original
+authority, complete evidence and one exact source-clause mapping.
+
+The supplemental obligation concerns required argument count/defaults and the
+public call form, without lexical parameter spelling or a prescribed invalid-input
+error. Tester receives only that selected obligation/source through its existing
+draft path. Developer receives only the accepted RED and its diagnostic.
+Accepted tests and prior attempts remain immutable; regression acceptance stays
+mechanical. No global contract is restored to either role.
+
+The failed reconciliation and progress journal are archived at the accepted
+revision before a new frontier is selected. The deterministic supplemental
+identity and durable repair record allow one repair per original source call
+shape across restart. A repeated violation stays blocked. Unknown/dynamic or
+incomplete mechanics, lexical deferral, non-behavioral assurance and protocol
+failure do not authorize this path. Final Gatekeeper runs again after the normal
+TDD/review/regression machinery delivers the supplemental obligation.
