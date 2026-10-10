@@ -204,7 +204,10 @@ async def test_behavioral_reconciliation_semantics_and_accepted_test_bodies_unch
     routed = RoutedChecklistReconciler(ChecklistItemReconciler(routed_gateway, catalog), catalog)
     record = await routed.reconcile(RoutedChecklistRequest("p", obligation, text, accepted))
     from core.development.specification_reconciliation import ChecklistReconciliationRequest
-    original = await ChecklistItemReconciler(original_gateway, catalog).reconcile(ChecklistReconciliationRequest("p", obligation.ref, text, accepted))
+    from core.development.reconciliation_source_authority import ChecklistSourceAuthority
+    original = await ChecklistItemReconciler(original_gateway, catalog).reconcile(
+        ChecklistReconciliationRequest("p", obligation.ref, text, accepted,
+            source_authority=ChecklistSourceAuthority(text, obligation)))
     assert record == original.to_dict()
     assert routed_gateway.requests == original_gateway.requests
     assert "def test_add_resource" in routed_gateway.requests[0].prompt

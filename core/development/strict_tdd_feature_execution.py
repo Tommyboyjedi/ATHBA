@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from core.development.behavior_contract_domain import BehaviorContract
 from core.development.feature_signature_evidence import signature_evidence
+from core.development.reconciliation_source_authority import RECONCILIATION_SOURCE_SCHEMA
 from core.development.specification_revision_snapshot import GitSpecificationSnapshot
 
 import subprocess
@@ -88,7 +90,7 @@ class CompletedFeatureReconciler:
         requested_subjects = required_source_subjects(gatekeeper.checklist)
         languages = {state.model.language_id for state in states}
         language = next(iter(languages)) if len(languages) == 1 else ""
-        identity = evidence_digest({
+        identity = evidence_digest({"source_authority_schema": RECONCILIATION_SOURCE_SCHEMA,
             "checklist": gatekeeper.checklist.to_dict(), "language": language,
             "repository": str(self.repository_root.resolve()),
             "accepted": [{"evidence": evidence.to_dict(), "verified_source": catalog.verified_source(evidence)}
