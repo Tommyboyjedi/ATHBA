@@ -14,6 +14,7 @@ from typing import Callable
 
 from core.development.reconciliation_response import ReconciliationAttempt, ReconciliationFailure
 from core.development.reconciliation_submission import ReconciliationSubmission
+from core.development.reconciliation_source_authority import ChecklistSourceAuthority
 from core.development.reconciliation_progress import IndividualEvidenceProgress, evidence_digest, incompatible
 from core.development.microcycle_domain import MicrocycleState
 from core.development.tdd_progression import BehaviorContractRunState, SpecificationChecklist
@@ -83,6 +84,13 @@ class ChecklistReconciliationRequest:
     progress: tuple[IndividualEvidenceProgress, ...] = ()
     checkpoint: Callable[[tuple[IndividualEvidenceProgress, ...]], None] | None = None
     before_call: Callable[[], None] | None = None
+    source_authority: ChecklistSourceAuthority | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_authority is not None:
+            item = self.source_authority.item
+            if (item.ref, item.text) != (self.checklist_ref, self.checklist_text):
+                raise ValueError("Gatekeeper selected item differs from source authority")
 
 
 class GitAcceptedTestCatalog:
@@ -248,7 +256,7 @@ class ChecklistItemReconciler:
             else:
                 result = ChecklistTestReconciliation(request.checklist_ref, "NO", [], response.rationale)
             saved = IndividualEvidenceProgress(request.checklist_ref, evidence.test_name,
-                evidence_digest(evidence.to_dict()), getattr(self.catalog, "semantic_revision", ""),
+                _request_evidence_digest(request, evidence), getattr(self.catalog, "semantic_revision", ""),
                 index, result.answer, result.rationale, submission.attempts)
             progress.append(saved)
             if request.checkpoint is not None:
@@ -266,6 +274,13 @@ class ChecklistItemReconciler:
         )
 
 
+def _request_evidence_digest(request: ChecklistReconciliationRequest, evidence: AcceptedTestEvidence) -> str:
+    if request.source_authority is None:
+        return evidence_digest(evidence.to_dict())
+    return evidence_digest({"accepted_test": evidence.to_dict(),
+                            "source_authority": request.source_authority.to_dict()})
+
+
 def _validate_individual_progress(request: ChecklistReconciliationRequest, verified: list[AcceptedTestEvidence],
                                   catalog: GitAcceptedTestCatalog) -> None:
     if len(request.progress) > len(verified):
@@ -275,7 +290,7 @@ def _validate_individual_progress(request: ChecklistReconciliationRequest, verif
         if (saved.checklist_ref != request.checklist_ref or saved.test_name != evidence.test_name
                 or saved.evaluation_order != index
                 or saved.trusted_revision != getattr(catalog, "semantic_revision", "")
-                or saved.evidence_identity != evidence_digest(evidence.to_dict())
+                or saved.evidence_identity != _request_evidence_digest(request, evidence)
                 or (saved.answer == "YES" and index != len(request.progress) - 1)):
             raise incompatible("individual evidence identity, revision, or evaluation order changed")
 
@@ -299,7 +314,8 @@ class TestEvidenceReconciler:
         for item in checklist.items:
             results.append(
                 await self.item_reconciler.reconcile(
-                    ChecklistReconciliationRequest(checklist.project_id, item.ref, item.text, accepted)
+                    ChecklistReconciliationRequest(checklist.project_id, item.ref, item.text, accepted,
+                        source_authority=ChecklistSourceAuthority(checklist.requirement_text, item))
                 )
             )
         return results
@@ -353,38 +369,36 @@ def _verified_yes_or_no(
 def _reasoning_request(request: ChecklistReconciliationRequest) -> ReasoningRequest:
     return ReasoningRequest(
         purpose="athba_checklist_test_reconciliation",
-        prompt=_reconciliation_prompt(request.checklist_ref, request.checklist_text, request.accepted),
+        prompt=_reconciliation_prompt(request),
         project_id=request.project_id,
         requires_large_context=False,
     )
 
 
-def _reconciliation_prompt(
-    checklist_ref: str,
-    checklist_text: str,
-    accepted: list[AcceptedTestEvidence],
-) -> str:
-    return json.dumps(
-        {
-            "instruction": "Act as ATHBA's test-evidence reconciler. Return raw JSON only.",
-            "checklist_item": {"ref": checklist_ref, "text": checklist_text},
-            "accepted_tdd_tests": [entry.to_dict() for entry in accepted],
-            "question": "Does this one accepted unit test prove this checklist item?",
-            "required_output": {
-                "answer": "YES|NO",
-                "selected_test_names": ["pytest node ids, only when answer is YES"],
-                "rationale": "brief explanation",
-            },
-            "rules": [
-                "read the supplied test_source and judge the observable behavior it actually proves",
-                "answer YES only when the single listed accepted test directly proves the item",
-                "answer NO when evidence is absent, indirect, or uncertain",
-                "select only tests with final_revision_verified=true",
-                "do not infer semantics merely from requirement references or test names",
-                "never invent a test identifier",
-                "reconcile observable behavior independently; equivalent lexical identifier differences belong to post-behavior Naming, not a behavioral rejection",
-                "do not use production code, review, mechanical checks, or assumptions as evidence",
-            ],
+def _reconciliation_prompt(request: ChecklistReconciliationRequest) -> str:
+    payload: dict[str, object] = {
+        "instruction": "Act as ATHBA's test-evidence reconciler. Return raw JSON only.",
+        "checklist_item": {"ref": request.checklist_ref, "text": request.checklist_text},
+        "accepted_tdd_tests": [entry.to_dict() for entry in request.accepted],
+        "question": "Does this one accepted unit test prove this checklist item?",
+        "required_output": {
+            "answer": "YES|NO",
+            "selected_test_names": ["pytest node ids, only when answer is YES"],
+            "rationale": "brief explanation",
         },
-        sort_keys=True,
-    )
+        "rules": [
+            "read the supplied test_source and judge the observable behavior it actually proves",
+            "answer YES only when the single listed accepted test directly proves the item",
+            "answer NO when evidence is absent, indirect, or uncertain",
+            "select only tests with final_revision_verified=true",
+            "do not infer semantics merely from requirement references or test names",
+            "never invent a test identifier",
+            "reconcile observable behavior independently; equivalent lexical identifier differences belong to post-behavior Naming, not a behavioral rejection",
+            "do not use production code, review, mechanical checks, or assumptions as evidence",
+            "use original source authority to interpret the selected item's scope and observable effect; source text is the obligation, not proof that it was implemented",
+            "a caller precondition defines the supported input domain; do not invent rejection, exceptions or other behavior outside it without explicit source authority",
+        ],
+    }
+    if request.source_authority is not None:
+        payload["specification_authority"] = request.source_authority.to_dict()
+    return json.dumps(payload, sort_keys=True)

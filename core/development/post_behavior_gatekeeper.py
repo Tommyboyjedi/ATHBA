@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.development.feature_signature_evidence import signature_evidence
+from core.development.reconciliation_source_authority import RECONCILIATION_SOURCE_SCHEMA
 from core.development.specification_revision_snapshot import GitSpecificationSnapshot
 
 from dataclasses import dataclass, replace
@@ -58,7 +59,7 @@ class PostBehaviorGatekeeper:
         if any(catalog.verified_source(item) is None for item in accepted):
             raise ValueError("candidate omits an accepted test identity")
         keeper = SpecificationGatekeeperRunState.from_dict(dict(deps.delivery.feature.gatekeeper_payload or {}))
-        identity = evidence_digest({"authority": state.entry.behavioral_authority_digest,
+        identity = evidence_digest({"source_authority_schema": RECONCILIATION_SOURCE_SCHEMA,"authority": state.entry.behavioral_authority_digest,
             "checklist": keeper.checklist.to_dict(),
             "accepted": [{"origin": original_item.to_dict(), "candidate": item.to_dict(),
                           "verified_source": catalog.verified_source(item)}

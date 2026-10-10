@@ -13,6 +13,7 @@ from core.development.specification_evidence_policy import (
 )
 from core.development.specification_obligations import EvidencePolicy, ObligationModality
 from core.development.specification_domain import SpecificationChecklist
+from core.development.reconciliation_source_authority import ChecklistSourceAuthority
 from core.development.specification_reconciliation import (
     AcceptedTestEvidence, ChecklistItemReconciler, ChecklistReconciliationRequest, GitAcceptedTestCatalog,
 )
@@ -65,7 +66,8 @@ class RoutedChecklistReconciler:
         if decision.policy == EvidencePolicy.BEHAVIORAL:
             result = await self.behavioral.reconcile(ChecklistReconciliationRequest(
                 request.project_id, item.ref, item.text, request.accepted,
-                request.progress, request.checkpoint, request.before_call))
+                request.progress, request.checkpoint, request.before_call,
+                ChecklistSourceAuthority(request.original_source, item)))
             return result.to_dict()
         snapshot = GitSpecificationSnapshot(self.catalog.repository_root).read(self.catalog.semantic_revision)
         adapter = self.adapters.for_language(request.language_id)

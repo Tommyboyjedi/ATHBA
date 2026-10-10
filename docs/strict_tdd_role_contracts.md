@@ -39,3 +39,18 @@ the observation's physical temporary prefix is not a path in the execution works
 The independent Behavior Reviewer receives only the approved selected behavior, its expected observable result and source references, the accepted test, and the selected production path read at immutable accepted Git revisions. Historical RED boundary outcomes are labelled as history. A repair finding must identify a concrete current semantic defect; earlier RED evidence is not a current failure. Production material does not come from the mutable working tree.
 
 Behavior repair retains the existing four-attempt limit across rejection and resume. Promotion updates the completion revision so subsequent review evaluates the accepted repair rather than the earlier candidate. Neither review nor repair gives Developer the full specification or lexical naming authority.
+
+## Independent Gatekeeper source authority
+
+Behavioral reconciliation receives the complete original specification and the
+selected typed source-grounded checklist item alongside exactly one verified
+accepted test. Source text defines the obligation; only accepted test evidence
+can prove its implementation. Caller-domain constraints do not invent invalid
+input handling, and lexical differences remain Naming concerns.
+
+The source-authority schema participates in revision-bound reconciliation
+identity. Individual test evidence is bound to the same original source and
+selected item. Reconciliation journals and individual cached results lacking this
+interpretation authority fail closed when reconciliation resumes rather than
+being silently reused or resubmitted. Tester and
+Developer receive no additional context.
