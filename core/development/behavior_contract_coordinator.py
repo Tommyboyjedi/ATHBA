@@ -17,8 +17,6 @@ from core.development.behavior_replan_domain import (
 from core.development.source_obligation_semantics import validate_planned_clauses
 from core.development.required_public_signature import required_signatures, validate_clause_signatures
 from core.development.behavior_replanning import BehaviorRequirementReplanner
-from core.development.behavior_requirement_repair import BehaviorRequirementRepairPlanner
-from core.development.behavior_requirement_repair_domain import BehaviorRepairRequest, BehaviorRepairRecord
 from core.datastore.repos.tdd_state_repo import TddStateRepo
 from core.development.contract_run_store import ContractRunStore
 from core.development.failure_progression import (
@@ -87,7 +85,6 @@ from core.development.policy_scope_violation import (
     PolicyScopeResolutionRequest,
     PolicyScopeViolationResolver,
 )
-from core.development.python_test_runtime import PythonPytestRuntime
 from core.development.red_acceptance import RedAcceptanceDependencies, RedAcceptanceRequest, RedAcceptanceResult, RedAcceptanceService, RedBehaviorVerifier, fail_closed_red_acceptance_result, fallback_red_acceptance_result
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
@@ -406,12 +403,6 @@ class BehaviorContractPlanner:
     def __init__(self, gateway: ReasoningGateway, clause_planner: RequirementClausePlanner | None = None):
         self.gateway = gateway
         self.clause_planner = clause_planner or RequirementClausePlanner(gateway)
-
-    async def repair_requirement(self, request: BehaviorRepairRequest) -> str:
-        return await BehaviorRequirementRepairPlanner(self.gateway).repair(request)
-
-    async def correct_requirement(self, record: BehaviorRepairRecord) -> str:
-        return await BehaviorRequirementRepairPlanner(self.gateway).correct(record)
 
     async def replan_requirement(self, request: BehaviorReplanRequest) -> BehaviorReplanResponse:
         return await BehaviorRequirementReplanner(self.gateway).replan(request)
@@ -825,9 +816,20 @@ class SeniorReviewer:
         )
 
 
+class ContractTestRuntime(Protocol):
+    def red_command(self, test_name: str) -> list[str]: ...
+    def test_command(self, target: str) -> list[str]: ...
+
+
+def require_contract_runtime(runtime: ContractTestRuntime | None) -> ContractTestRuntime:
+    if runtime is None:
+        raise ValueError("contract work has no configured language runtime")
+    return runtime
+
+
 class ContractTesterWorkUnitFactory:
-    def __init__(self, runtime: PythonPytestRuntime | None = None):
-        self.runtime = runtime or PythonPytestRuntime()
+    def __init__(self, runtime: ContractTestRuntime | None = None):
+        self.runtime = runtime
 
     def build(self, request: WorkUnitBuildRequest) -> DevelopmentWorkUnit:
         return DevelopmentWorkUnit(
@@ -837,7 +839,7 @@ class ContractTesterWorkUnitFactory:
             objective=_tester_objective(request.contract, request.step, request.repository_material),
             allowed_paths=[request.step.test_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.red_command(request.step.test_name)],
+                commands=[require_contract_runtime(self.runtime).red_command(request.step.test_name)],
                 required_artifacts=[request.step.test_path],
             ),
             status=WorkUnitStatus.READY,
@@ -845,8 +847,8 @@ class ContractTesterWorkUnitFactory:
 
 
 class ContractDeveloperWorkUnitFactory:
-    def __init__(self, runtime: PythonPytestRuntime | None = None):
-        self.runtime = runtime or PythonPytestRuntime()
+    def __init__(self, runtime: ContractTestRuntime | None = None):
+        self.runtime = runtime
 
     def build(self, request: WorkUnitBuildRequest) -> DevelopmentWorkUnit:
         return DevelopmentWorkUnit(
@@ -856,7 +858,7 @@ class ContractDeveloperWorkUnitFactory:
             objective=_developer_objective(request.contract, request.step, request.repository_material),
             allowed_paths=[request.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.pytest_command(request.step.test_name), self.runtime.pytest_command(request.step.test_path)],
+                commands=[require_contract_runtime(self.runtime).test_command(request.step.test_name), require_contract_runtime(self.runtime).test_command(request.step.test_path)],
                 required_artifacts=[request.step.production_path],
             ),
             status=WorkUnitStatus.READY,
@@ -864,8 +866,8 @@ class ContractDeveloperWorkUnitFactory:
 
 
 class ContractRepairWorkUnitFactory:
-    def __init__(self, runtime: PythonPytestRuntime | None = None):
-        self.runtime = runtime or PythonPytestRuntime()
+    def __init__(self, runtime: ContractTestRuntime | None = None):
+        self.runtime = runtime
 
     def build(self, request: RepairWorkUnitBuildRequest) -> DevelopmentWorkUnit:
         attempt_number = request.cycle.repair_attempts + 1
@@ -876,7 +878,7 @@ class ContractRepairWorkUnitFactory:
             objective=_repair_objective(request.contract, request.cycle.step, request.review),
             allowed_paths=[request.cycle.step.production_path],
             acceptance=AcceptanceContract(
-                commands=[self.runtime.pytest_command(request.cycle.step.test_name), self.runtime.pytest_command(request.cycle.step.test_path)],
+                commands=[require_contract_runtime(self.runtime).test_command(request.cycle.step.test_name), require_contract_runtime(self.runtime).test_command(request.cycle.step.test_path)],
                 required_artifacts=[request.cycle.step.production_path],
             ),
             status=WorkUnitStatus.READY,
@@ -908,6 +910,7 @@ class CoordinatorDependencies:
     dependency_planner: DependencyPrerequisitePlanner | None = None
     policy_scope_resolver: PolicyScopeViolationResolver | None = None
     red_acceptance_service: RedAcceptanceService | None = None
+    runtime: ContractTestRuntime | None = None
 
 
 @dataclass(frozen=True)
@@ -1697,9 +1700,9 @@ class BehaviorContractCoordinator:
         repository_material_provider = deps.repository_material_provider or _default_tester_repository_material_provider(deps.repository_binding)
         step_planner = deps.step_planner or DynamicTddPlanner(deps.reasoning_gateway, repository_material_provider=repository_material_provider)
         reviewer = deps.reviewer or SeniorReviewer(deps.reasoning_gateway)
-        tester_factory = deps.tester_factory or ContractTesterWorkUnitFactory()
-        developer_factory = deps.developer_factory or ContractDeveloperWorkUnitFactory()
-        repair_factory = deps.repair_factory or ContractRepairWorkUnitFactory()
+        tester_factory = deps.tester_factory or ContractTesterWorkUnitFactory(deps.runtime)
+        developer_factory = deps.developer_factory or ContractDeveloperWorkUnitFactory(deps.runtime)
+        repair_factory = deps.repair_factory or ContractRepairWorkUnitFactory(deps.runtime)
         review_material_provider = deps.review_material_provider or _default_review_material_provider(deps.repository_binding)
         failure_policy = deps.failure_policy or FailureProgressionPolicy()
         dependency_planner = deps.dependency_planner or DependencyPrerequisitePlanner(deps.reasoning_gateway)

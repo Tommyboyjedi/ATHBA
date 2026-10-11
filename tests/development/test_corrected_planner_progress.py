@@ -20,7 +20,9 @@ async def test_corrected_received_response_is_durable_progress_before_validation
     assert first.fingerprint != correction.fingerprint, "The normal run controller must not mistake one corrective submission for a stalled transition"
     state = app.states.load("feature")
     assert state.behavior_replans[-1].correction_attempted
-    assert len(state.behavior_replans[-1].request.tester_failures.attempts) == 4
+    assert set(f"evidence/{index}" for index in range(1, 5)).issubset(
+        state.behavior_replans[-1].request.failure_evidence)
+    assert len(app.scenarios.requests) == 1
     assert len(gateway.requests) == 2
     # Load/save is the production JSON persistence boundary; no resubmission on resume.
     app.states.save(state)

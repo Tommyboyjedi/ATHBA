@@ -14,6 +14,7 @@ from core.development.deterministic_regression import (
     DeterministicRegressionRequest,
 )
 from core.development.microcycle_domain import (
+    MAX_MICROCYCLE_ATTEMPTS,
     BoundaryClassificationRequest,
     BoundaryOutcome,
     FrontierExecutionRequest,
@@ -37,6 +38,7 @@ from core.development.strict_microcycle import (
     _load_state,
     _promote_canonical_revision,
     _record_execution,
+    _counts_for,
     _workspace_relative_diagnostic,
 )
 from core.development.strict_tdd_transitions import (
@@ -65,14 +67,10 @@ async def advance(
     action = MicrocyclePendingAction(state.pending_action)
     if action == MicrocyclePendingAction.BLOCKED and state.behavior_review.verdict == "protocol_failure":
         return _result(MicrocycleTransitionKind.BLOCKED, prior_status, state, request, blocker="behavior_review_protocol_failure", more=False)
-    if action == MicrocyclePendingAction.BLOCKED and state.behavior_review.verdict == REPLAN_REQUIRED:
-        return _result(
-            MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED,
-            prior_status,
-            state,
-            request,
-            blocker=state.behavior_review.rationale,
-        )
+    if action == MicrocyclePendingAction.RETURN_TO_PLANNER:
+        return _result(MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED, prior_status, state, request,
+                       blocker=state.behavior_review.rationale or "Current behavioral frontier was not delivered",
+                       more=False)
     if action == MicrocyclePendingAction.OBSERVE_FRONTIER:
         return _observe_frontier(service, request, state, adapter, prior_status)
     if action == MicrocyclePendingAction.SUBMIT_DEVELOPER:
@@ -116,6 +114,11 @@ def _observe_frontier(
     prior_status: str,
 ) -> MicrocycleAdvanceResult:
     base = state.candidate_chain_revision or state.development_base_revision
+    if _counts_for(state, base).executions >= MAX_MICROCYCLE_ATTEMPTS:
+        updated = replace(state, pending_action=MicrocyclePendingAction.RETURN_TO_PLANNER.value)
+        service.state_store.save(updated)
+        return _result(MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED, prior_status, updated, request,
+                       blocker="frontier_execution_attempts_exhausted")
     artifact = adapter.materialise_frontier(
         FrontierMaterialisationRequest(state.model, state.fragments, state.frontier, base)
     )
@@ -167,9 +170,13 @@ def _observe_frontier(
             )
             service.state_store.save(updated)
             return _result(MicrocycleTransitionKind.PASSING_FRONTIER_OBSERVED, prior_status, updated, request)
-        updated = replace(updated, pending_action=MicrocyclePendingAction.BLOCKED.value)
+        semantic = assessment.outcome in {BoundaryOutcome.INVALID_TEST_SYNTAX.value,
+                                          BoundaryOutcome.FAILURE_BEFORE_FRONTIER.value}
+        updated = replace(updated, pending_action=(MicrocyclePendingAction.RETURN_TO_PLANNER.value
+                          if semantic else MicrocyclePendingAction.BLOCKED.value))
         service.state_store.save(updated)
-        return _result(MicrocycleTransitionKind.BLOCKED, prior_status, updated, request, blocker=assessment.outcome)
+        return _result(MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED if semantic else MicrocycleTransitionKind.BLOCKED,
+                       prior_status, updated, request, blocker=assessment.outcome)
     finally:
         service.candidates.cleanup(candidate)
 
@@ -190,7 +197,7 @@ async def _submit_developer(
         kind = MicrocycleTransitionKind.DEVELOPER_CANDIDATE_REJECTED
         blocker = None
     elif outcome.status.endswith("exhausted"):
-        updated = replace(updated, pending_action=MicrocyclePendingAction.BLOCKED.value)
+        updated = replace(updated, pending_action=MicrocyclePendingAction.RETURN_TO_PLANNER.value)
         kind = MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED
         blocker = outcome.status
     else:
@@ -245,8 +252,11 @@ def _verify_developer_green(
             kind = MicrocycleTransitionKind.GREEN_VERIFIED
             blocker = None
         else:
-            updated = replace(updated, pending_action=MicrocyclePendingAction.BLOCKED.value)
-            kind = MicrocycleTransitionKind.BLOCKED
+            semantic = assessment.outcome in {BoundaryOutcome.INVALID_TEST_SYNTAX.value,
+                                              BoundaryOutcome.FAILURE_BEFORE_FRONTIER.value}
+            updated = replace(updated, pending_action=(MicrocyclePendingAction.RETURN_TO_PLANNER.value
+                              if semantic else MicrocyclePendingAction.BLOCKED.value))
+            kind = MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED if semantic else MicrocycleTransitionKind.BLOCKED
             blocker = assessment.outcome
         service.state_store.save(updated)
         return _result(kind, prior_status, updated, request, blocker=blocker)
@@ -315,8 +325,16 @@ async def _submit_regression_repair(
         updated = replace(updated, pending_action=MicrocyclePendingAction.VERIFY_REGRESSION_REPAIR.value)
         kind = MicrocycleTransitionKind.REGRESSION_REPAIR_SUBMITTED
         blocker = None
+    elif outcome.status == "regression_repair_rejected":
+        updated = replace(updated, pending_action=MicrocyclePendingAction.SUBMIT_REGRESSION_REPAIR.value)
+        kind = MicrocycleTransitionKind.REGRESSION_REPAIR_SUBMITTED
+        blocker = None
+    elif outcome.status == ACCUMULATED_REGRESSION:
+        updated = replace(updated, pending_action=MicrocyclePendingAction.RETURN_TO_PLANNER.value)
+        kind = MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED
+        blocker = outcome.status
     elif outcome.status.endswith("exhausted"):
-        updated = replace(updated, pending_action=MicrocyclePendingAction.BLOCKED.value)
+        updated = replace(updated, pending_action=MicrocyclePendingAction.RETURN_TO_PLANNER.value)
         kind = MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED
         blocker = outcome.status
     else:
@@ -353,6 +371,10 @@ def _run_repair_regression(
     if outcome.status == "green":
         updated = replace(updated, pending_action=MicrocyclePendingAction.PROMOTE_REGRESSION_REPAIR.value)
         kind = MicrocycleTransitionKind.REGRESSION_REPAIR_CLEARED
+        blocker = None
+    elif outcome.status == ACCUMULATED_REGRESSION:
+        updated = replace(updated, pending_action=MicrocyclePendingAction.SUBMIT_REGRESSION_REPAIR.value)
+        kind = MicrocycleTransitionKind.ACCUMULATED_REGRESSION
         blocker = None
     else:
         updated = replace(updated, pending_action=MicrocyclePendingAction.BLOCKED.value)
@@ -434,7 +456,7 @@ async def _review_behavior(
         kind = MicrocycleTransitionKind.BEHAVIOR_REVIEW_REPAIR_REQUIRED
         blocker = None
     elif updated.behavior_review.verdict == REPLAN_REQUIRED:
-        updated = replace(updated, pending_action=MicrocyclePendingAction.BLOCKED.value)
+        updated = replace(updated, pending_action=MicrocyclePendingAction.RETURN_TO_PLANNER.value)
         kind = MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED
         blocker = updated.behavior_review.rationale
     else:
@@ -500,7 +522,7 @@ async def _submit_behavior_repair(
         kind = MicrocycleTransitionKind.BEHAVIOR_REPAIR_CANDIDATE_REJECTED
         blocker = None
     elif outcome.status.endswith("exhausted"):
-        updated = replace(outcome.state, pending_action=MicrocyclePendingAction.BLOCKED.value)
+        updated = replace(outcome.state, pending_action=MicrocyclePendingAction.RETURN_TO_PLANNER.value)
         kind = MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED
         blocker = outcome.status
     else:
@@ -541,6 +563,10 @@ def _run_behavior_repair_regression(
             pending_action=MicrocyclePendingAction.PROMOTE_BEHAVIOR_REPAIR.value,
         )
         kind = MicrocycleTransitionKind.BEHAVIOR_REPAIR_REGRESSION_CLEAR
+        blocker = None
+    elif outcome.status == ACCUMULATED_REGRESSION:
+        updated = replace(outcome.state, pending_action=MicrocyclePendingAction.SUBMIT_REGRESSION_REPAIR.value)
+        kind = MicrocycleTransitionKind.ACCUMULATED_REGRESSION
         blocker = None
     else:
         updated = replace(outcome.state, pending_action=MicrocyclePendingAction.BLOCKED.value)
@@ -636,7 +662,9 @@ def _result(
         ),
         state.pending_action,
     )
-    evidence = tuple(state.regression.evidence_refs) + tuple(state.behavior_review.evidence_refs)
+    evidence = tuple(dict.fromkeys((*state.regression.evidence_refs, *state.behavior_review.evidence_refs,
+        *(ref for attempt in state.developer_attempts for ref in attempt.evidence_refs),
+        *(ref for boundary in state.boundary_evidence for ref in boundary.diagnostic.evidence_refs))))
     terminal = {
         MicrocycleTransitionKind.BLOCKED,
         MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED,

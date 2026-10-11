@@ -1,4 +1,5 @@
 """Pre-fix regression reproduced from retained RunningTotal Naming evidence."""
+from core.development.python_parameter_naming import PythonParameterNaming
 from pathlib import Path
 from core.development.post_behavior_assessment import NamingMaterial,NamingAssessmentInput,parse_naming_decision
 from core.development.required_public_signature import required_signatures
@@ -15,7 +16,7 @@ def test_source_scoped_parameter_rename_does_not_select_unrelated_same_spelling(
     focused=PythonProductionSlice().derive(SliceRequest(entry,before))
     text="Provide a Counter class. Calling add(amount) adds the value."
     material=NamingMaterial(text,("Counter","add","amount"),required_signatures(text))
-    mapping=parse_naming_decision("x -> amount",NamingAssessmentInput(material,focused)).rename
+    mapping=parse_naming_decision("x -> amount",NamingAssessmentInput(material,focused, parameter_naming=PythonParameterNaming())).rename
     assert mapping is not None
     result=PythonPostBehaviorAuthority().rename(RenameAuthorityRequest(before,after,focused,mapping))
     assert result.passed,result.reason
@@ -30,7 +31,7 @@ def test_source_scope_survives_checkpoint_and_does_not_authorize_overbroad_renam
     focused = PythonProductionSlice().derive(SliceRequest(SpecificationSnapshot("entry", (RevisionFile("app.py", ""),)), before))
     text = "Provide a Counter class. Calling add(amount) adds the value."
     material = NamingMaterial(text, ("Counter", "add", "amount"), required_signatures(text))
-    decision = parse_naming_decision("x -> amount", NamingAssessmentInput(material, focused))
+    decision = parse_naming_decision("x -> amount", NamingAssessmentInput(material, focused, parameter_naming=PythonParameterNaming()))
     mapping = IdentifierRename(**json.loads(json.dumps(asdict(decision.rename))))
     assert (mapping.parameter_owner, mapping.parameter_operation, mapping.parameter_index) == ("Counter", "add", 0)
     expected = source.replace("def add(self,x)", "def add(self,amount)").replace("self.x=x", "self.x=amount").replace("self.x=amount\n        return x", "self.x=amount\n        return amount")

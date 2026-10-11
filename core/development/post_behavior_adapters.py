@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from core.development.parameter_naming import ParameterNamingAdapter
 from hashlib import sha256
 from pathlib import PurePosixPath
 import re
@@ -35,6 +36,7 @@ class PostBehaviorAssessorDependencies:
     source: PostBehaviorSource
     reasoning: LocalOnlyPostBehaviorReasoning
     evidence: PostBehaviorEvidenceStore
+    parameter_naming: ParameterNamingAdapter | None = None
 
 
 class PostBehaviorAssessors:
@@ -47,7 +49,7 @@ class PostBehaviorAssessors:
         deps = self.dependencies
         production = deps.source.focused(state)
         material = focused_naming_material(deps.delivery)
-        decision = await NamingAssessor(deps.reasoning).reason(NamingAssessmentInput(material, production))
+        decision = await NamingAssessor(deps.reasoning).reason(NamingAssessmentInput(material, production, deps.parameter_naming))
         ref = deps.evidence.record("naming_assessment", {
             "revision": production.revision, "slice_identity": production.identity,
             "decision": None if decision.rename is None else {

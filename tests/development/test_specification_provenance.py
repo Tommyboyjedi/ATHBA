@@ -268,12 +268,12 @@ def split_request():
     return ChecklistSplitRequest(
         project_id="p", requirement_text=COMPOUND, parent_ref="REQ", parent_text=COMPOUND,
         parent_kind="constraint", parent_modality="required", parent_source_quote=COMPOUND,
-        parent_subject="implementation", individual_no_results=(), final_revision="a" * 40,
+        parent_subject="dependency-free and in memory", individual_no_results=(), final_revision="a" * 40,
     )
 
 
 def split_payload(memory_quote: str) -> str:
-    children = [item("Keep the implementation dependency-free", "dependency-free"),
+    children = [item(COMPOUND, "dependency-free"),
                 item(memory_quote)]
     children[0]["text"] = "Remain dependency-free."
     return json.dumps({
@@ -283,7 +283,7 @@ def split_payload(memory_quote: str) -> str:
 
 @pytest.mark.asyncio
 async def test_valid_split_path_uses_ordered_source_provenance_rule():
-    gateway = RecordedGateway([split_payload("Keep ... in memory.")])
+    gateway = RecordedGateway([split_payload(COMPOUND)])
 
     result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
 
@@ -298,7 +298,7 @@ async def test_valid_split_path_uses_ordered_source_provenance_rule():
 @pytest.mark.asyncio
 async def test_invalid_split_response_is_repaired_with_precise_feedback():
     invalid = split_payload("in memory ... Keep the implementation")
-    repaired = split_payload("Keep ... in memory.")
+    repaired = split_payload(COMPOUND)
     gateway = RecordedGateway([invalid, repaired])
 
     result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
@@ -333,15 +333,15 @@ async def test_repeated_invalid_split_response_is_distinct_from_genuine_unsplitt
 
 
 @pytest.mark.asyncio
-async def test_genuine_unsplittable_split_response_remains_terminal_without_repair():
+async def test_model_no_partition_does_not_claim_atomicity():
     gateway = RecordedGateway([json.dumps({
-        "disposition": "unsplittable",
-        "rationale": "The parent is already a single grounded obligation.",
+        "disposition": "not_produced",
+        "rationale": "No validated partition was produced; atomicity is unproven.",
     })])
 
     result = await SpecificationChecklistPlanner(gateway).split_item(split_request())
 
-    assert result.disposition == "unsplittable"
+    assert result.disposition == "not_produced"
     assert result.rejection_reason is None
     assert len(gateway.requests) == 1
     assert len(result.attempts) == 1

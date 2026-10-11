@@ -7,12 +7,16 @@ import pytest
 from core.development.behavior_contract_coordinator import BehaviorContractPlanner
 from core.development.behavior_contract_domain import BehaviorContractRequirement
 from core.development.behavior_replan_domain import (
-    BehaviorReplanBlocker, BehaviorReplanDisposition, BehaviorReplanPhase, BehaviorReplanPolicy,
+    BehavioralFailure, BehaviorReplanBlocker, BehaviorReplanDisposition, BehaviorReplanPhase, BehaviorReplanPolicy,
 )
-from core.development.behavior_replan_validation import BehaviorSplitValidationContext, replan_worthy
+from core.development.behavior_replan_validation import BehaviorSplitValidationContext
 from core.development.scenario_drafting_domain import ScenarioDraftAttempt, ScenarioDraftRunState
 from core.development.strict_tdd_feature_domain import StrictTddFeatureState
-from core.development.strict_tdd_feature_replan import require_replan
+from core.development.strict_tdd_feature_replan import require_replan as _require_replan
+
+
+def require_replan(state, draft):
+    return _require_replan(state, BehavioralFailure(draft.behavior_ref, "Bounded delivery failed", ("attempts:1-4",)))
 from core.development.strict_tdd_transitions import FeatureTransitionKind
 from core.execution.reasoning_gateway import ReasoningResult
 from tests.development.test_strict_tdd_feature_application import contract, request, service
@@ -103,75 +107,10 @@ async def pending_application(tmp_path, payload=None, count=1):
     return app, gateway, gatekeeper, scenarios, reconciler, transition
 
 
-def test_developer_exhaustion_reuses_replan_request_with_frontier_evidence():
-    planned = contract("feature", 5)
-    parent = planned.observable_requirements[-1]
-    state = StrictTddFeatureState(
-        "feature", "hash", "running", planned.to_dict(),
-        current_scenario_id="feature--B-4",
-        completed_behaviors=(),
-        canonical_ref="refs/heads/main", canonical_development_base="trusted",
-    )
-    approved = replace(exhausted(parent), status="approved")
-    result = require_replan(
-        state, approved, developer_exhaustion=True,
-        failure_evidence=("microcycle:feature--B-4:frontier-5", "developer:attempts-1-4"),
-    )
-    assert result is not None and result.status == "running"
-    record = result.behavior_replans[-1]
-    assert record.phase == BehaviorReplanPhase.REQUIRED
-    assert record.request.failure_evidence == (
-        "microcycle:feature--B-4:frontier-5", "developer:attempts-1-4"
-    )
-    assert record.request.canonical_revision == "trusted"
-    assert len(record.request.tester_failures.attempts) == 4
 
 
-def test_timeout_exhaustion_replan_request_preserves_all_four_attempts():
-    planned = contract("feature", 5)
-    parent = planned.observable_requirements[-1]
-    state = StrictTddFeatureState(
-        "feature", "hash", "running", planned.to_dict(),
-        current_scenario_id="feature--B-4",
-        completed_behaviors=(),
-        canonical_ref="refs/heads/main", canonical_development_base="trusted",
-    )
-    approved = replace(
-        exhausted(parent, statuses=["timed_out_no_candidate"] * 4),
-        status="approved",
-    )
-
-    result = require_replan(
-        state,
-        approved,
-        developer_exhaustion=True,
-        failure_evidence=tuple(f"developer:timeout-attempt-{index}" for index in range(1, 5)),
-    )
-
-    assert result is not None
-    record = result.behavior_replans[-1]
-    assert record.request.failure_evidence == tuple(f"developer:timeout-attempt-{index}" for index in range(1, 5))
-    assert [attempt.no_candidate_outcome for attempt in record.request.tester_failures.attempts] == ["timed_out_no_candidate"] * 4
 
 
-def test_tester_timeout_exhaustion_reaches_replan_without_candidate():
-    planned = contract("feature", 1)
-    parent = planned.observable_requirements[0]
-    state = StrictTddFeatureState(
-        "feature", "hash", "running", planned.to_dict(),
-        current_scenario_id="feature--B-0",
-        completed_behaviors=(),
-        canonical_ref="refs/heads/main", canonical_development_base="trusted",
-    )
-    draft = exhausted(parent, statuses=["worker_model_timeout"] * 4)
-
-    result = require_replan(state, draft)
-
-    assert result is not None
-    record = result.behavior_replans[-1]
-    assert record.phase == BehaviorReplanPhase.REQUIRED
-    assert [attempt.candidate_revision for attempt in record.request.tester_failures.attempts] == [None] * 4
-    assert [attempt.no_candidate_outcome for attempt in record.request.tester_failures.attempts] == ["worker_model_timeout"] * 4
 
 
 @pytest.mark.asyncio
@@ -194,7 +133,7 @@ async def test_application_routes_developer_exhaustion_to_existing_replan(tmp_pa
             status="approved",
         )
         outcome = replace(
-            advanced.result, status="attempts_exhausted",
+            advanced.result, scenario_id=value.selected_scenario_id, status="attempts_exhausted",
             canonical_development_base=value.canonical_development_base,
             blocked_reason="developer_attempts_exhausted",
             draft_state=draft,
@@ -231,9 +170,9 @@ async def test_split_replaces_parent_in_order_preserves_completed_and_resumes(tm
     assert saved.behavior_replans[-1].phase == BehaviorReplanPhase.RECEIVED
     assert saved.canonical_development_base == before.canonical_development_base
     sent = json.loads(gateway.requests[0].prompt)["request"]
-    assert len(sent["tester_failures"]["attempts"]) == 4
-    assert len(sent["completed_requirements"]) == 4
-    assert "must not be changed" in sent["preservation_instruction"]
+    assert sent["failure_summary"] and "tester_failures" not in sent
+    assert "completed_requirements" not in sent
+    assert "source_clauses" in sent
     assert sent["canonical_revision"] == before.canonical_development_base
     # Reconstruct the service with a deserialized repository and the same deterministic ports.
     from core.development.strict_tdd_feature_application import StrictTddFeatureApplicationService, StrictTddFeatureDependencies
@@ -241,7 +180,7 @@ async def test_split_replaces_parent_in_order_preserves_completed_and_resumes(tm
     app = StrictTddFeatureApplicationService(StrictTddFeatureDependencies(
         app.environment, StrictTddFeatureRepository(tmp_path / "features"), app.contract_planner,
         gatekeeper, scenarios, reconciler,
-    ))
+    prepare_project=app.project_preparer))
     split = await app.advance(request())
     assert split.kind == FeatureTransitionKind.BEHAVIOR_SPLIT
     after = app.states.load("feature")
@@ -260,16 +199,17 @@ async def test_split_replaces_parent_in_order_preserves_completed_and_resumes(tm
 
 
 @pytest.mark.asyncio
-async def test_unsplittable_durably_blocks_without_more_tester_work(tmp_path):
-    payload = {"disposition": "unsplittable", "rationale": "Atomic obligation cannot be divided without changing its meaning.", "coverage_rationale": "", "children": []}
+async def test_no_proposal_durably_reports_atomisation_failure_not_atomicity(tmp_path):
+    payload = {"disposition": "not_produced", "rationale": "Atomic obligation cannot be divided without changing its meaning.", "coverage_rationale": "", "children": []}
     app, gateway, _, scenarios, _, _ = await pending_application(tmp_path, payload)
     count = len(scenarios.requests)
     result = await app.run(request())
-    assert result.blocked_reason == "behavior_unsplittable"
+    assert result.blocked_reason == "behavior_atomisation_not_produced"
     record = app.states.load("feature").behavior_replans[-1]
-    assert record.phase == BehaviorReplanPhase.UNSPLITTABLE
+    assert record.phase == BehaviorReplanPhase.FAILED
+    assert "atomicity is unproven" in record.detail
     assert record.response.rationale == payload["rationale"]
-    assert len(record.request.tester_failures.attempts) == 4
+    assert record.request.failure_summary
     assert record.request.source_clauses and record.request.canonical_revision
     assert await app.run(request()) == result
     assert len(gateway.requests) == 1 and len(scenarios.requests) == count
@@ -302,7 +242,7 @@ async def test_nonprogress_protocol_and_provider_fail_closed_with_bounded_correc
     count = len(scenarios.requests)
     result = await app.run(request())
     assert result.current_status == "blocked"
-    expected_requests = 2 if invalid in {"same_parent", "duplicate", "source"} else 1
+    expected_requests = 1 if invalid == "provider" else 2
     assert len(gateway.requests) == expected_requests and len(scenarios.requests) == count
     assert reconciler.calls == []
     assert app.states.load("feature").behavior_replans[-1].detail
@@ -369,20 +309,8 @@ async def test_started_without_response_blocks_on_resume_without_second_replan(t
     assert len(scenarios.requests) == 1
 
 
-@pytest.mark.parametrize("statuses", [
-    ["intent_review_protocol_failure"] * 4,
-    ["scenario_harness_failure"] * 4,
-    ["insufficient_evidence", "intent_review_protocol_failure", "insufficient_evidence", "insufficient_evidence"],
-])
-def test_infrastructure_exhaustion_is_not_decomposition(statuses):
-    assert not replan_worthy(exhausted(contract("feature").observable_requirements[0], statuses=statuses))
 
 
-@pytest.mark.parametrize("status", sorted(NO_CANDIDATE_MODEL_FAILURES))
-def test_model_execution_exhaustion_is_decomposition_evidence_without_candidate(status):
-    draft = exhausted(contract("feature").observable_requirements[0], statuses=[status] * 4)
-
-    assert replan_worthy(draft)
 
 
 @pytest.mark.asyncio
@@ -424,7 +352,7 @@ def test_observed_signalboard_shape_requests_replan_not_feature_blocker():
     result = require_replan(state, exhausted(parent))
     assert result.status == "running" and result.blocked_reason is None
     assert result.behavior_replans[0].phase == BehaviorReplanPhase.REQUIRED
-    assert len(result.behavior_replans[0].request.completed_requirements) == 4
+    assert len(result.completed_behaviors) == 4
 
 
 @pytest.mark.asyncio
@@ -441,13 +369,13 @@ async def test_total_split_guard_escalates_without_another_planner_submission(tm
         return result
     scenarios.execute = execute
     result = await app.run(request())
-    assert result.blocked_reason == "behavior_unsplittable"
+    assert result.blocked_reason == "behavior_atomisation_budget_exhausted"
     assert len(gateway.requests) == 1
     assert "safety budget" in app.states.load("feature").behavior_replans[-1].detail
 
 
 @pytest.mark.asyncio
-async def test_replan_lifecycle_projects_required_received_split_and_unsplittable(tmp_path):
+async def test_replan_lifecycle_projects_required_received_split_and_failure(tmp_path):
     from core.development.strict_tdd_transition_provenance import StrictTddTransitionEventProjector, StrictTddTransitionProjectionRequest, StrictTddTerminalPolicy, StrictTddTerminalPolicyRequest
     from core.development.strict_tdd_lifecycle_evidence import StrictTddLifecycleRunContext
     app, _, _, _, _, required = await pending_application(tmp_path)
@@ -458,10 +386,10 @@ async def test_replan_lifecycle_projects_required_received_split_and_unsplittabl
         projected = StrictTddTransitionEventProjector().project(StrictTddTransitionProjectionRequest(context, transition, 1))
         assert projected[0].event_kind.value == event
         assert StrictTddTerminalPolicy().decide(StrictTddTerminalPolicyRequest(transition, None, frozenset())).disposition.value == "continue"
-    blocked = replace(split, kind=FeatureTransitionKind.BLOCKED, blocker_or_replan_reason="behavior_unsplittable",
+    blocked = replace(split, kind=FeatureTransitionKind.BLOCKED, blocker_or_replan_reason="behavior_atomisation_not_produced",
                       transition_path=replace(split.transition_path, feature_kind=FeatureTransitionKind.BLOCKED))
     projected = StrictTddTransitionEventProjector().project(StrictTddTransitionProjectionRequest(context, blocked, 2))
-    assert projected[0].event_kind.value == "behavior_unsplittable"
+    assert projected[0].event_kind.value == "behavior_atomisation_not_produced"
 
 
 def test_split_validation_rejects_reordered_duplicates_prior_structure_and_missing_coverage():
@@ -510,26 +438,6 @@ def test_split_rewires_pending_dependencies_without_changing_completed_requireme
     assert updated.observable_requirements[-1].depends_on == ["B-1-S001", "B-1-S002"]
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["intent_review_protocol_failure"])
-async def test_feature_infrastructure_exhaustion_blocks_without_planner(tmp_path, status):
-    app, _, _, scenarios, reconciler = service(tmp_path, contract("feature"))
-    for _ in range(3):
-        await app.advance(request())
-    gateway = ReplanGateway()
-    app.contract_planner = BehaviorContractPlanner(gateway)
-    original = scenarios.execute
-    async def execute(value):
-        result = await original(value)
-        draft = exhausted(value.behavior, value.canonical_development_base, "feature--B-0", [status] * 4)
-        return replace(result, scenario_id=draft.scenario_id, status="attempts_exhausted", draft_state=draft,
-                       canonical_development_base=value.canonical_development_base)
-    scenarios.execute = execute
-    result = await app.run(request())
-    assert result.current_status == "blocked"
-    assert result.blocked_reason == "attempts_exhausted"
-    assert gateway.requests == [] and reconciler.calls == []
-    assert not app.states.load("feature").behavior_replans
 
 
 @pytest.mark.asyncio
@@ -561,8 +469,8 @@ async def test_feature_model_execution_exhaustion_reaches_planner_without_candid
     assert result.current_status == "completed"
     assert len(gateway.requests) == 1
     sent = json.loads(gateway.requests[0].prompt)["request"]
-    assert [attempt["candidate_revision"] for attempt in sent["tester_failures"]["attempts"]] == [None] * 4
-    assert [attempt["no_candidate_outcome"] for attempt in sent["tester_failures"]["attempts"]] == [status] * 4
+    assert "tester_failures" not in sent
+    assert sent["failure_summary"]
 
 
 @pytest.mark.asyncio

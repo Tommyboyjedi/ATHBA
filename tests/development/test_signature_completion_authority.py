@@ -1,4 +1,6 @@
 """Call-shape uncertainty is never a non-functional assurance exemption."""
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
 import pytest
 
 from core.development.assurance_completion import CompletionAuthority, assess_completion
@@ -11,7 +13,7 @@ REVISION = "a" * 40
 
 def evidence(code):
     return signature_evidence(SOURCE,
-        SpecificationSnapshot(REVISION, (RevisionFile("basket.py", code),)), "python")
+        SpecificationSnapshot(REVISION, (RevisionFile("basket.py", code),)), PythonSpecificationEvidenceAdapter())
 
 
 @pytest.mark.parametrize("declaration", [
@@ -71,7 +73,7 @@ def test_mixed_lexical_deferral_cannot_hide_a_known_shape_violation():
     source = SOURCE + " Calling total() returns the current total."
     snapshot = SpecificationSnapshot(REVISION, (RevisionFile("basket.py",
         "class Basket:\n    def insert(self, item, cost): pass\n    def total(self, extra=1): return 0\n"),))
-    result = signature_evidence(source, snapshot, "python")
+    result = signature_evidence(source, snapshot, PythonSpecificationEvidenceAdapter())
     assert result["deferred_signatures"]
     assert result["evidence_status"] == EvidenceStatus.FAIL.value
     assert not assess_completion(CompletionAuthority((result,), source)).behaviorally_complete
@@ -80,7 +82,7 @@ def test_mixed_lexical_deferral_cannot_hide_a_known_shape_violation():
 def test_naming_deferral_is_not_created_from_incomplete_snapshot():
     snapshot = SpecificationSnapshot(REVISION,
         (RevisionFile("basket.py", "class Basket:\n    pass\n"),), complete=False)
-    result = signature_evidence(SOURCE, snapshot, "python")
+    result = signature_evidence(SOURCE, snapshot, PythonSpecificationEvidenceAdapter())
     assert result["answer"] == "NO"
     assert not result["deferred_signatures"]
     assert not assess_completion(CompletionAuthority((result,), SOURCE)).behaviorally_complete

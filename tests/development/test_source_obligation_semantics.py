@@ -195,7 +195,8 @@ async def test_four_failures_planner_correction_rejects_invented_error_then_narr
     state = app.states.load("feature")
     record = state.behavior_replans[-1]
     assert record.phase == BehaviorReplanPhase.SUPERSEDED
-    assert len(record.request.tester_failures.attempts) == 4
+    assert record.request.failure_summary and record.request.failure_evidence
+    assert len(app.states.load("feature").completed_behaviors) == 0
     assert record.correction_attempted
     assert len(record.rejected_responses) == 1
     assert "source does not specify rejection" in record.validation_errors[0]

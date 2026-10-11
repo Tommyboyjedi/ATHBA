@@ -12,7 +12,7 @@ from core.development.semantic_api_annotations import (
     SemanticApiAnnotation,
 )
 
-MICROCYCLE_SCHEMA_VERSION = 2
+MICROCYCLE_SCHEMA_VERSION = 3
 MAX_MICROCYCLE_ATTEMPTS = 4
 
 
@@ -60,6 +60,7 @@ class MicrocyclePendingAction(str, Enum):
     RUN_BEHAVIOR_REPAIR_REGRESSION = "run_behavior_repair_regression"
     PROMOTE_BEHAVIOR_REPAIR = "promote_behavior_repair"
     COMPLETE_BEHAVIOR = "complete_behavior"
+    RETURN_TO_PLANNER = "return_to_behavioral_planner"
     BLOCKED = "blocked"
 
 
@@ -754,8 +755,8 @@ class MicrocycleState:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "MicrocycleState":
-        if "schema_version" not in value:
-            raise MicrocycleMigrationError("legacy PR17 state has no microcycle schema version; explicit migration is required")
+        if value.get("schema_version") != MICROCYCLE_SCHEMA_VERSION:
+            raise MicrocycleMigrationError("legacy microcycle state requires explicit migration")
         return cls(
             TestScenarioDraft.from_dict(dict(value["scenario_draft"])),
             ScenarioIntentResult.from_dict(dict(value["intent"])),
@@ -893,6 +894,7 @@ class LanguageTestAdapter(Protocol):
     """Protocol guarantee: every materialised frontier is complete source."""
 
     descriptor: LanguageAdapterDescriptor
+    framework_id: str
 
     def parse_scenario(self, request: ScenarioParseRequest) -> ScenarioModel: ...
     def validate_scenario_syntax(self, request: SyntaxValidationRequest) -> bool: ...

@@ -1,3 +1,8 @@
+from core.development.scenario_drafting import ScenarioDraftWorkUnitFactory
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
+from core.development.python_test_material import PythonTestMaterial
+from core.development.strict_microcycle import DeveloperFrontierWorkUnitFactory, RegressionRepairWorkUnitFactory
 from core.development.strict_tdd_execution_budget import StrictTddWorkKind
 import json
 import shutil
@@ -230,7 +235,7 @@ async def test_real_git_feature_composition_runs_lifecycle_and_reconciles_only_c
         ScenarioDraftingDependencies(
             gateway, ScenarioIntentReviewer(reasoning), adapters,
             GitCandidateScenarioSourceReader(repository), ScenarioDraftStateRepo(state_root / "drafts"),
-        )
+        work_units=ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     revisions = MicrocycleRevisionLifecycle(
         RevisionLifecycleDependencies(
@@ -239,11 +244,11 @@ async def test_real_git_feature_composition_runs_lifecycle_and_reconciles_only_c
     )
     strict = StrictMicrocycleService(
         StrictMicrocycleDependencies(
-            microcycles, GitFrontierMaterialiser(), gateway, adapters, regression,
+            microcycles, GitFrontierMaterialiser(test_material=PythonTestMaterial()), gateway, adapters, regression,
             behavior_completion=BehaviorCompletionService(
                 BehaviorCompletionDependencies(ProviderSeniorBehaviorReviewer(reasoning))
             ),
-        )
+        developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial()))
     )
     scenarios = StrictFeatureScenarioExecutor(
         StrictFeatureScenarioDependencies(drafting, strict, revisions, environment)
@@ -253,8 +258,8 @@ async def test_real_git_feature_composition_runs_lifecycle_and_reconciles_only_c
     application = StrictTddFeatureApplicationService(
         StrictTddFeatureDependencies(
             environment, StrictTddFeatureRepository(state_root / "features"), planner, gatekeeper,
-            scenarios, CompletedFeatureReconciler(repository, microcycles, reasoning),
-        )
+            scenarios, CompletedFeatureReconciler(repository, microcycles, reasoning, test_material=PythonTestMaterial(), evidence_adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))),
+        prepare_project=lambda value: environment.create_or_load_python_project_with_disposition(value.project_id, value.production_paths))
     )
 
     result = await application.run(feature_request())

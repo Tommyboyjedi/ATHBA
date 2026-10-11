@@ -1,4 +1,6 @@
 """Real Git/pytest strict-TDD lifecycle with fake execution and reasoning only."""
+from core.development.specification_reconciliation import TestCatalogRevision
+from core.development.python_test_material import PythonTestMaterial
 from core.development.strict_tdd_execution_budget import StrictTddWorkKind
 import json
 import shutil
@@ -208,8 +210,10 @@ async def test_split_children_use_real_tdd_preserve_tests_and_resume_composition
     assert len(parent_draft.attempts) == 4 and parent_draft.status == "attempts_exhausted"
     assert parent_draft.attempts[1].no_candidate_outcome == "worker_model_timeout"
     assert all(parent_draft.attempts[index].intent.status == "insufficient_evidence" for index in (0, 2, 3))
-    assert len(reasoning.replans[0]["tester_failures"]["attempts"]) == 4
-    assert len(reasoning.replans[0]["completed_requirements"]) == 4
+    assert "tester_failures" not in reasoning.replans[0]
+    assert "completed_requirements" not in reasoning.replans[0]
+    assert reasoning.replans[0]["failure_summary"]
+    assert reasoning.replans[0]["failure_evidence"]
     assert len(gatekeeper.requests) == 1
     assert state.gatekeeper_payload == before.gatekeeper_payload
     assert state.final_reconciliation[0]["answer"] == "YES"
@@ -226,7 +230,7 @@ async def test_split_children_use_real_tdd_preserve_tests_and_resume_composition
     assert test_names(json.loads(reconciliation_requests[0].prompt)) == record["accepted_test_names"]
     microcycles = [composition.application.reconciler.state_store.load(completed.scenario_id) for completed in state.completed_behaviors]
     evidence = CompletedMicrocycleEvidenceCollector().collect(microcycles)
-    catalog = GitAcceptedTestCatalog(repository, state.canonical_development_base)
+    catalog = GitAcceptedTestCatalog(repository, TestCatalogRevision(state.canonical_development_base, PythonTestMaterial()))
     assert len(evidence) == len(state.completed_behaviors)
     assert all(catalog.contains(item) for item in evidence)
     accepted = [item.test_name for item in evidence]

@@ -1,3 +1,4 @@
+from core.development.python_test_runtime import PythonPytestRuntime
 import json
 import subprocess
 from types import SimpleNamespace
@@ -870,8 +871,8 @@ async def test_contract_output_paths_must_match_allowed_path_sets():
 
 def test_no_worker_model_or_gpu_fields_leak_into_contract_or_tdd_requests():
     step = proposal()
-    red_request = to_rack_ai_request("reservation-book", binding(), ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step)))
-    green_request = to_rack_ai_request("reservation-book", binding(), ContractDeveloperWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step)))
+    red_request = to_rack_ai_request("reservation-book", binding(), ContractTesterWorkUnitFactory(runtime=PythonPytestRuntime()).build(WorkUnitBuildRequest(contract(), step)))
+    green_request = to_rack_ai_request("reservation-book", binding(), ContractDeveloperWorkUnitFactory(runtime=PythonPytestRuntime()).build(WorkUnitBuildRequest(contract(), step)))
 
     assert find_forbidden_resource_selection_keys(contract().to_dict()) == []
     assert find_forbidden_resource_selection_keys(red_request) == []
@@ -998,7 +999,7 @@ def test_tester_work_unit_receives_external_repository_context_without_athba_ass
     state = run_state(semantic_base_revision=base_revision, registered_root=repo_root)
     material = GitTesterRepositoryMaterialProvider(repo_root).render(RepositoryMaterialRequest(contract(), state))
 
-    work_unit = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), proposal(), material))
+    work_unit = ContractTesterWorkUnitFactory(runtime=PythonPytestRuntime()).build(WorkUnitBuildRequest(contract(), proposal(), material))
 
     assert "standalone external repository, not ATHBA" in work_unit.objective
     assert "Do not import ATHBA internals" in work_unit.objective
@@ -1041,7 +1042,7 @@ def test_empty_external_source_uses_bootstrap_guidance_in_red_objective():
         "production_files": [{"module_name": "reservation_book", "content": ""}],
     }
 
-    work_unit = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), proposal(), material))
+    work_unit = ContractTesterWorkUnitFactory(runtime=PythonPytestRuntime()).build(WorkUnitBuildRequest(contract(), proposal(), material))
 
     assert "Choose a bootstrap behavior" in work_unit.objective
     assert "reservation_book" in work_unit.objective
@@ -1290,7 +1291,7 @@ async def test_green_cannot_begin_before_accepted_red_and_tester_failures_use_bo
         reasoning_gateway=reasoner,
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     assert [call[0] for call in gateway.calls] == [step.step_id + "--red"] * 3
     assert result.current_pool == "replan_ready"
@@ -1339,7 +1340,7 @@ async def test_mechanically_accepted_green_is_persisted_as_review_ready_before_r
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     pools = [snap.contract_runs[contract_state.id].current_pool for snap in repo.saved if contract_state.id in snap.contract_runs]
     assert "review_ready" in pools
@@ -1394,7 +1395,7 @@ async def test_next_tdd_cycle_cannot_start_before_semantic_approval():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls == []
     assert reasoner.requests[0].purpose == "athba_senior_review"
@@ -1428,7 +1429,7 @@ async def test_approved_review_promotes_candidate_revision_to_semantic_base():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.semantic_revision == "c" * 40
 
@@ -1491,7 +1492,7 @@ async def test_repair_required_moves_to_repair_ready():
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     assert result.current_pool in {"repair_ready", "replan_ready"}
     assert "repair_ready" in [snap.contract_runs[contract().id].current_pool for snap in repo.saved if contract().id in snap.contract_runs]
@@ -1551,7 +1552,7 @@ async def test_repair_result_returns_to_review_ready_before_final_approval():
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     pools = [snap.contract_runs[contract_state.id].current_pool for snap in repo.saved if contract_state.id in snap.contract_runs]
     assert "review_ready" in pools
@@ -1593,7 +1594,7 @@ async def test_repair_attempts_are_bounded():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     assert result.current_pool == "replan_ready"
     assert result.blocked_reason == "semantic repair budget exhausted"
@@ -1633,7 +1634,7 @@ async def test_replan_required_moves_to_replan_ready_and_stops_lane():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     assert result.current_pool == "replan_ready"
     assert result.blocked_reason == "The contract missed a state invariant."
@@ -1665,7 +1666,7 @@ async def test_semantically_rejected_candidate_never_becomes_next_cycle_base():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     assert result.semantic_revision == "a" * 40
 
@@ -1735,7 +1736,7 @@ async def test_resume_can_continue_from_review_ready_without_rerunning_green():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls == []
 
@@ -1793,7 +1794,7 @@ async def test_resume_can_continue_from_repair_ready():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls[0][0] == step.step_id + "--repair-1"
 
@@ -1824,7 +1825,7 @@ async def test_coordinator_completion_keeps_persisted_approved_requirement_refs(
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "completed"
     assert result.completed_requirement_refs == ["RB-1"]
@@ -1852,7 +1853,7 @@ async def test_completed_contract_is_not_rerun():
         reasoning_gateway=reasoner,
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     assert result.current_pool == "completed"
     assert gateway.calls == []
@@ -1861,9 +1862,9 @@ async def test_completed_contract_is_not_rerun():
 
 def test_tester_and_developer_prompts_remain_specific_and_path_bounded():
     step = proposal()
-    red = ContractTesterWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
-    green = ContractDeveloperWorkUnitFactory().build(WorkUnitBuildRequest(contract(), step))
-    repair = ContractRepairWorkUnitFactory().build(
+    red = ContractTesterWorkUnitFactory(runtime=PythonPytestRuntime()).build(WorkUnitBuildRequest(contract(), step))
+    green = ContractDeveloperWorkUnitFactory(runtime=PythonPytestRuntime()).build(WorkUnitBuildRequest(contract(), step))
+    repair = ContractRepairWorkUnitFactory(runtime=PythonPytestRuntime()).build(
         RepairWorkUnitBuildRequest(
             contract(),
             ContractCycleRecord.from_step(step, base_revision="a" * 40),
@@ -2135,7 +2136,7 @@ async def test_coordinator_uses_default_git_review_material_provider_when_reposi
         reasoning_gateway=reasoner,
         repository_binding=binding(base_revision, registered_root=repo_root),
         state_repo=MemoryStateRepo(snapshot),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert "production_diff" in reasoner.requests[0].prompt
     assert "test_source" in reasoner.requests[0].prompt
@@ -2238,7 +2239,7 @@ async def test_rejected_red_is_persisted_and_cannot_become_green_base():
         repository_binding=binding(),
         state_repo=state_repo,
         max_tester_repairs=0,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     saved_cycle = state_repo.snapshot.contract_runs[contract().id].cycles[0]
     assert result.current_pool == "replan_ready"
@@ -2522,7 +2523,7 @@ async def test_resource_limit_failure_splits_into_persisted_children_and_updates
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     split_states = [item for item in saved_runs(repo, contract_state.id) if item.failure_progress.splits]
     assert result.current_pool == "completed"
@@ -2604,7 +2605,7 @@ async def test_resume_split_uses_persisted_children_without_replanning():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "completed"
     assert [call[:2] for call in execution.calls] == [
@@ -2635,7 +2636,7 @@ async def test_cannot_split_resource_limit_failure_replans_without_child_work():
         repository_binding=binding(),
         state_repo=MemoryStateRepo(),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "replan_ready"
     assert "smallest coherent semantic slice" in (result.blocked_reason or "")
@@ -2665,7 +2666,7 @@ async def test_cannot_split_resource_limit_failure_accepts_fenced_json_response(
         repository_binding=binding(),
         state_repo=MemoryStateRepo(),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "replan_ready"
     assert "smallest coherent semantic slice" in (result.blocked_reason or "")
@@ -2726,7 +2727,7 @@ async def test_split_depth_exhaustion_replans_without_calling_split_planner():
         repository_binding=binding("d" * 40),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "replan_ready"
     assert "split depth exhausted" in (result.blocked_reason or "")
@@ -2743,7 +2744,7 @@ async def test_red_security_violation_routes_to_tester_repair():
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     retry_snapshot = next(item for item in saved_runs(repo, single_requirement_contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
     assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION
@@ -2767,7 +2768,7 @@ async def test_green_security_violation_routes_to_developer_repair():
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     retry_snapshot = next(item for item in saved_runs(repo, single_requirement_contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
     assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.SECURITY_OR_EXECUTION_POLICY_VIOLATION
@@ -2788,7 +2789,7 @@ async def test_red_change_scope_violation_routes_to_tester_repair():
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     retry_snapshot = next(item for item in saved_runs(repo, single_requirement_contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
     assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.CHANGE_SCOPE_VIOLATION
@@ -2812,7 +2813,7 @@ async def test_green_change_scope_violation_routes_to_developer_repair():
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     retry_snapshot = next(item for item in saved_runs(repo, single_requirement_contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
     assert retry_snapshot.failure_progress.history[-1].dominant is FailureClassification.CHANGE_SCOPE_VIOLATION
@@ -2842,7 +2843,7 @@ async def test_green_security_violation_preserves_developer_retry_budget_and_fai
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     saved = repo.snapshot.contract_runs[contract().id]
     retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
@@ -2881,7 +2882,7 @@ async def test_red_change_scope_violation_preserves_tester_retry_budget_and_fail
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     saved = repo.snapshot.contract_runs[contract().id]
     retry_snapshot = next(item for item in saved_runs(repo, contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
@@ -2909,7 +2910,7 @@ async def test_athba_request_defect_policy_violation_fails_closed_without_role_b
 
     class WrongAllowedPathDeveloperFactory:
         def build(self, request):
-            unit = ContractDeveloperWorkUnitFactory().build(request)
+            unit = ContractDeveloperWorkUnitFactory(runtime=PythonPytestRuntime()).build(request)
             return replace(unit, allowed_paths=["tests/test_reservation_book.py"])
 
     result = await BehaviorContractCoordinator(
@@ -2928,7 +2929,7 @@ async def test_athba_request_defect_policy_violation_fails_closed_without_role_b
         repository_binding=binding(),
         state_repo=repo,
         developer_factory=WrongAllowedPathDeveloperFactory(),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     saved = repo.snapshot.contract_runs[contract_state.id]
     observation = saved.failure_progress.history[-1].observations[0]
@@ -2963,7 +2964,7 @@ async def test_change_scope_within_contract_phase_scope_replans_without_role_bla
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     saved = repo.snapshot.contract_runs[contract_state.id]
     assert result.current_pool == "replan_ready"
@@ -3022,7 +3023,7 @@ async def test_resume_green_security_violation_retry_preserves_developer_route_a
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls[0][:2] == (step.step_id + "--green", "b" * 40)
     assert result.current_pool == "completed"
@@ -3079,7 +3080,7 @@ async def test_resume_red_change_scope_violation_retry_preserves_tester_route_an
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
     assert result.current_pool == "completed"
@@ -3111,7 +3112,7 @@ async def test_red_security_violation_retry_can_recover_and_complete():
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     saved = repo.snapshot.contract_runs[contract_state.id]
     assert result.current_pool == "completed"
@@ -3144,7 +3145,7 @@ async def test_green_change_scope_violation_retry_can_recover_and_reach_review_n
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     saved = repo.snapshot.contract_runs[contract_state.id]
     assert result.current_pool == "completed"
@@ -3173,7 +3174,7 @@ async def test_syntax_failure_already_planned_dependency_defers_and_parent_resum
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     deferred = repo.snapshot.contract_runs[contract().id]
     assert first_result.current_pool == "tdd_ready"
@@ -3200,7 +3201,7 @@ async def test_syntax_failure_already_planned_dependency_defers_and_parent_resum
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     assert second_result.current_pool == "completed"
     assert [call[0] for call in second_gateway.calls] == [
@@ -3233,7 +3234,7 @@ async def test_syntax_failure_add_prerequisite_synthesizes_requirement_and_paren
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     deferred = repo.snapshot.contract_runs[contract_state.id]
     requirement_refs = deferred.contract.requirement_refs()
@@ -3263,7 +3264,7 @@ async def test_syntax_failure_add_prerequisite_synthesizes_requirement_and_paren
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert second_result.current_pool == "completed"
     assert [call[0] for call in second_gateway.calls] == [
@@ -3301,7 +3302,7 @@ async def test_syntax_failure_reject_dependency_routes_to_tester_repair_from_sem
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     retry_snapshot = next(item for item in saved_runs(repo, single_requirement_contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
     packet = retry_snapshot.failure_progress.repair_packets[-1]
@@ -3336,7 +3337,7 @@ async def test_candidate_repair_uses_attempt_scoped_change_key_for_live_retries(
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     assert result.current_pool == "completed"
     assert gateway.calls[0][3] is None
@@ -3370,7 +3371,7 @@ async def test_build_link_failure_reject_dependency_routes_to_developer_repair_f
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     retry_snapshot = next(item for item in saved_runs(repo, single_requirement_contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
     packet = retry_snapshot.failure_progress.repair_packets[-1]
@@ -3404,7 +3405,7 @@ async def test_collection_bootstrap_failure_uses_dependency_deferral_route():
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     saved = repo.snapshot.contract_runs[contract().id]
     assert result.current_pool == "tdd_ready"
@@ -3434,7 +3435,7 @@ async def test_green_generic_candidate_failure_routes_as_developer_candidate_def
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(single_requirement_contract())
+     runtime=PythonPytestRuntime()).run_contract(single_requirement_contract())
 
     retry_snapshot = next(item for item in saved_runs(repo, single_requirement_contract().id) if item.failure_progress.state is FailureRouteState.AWAITING_REPAIR)
     packet = retry_snapshot.failure_progress.repair_packets[-1]
@@ -3472,7 +3473,7 @@ async def test_environment_recovery_success_reruns_from_trusted_revision():
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
         environment_recovery=recovery,
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert recovery.calls == ["reservation-book"]
     assert [call[0] for call in gateway.calls[:2]] == [step.step_id + "--red", step.step_id + "--red"]
@@ -3494,7 +3495,7 @@ async def test_environment_recovery_exhaustion_blocks_environment_truthfully():
         repository_binding=binding(),
         state_repo=repo,
         environment_recovery=recovery,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     saved = repo.snapshot.contract_runs[contract().id]
     assert result.current_pool == "blocked_environment"
@@ -3518,7 +3519,7 @@ async def test_executor_failure_stops_safely_in_blocked_executor_pool():
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     saved = repo.snapshot.contract_runs[contract().id]
     assert result.current_pool == "blocked_executor"
@@ -3553,7 +3554,7 @@ async def test_transport_timeout_exception_blocks_executor_without_advancing_tru
         ]),
         repository_binding=binding(),
         state_repo=repo,
-    ).run_contract(contract())
+     runtime=PythonPytestRuntime()).run_contract(contract())
 
     saved = repo.snapshot.contract_runs[contract().id]
     assert result.current_pool == "blocked_executor"
@@ -3584,7 +3585,7 @@ async def test_review_repair_uses_review_state_and_preserves_runtime_flow():
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     repair_ready = next(item for item in saved_runs(repo, contract_state.id) if item.current_pool == "repair_ready")
     assert repair_ready.failure_progress.history == []
@@ -3611,7 +3612,7 @@ async def test_semantic_replan_uses_review_result_and_replan_pool():
         repository_binding=binding(),
         state_repo=repo,
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     saved = repo.snapshot.contract_runs[contract_state.id]
     assert result.current_pool == "replan_ready"
@@ -3637,7 +3638,7 @@ async def test_expected_red_success_path_does_not_create_failure_progression_ent
         repository_binding=binding(),
         state_repo=MemoryStateRepo(),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "completed"
     assert result.blocked_reason is None
@@ -3675,7 +3676,7 @@ async def test_resume_tester_repair_retry_preserves_transition_and_trusted_base(
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
     assert result.current_pool == "completed"
@@ -3711,7 +3712,7 @@ async def test_resume_developer_repair_retry_preserves_transition_and_red_base()
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls[0][:2] == (step.step_id + "--green", "b" * 40)
     assert result.current_pool == "completed"
@@ -3749,7 +3750,7 @@ async def test_resume_environment_recovery_success_reruns_without_resetting_coun
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
         review_material_provider=StaticReviewMaterialProvider("candidate source"),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert gateway.calls[0][:2] == (step.step_id + "--red", "a" * 40)
     assert result.current_pool == "completed"
@@ -3782,7 +3783,7 @@ async def test_resume_blocked_environment_is_terminal_and_does_not_execute():
         reasoning_gateway=FakeReasoningGateway([]),
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "blocked_environment"
     assert gateway.calls == []
@@ -3814,7 +3815,7 @@ async def test_resume_blocked_executor_is_terminal_and_does_not_execute():
         reasoning_gateway=FakeReasoningGateway([]),
         repository_binding=binding(),
         state_repo=MemoryStateRepo(snapshot),
-    ).run_contract(contract_state)
+     runtime=PythonPytestRuntime()).run_contract(contract_state)
 
     assert result.current_pool == "blocked_executor"
     assert gateway.calls == []

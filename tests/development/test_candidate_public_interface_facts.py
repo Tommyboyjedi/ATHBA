@@ -1,4 +1,5 @@
 """Source interface facts are harness-only; a candidate cannot redefine a query."""
+from core.development.python_test_material import PythonTestMaterial
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -53,7 +54,7 @@ def test_unrelated_owner_or_equivalent_identifier_is_not_lexically_rejected():
 
 def test_private_interface_facts_never_enter_fresh_tester_semantic_context():
     base = replace(request("catalog"), candidate_interface_facts=FACTS)
-    task = ScenarioDraftWorkUnitFactory().build(ScenarioDraftWorkUnitRequest(base, 1, None)).objective
+    task = ScenarioDraftWorkUnitFactory(test_material=PythonTestMaterial()).build(ScenarioDraftWorkUnitRequest(base, 1, None)).objective
     assert "candidate_interface_facts" not in task
     assert "future_operation" not in task
     assert "arg0" not in task
@@ -66,7 +67,7 @@ async def test_property_repair_uses_precise_feedback_and_keeps_attempt_authority
     bad = "from catalog import Catalog\n\ndef test_one():\n    c=Catalog()\n    assert c.item_count==0\n"
     good = bad.replace("c.item_count==0", "c.item_count()==0")
     service, gateway, reasoning, _ = components(
-        [accepted("d1", "b"*40, "d1"), accepted("d2", "c"*40, "d2")],
+        [accepted("catalog-ticket--scenario-draft-1", "b"*40, "d1"), accepted("catalog-ticket--scenario-draft-2", "c"*40, "d2")],
         [approval("SRC-CATALOG")], {"b"*40: bad, "c"*40: good})
     first = await service.draft(base, binding())
     assert first.state.attempts[0].status == "candidate_invalid"

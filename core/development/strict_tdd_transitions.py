@@ -54,11 +54,6 @@ class ScenarioTransitionKind(str, Enum):
 
 
 class FeatureTransitionKind(str, Enum):
-    BEHAVIOR_REPAIR_REQUIRED = "behavior_repair_required"
-    BEHAVIOR_REPAIR_RECEIVED = "behavior_repair_received"
-    BEHAVIOR_REPAIR_CORRECTION_REQUIRED = "behavior_repair_correction_required"
-    BEHAVIOR_REPAIR_CORRECTION_RECEIVED = "behavior_repair_correction_received"
-    BEHAVIOR_REPAIR_APPLIED = "behavior_repair_applied"
     PROJECT_LOADED = "project_loaded"
     CONTRACT_PERSISTED = "contract_persisted"
     GATEKEEPER_PERSISTED = "gatekeeper_persisted"
@@ -68,7 +63,6 @@ class FeatureTransitionKind(str, Enum):
     BEHAVIOR_REPLAN_REQUIRED = "behavior_replan_required"
     BEHAVIOR_SPLIT_RECEIVED = "behavior_split_received"
     BEHAVIOR_SPLIT = "behavior_split"
-    SPECIFICATION_REPAIR_PLANNED = "specification_repair_planned"
     RECONCILIATION_COMPLETED = "reconciliation_completed"
     FEATURE_COMPLETED = "feature_completed"
     BLOCKED = "blocked"
@@ -94,7 +88,6 @@ class StrictTddTransitionPath:
         if self.scenario_kind is not None and self.feature_kind not in {
             FeatureTransitionKind.SCENARIO_ADVANCED,
             FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED,
-            FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED,
             FeatureTransitionKind.BLOCKED,
         }:
             raise ValueError("nested scenario provenance requires a scenario-consuming feature transition")
@@ -104,7 +97,6 @@ class StrictTddTransitionPath:
             FeatureTransitionKind.GATEKEEPER_PERSISTED,
             FeatureTransitionKind.BEHAVIOR_SELECTED,
             FeatureTransitionKind.BEHAVIOR_RECORDED,
-            FeatureTransitionKind.SPECIFICATION_REPAIR_PLANNED,
             FeatureTransitionKind.RECONCILIATION_COMPLETED,
             FeatureTransitionKind.FEATURE_COMPLETED,
         } and (self.scenario_kind is not None or self.microcycle_kind is not None):

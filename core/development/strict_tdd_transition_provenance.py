@@ -117,8 +117,8 @@ class StrictTddTransitionEventProjector:
         status = _event_status(path)
         draft = LifecycleEventDraft(
             identity,
-            (StrictTddLifecycleEventKind.BEHAVIOR_UNSPLITTABLE
-             if transition.blocker_or_replan_reason == BehaviorReplanBlocker.UNSPLITTABLE.value
+            (StrictTddLifecycleEventKind.ATOMISATION_FAILED
+             if transition.blocker_or_replan_reason == BehaviorReplanBlocker.NOT_PRODUCED.value
              else _event_kind(path, transition.project_disposition)),
             status,
             evidence,
@@ -170,8 +170,6 @@ def _event_identity(
 def _event_kind(path: StrictTddTransitionPath, project_disposition: ProjectTransitionDisposition | None) -> StrictTddLifecycleEventKind:
     if path.feature_kind == FeatureTransitionKind.PROJECT_LOADED and project_disposition == ProjectTransitionDisposition.CREATED:
         return StrictTddLifecycleEventKind.PROJECT_CREATED
-    if path.feature_kind == FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED:
-        return StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_REQUIRED
     if path.feature_kind == FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED:
         return StrictTddLifecycleEventKind.BEHAVIOR_REPLAN_REQUIRED
     if path.microcycle_kind is not None:
@@ -203,9 +201,6 @@ def _message(path: StrictTddTransitionPath) -> str:
 
 
 _FEATURE_EVENTS = {
-    FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_REQUIRED,
-    FeatureTransitionKind.BEHAVIOR_REPAIR_RECEIVED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_RECEIVED,
-    FeatureTransitionKind.BEHAVIOR_REPAIR_APPLIED: StrictTddLifecycleEventKind.BEHAVIOR_REPAIR_APPLIED,
     FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED: StrictTddLifecycleEventKind.BEHAVIOR_REPLAN_REQUIRED,
     FeatureTransitionKind.BEHAVIOR_SPLIT_RECEIVED: StrictTddLifecycleEventKind.BEHAVIOR_SPLIT_RECEIVED,
     FeatureTransitionKind.BEHAVIOR_SPLIT: StrictTddLifecycleEventKind.BEHAVIOR_SPLIT,
@@ -215,7 +210,6 @@ _FEATURE_EVENTS = {
     FeatureTransitionKind.BEHAVIOR_SELECTED: StrictTddLifecycleEventKind.BEHAVIOR_SELECTED,
     FeatureTransitionKind.SCENARIO_ADVANCED: StrictTddLifecycleEventKind.SCENARIO_DRAFTING_COMPLETED,
     FeatureTransitionKind.BEHAVIOR_RECORDED: StrictTddLifecycleEventKind.BEHAVIOR_COMPLETED,
-    FeatureTransitionKind.SPECIFICATION_REPAIR_PLANNED: StrictTddLifecycleEventKind.SPECIFICATION_REPAIR_PLANNED,
     FeatureTransitionKind.RECONCILIATION_COMPLETED: StrictTddLifecycleEventKind.RECONCILIATION_COMPLETED,
     FeatureTransitionKind.FEATURE_COMPLETED: StrictTddLifecycleEventKind.FEATURE_COMPLETED,
     FeatureTransitionKind.BLOCKED: StrictTddLifecycleEventKind.FEATURE_BLOCKED,

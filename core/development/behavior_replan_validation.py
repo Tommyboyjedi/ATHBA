@@ -12,46 +12,8 @@ from core.development.behavior_replan_domain import (
     BehaviorReplanDisposition, BehaviorReplanPolicy, BehaviorReplanRecord,
 )
 from core.development.behavior_replanning import child_ref
-from core.development.scenario_drafting_domain import (
-    MAX_TESTER_SCENARIO_ATTEMPTS, ScenarioDraftRunState, ScenarioDraftStatus,
-)
 
 
-SEMANTIC_REJECTIONS = frozenset({"semantic_repair_required", "wrong_behavior", "insufficient_evidence", "candidate_invalid", "candidate_unchanged"})
-MODEL_EXECUTION_FAILURES = frozenset({
-    "worker_model_timeout",
-    "model_completed_without_candidate",
-    "model_protocol_failure",
-    "disallowed_or_unknown_tool_call",
-    "timed_out_no_candidate",  # compatibility with already-persisted draft states
-})
-INFRASTRUCTURE_ATTEMPT_STATUSES = frozenset({
-    "intent_review_protocol_failure", "scenario_harness_failure", "intent_protocol_failure",
-})
-
-
-def replan_worthy(draft: ScenarioDraftRunState) -> bool:
-    if (draft.status != ScenarioDraftStatus.ATTEMPTS_EXHAUSTED.value
-            or draft.approved_microcycle is not None or draft.harness_failure_evidence is not None
-            or tuple(item.attempt_number for item in draft.attempts) != tuple(range(1, MAX_TESTER_SCENARIO_ATTEMPTS + 1))):
-        return False
-    if any(item.intent_protocol_failure is not None or item.status in INFRASTRUCTURE_ATTEMPT_STATUSES for item in draft.attempts):
-        return False
-    return any(_attempt_supports_replan(item) for item in draft.attempts)
-
-
-def _attempt_supports_replan(item) -> bool:
-    if not item.feedback:
-        return False
-    if item.status in SEMANTIC_REJECTIONS:
-        return item.candidate_revision is not None or item.candidate_assessment is not None
-    outcome = item.no_candidate_outcome or item.status
-    return (
-        outcome in MODEL_EXECUTION_FAILURES
-        and item.candidate_revision is None
-        and item.candidate_assessment is None
-        and item.intent_protocol_failure is None
-    )
 
 def normalized(value: str) -> str:
     return " ".join(re.findall(r"\w+", value.casefold()))
@@ -82,8 +44,6 @@ def validate_split(record: BehaviorReplanRecord, context: BehaviorSplitValidatio
     active = {item.ref: item for item in contract.observable_requirements}
     if active.get(parent.ref) != parent:
         raise ValueError("parent changed since replan request")
-    if any(active.get(item.ref) != item for item in record.request.completed_requirements):
-        raise ValueError("completed behavior changed since replan request")
     forbidden = {normalized(item.observable_outcome) for item in active.values()}
     forbidden.update(normalized(item.request.parent.observable_outcome) for item in history)
     outcomes = [normalized(item.observable_outcome) for item in children]

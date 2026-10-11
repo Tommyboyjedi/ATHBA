@@ -1,5 +1,7 @@
 """Session 4 bounded scenario drafting; it deliberately does not run microcycles."""
 from __future__ import annotations
+from core.execution.work_execution_boundary import ExecutionBoundaryFailure, ExecutionBoundaryRequest, assert_execution_boundary
+from core.development.test_material import TestMaterialAdapter, require_test_material
 
 from core.development.tester_artifact import selected_source_payload
 from core.development.required_public_signature import RequiredPublicSignature
@@ -155,7 +157,7 @@ class ScenarioDraftExecutionRecord:
 
 @dataclass(frozen=True)
 class ScenarioDraftWorkUnitFactory:
-    python_executable: str = "python3"
+    test_material: TestMaterialAdapter | None = None
     budget_policy: StrictTddExecutionBudgetPolicy = field(
         default_factory=StrictTddExecutionBudgetPolicy
     )
@@ -176,7 +178,7 @@ class ScenarioDraftWorkUnitFactory:
             objective=_tester_objective(draft, request.feedback, request.repair_attempt),
             allowed_paths=[draft.authoring_path],
             acceptance=AcceptanceContract(
-                commands=[[self.python_executable, "-B", "-m", "py_compile", draft.authoring_path]],
+                commands=[require_test_material(self.test_material).syntax_command(draft.authoring_path)],
                 required_artifacts=[draft.authoring_path],
             ),
             max_implementation_attempts=1,
@@ -320,6 +322,14 @@ class ScenarioDraftingService:
         repair_binding = _repair_binding(binding, request, repair, self.source_reader)
         unit = self.work_units.build(ScenarioDraftWorkUnitRequest(request, attempt_number, _last_feedback(state), repair))
         result = await self.execution_gateway.execute(unit, repair_binding)
+        try:
+            assert_execution_boundary(ExecutionBoundaryRequest(unit, result))
+        except ExecutionBoundaryFailure as error:
+            evidence = _workspace_failure_evidence(unit, replace(result, error=error.kind.value + ": " + error.detail))
+            blocked = replace(state, status=ScenarioDraftStatus.SCENARIO_HARNESS_FAILURE.value,
+                              harness_failure_evidence=evidence)
+            self.state_store.save(blocked)
+            return ScenarioDraftOutcome(blocked, False)
         outcome = _record_submission(ScenarioDraftExecutionRecord(state, request, unit, result, repair_binding), self.source_reader)
         self.state_store.save(outcome.state)
         return outcome
@@ -513,9 +523,6 @@ def _record_submission(
         repair_base_ref=record.binding.base_ref if state.attempts else None,
         repair_base_sha=record.binding.base_sha if state.attempts else None,
     )
-    path_failure = _path_violation_attempt(record, attempt)
-    if path_failure is not None:
-        return _append_attempt(state, path_failure)
     if state.attempts and attempt.candidate_revision is not None:
         try:
             returned_source = source_reader.read(attempt.candidate_revision, record.request.authoring_path)
@@ -537,23 +544,6 @@ def _record_submission(
         unchanged_evidence=unchanged,
     )
     return _append_attempt(state, rejected)
-
-
-def _path_violation_attempt(
-    record: ScenarioDraftExecutionRecord, attempt: ScenarioDraftAttempt,
-) -> ScenarioDraftAttempt | None:
-    evidence = record.result.policy_evidence
-    if evidence is None:
-        return None
-    outside = tuple(path for path in evidence.changed_paths if path != record.request.authoring_path)
-    if not outside:
-        return None
-    detail = f"Candidate edits outside the permitted test path: {', '.join(outside)}. Submit only the permitted test artifact."
-    issue = ScenarioCandidateIssue(ScenarioCandidateIssueCode.UNUSABLE_ARTIFACT.value, detail)
-    return replace(
-        attempt, status="candidate_invalid", feedback=detail,
-        candidate_assessment=ScenarioCandidateAssessment(False, (), issues=(issue,)),
-    )
 
 
 def _candidate_failure(request: ScenarioCandidateFailureRequest) -> ScenarioDraftOutcome:

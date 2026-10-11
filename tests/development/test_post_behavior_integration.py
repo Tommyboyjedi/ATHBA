@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
+from core.development.python_test_material import PythonTestMaterial
 import pytest
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -275,10 +276,10 @@ def test_entry_loader_rejects_unapproved_or_missing_baseline_authority(tmp_path)
     feature = repository.load(PROJECT)
     repository.save(replace(feature, final_reconciliation=({"checklist_ref": "CHK-1", "answer": "NO"},)))
     with pytest.raises(ValueError, match="final Specification Gatekeeper"):
-        AcceptedBehavioralDeliveryLoader(state_root).load(PROJECT)
+        AcceptedBehavioralDeliveryLoader(state_root, PythonTestMaterial()).load(PROJECT)
     repository.save(replace(feature, behavioral_entry_revision=None))
     with pytest.raises(ValueError, match="entry revision"):
-        AcceptedBehavioralDeliveryLoader(state_root).load(PROJECT)
+        AcceptedBehavioralDeliveryLoader(state_root, PythonTestMaterial()).load(PROJECT)
 
 
 
@@ -293,7 +294,6 @@ async def test_real_candidate_validation_failure_retains_last_accepted_revision(
     if failure == "gatekeeper":
         responses.extend([
             json.dumps({"answer": "NO", "selected_test_names": [], "rationale": "Evidence is insufficient."}),
-            json.dumps({"disposition": "unsplittable", "rationale": "The requirement is already atomic."}),
         ])
     gateway, calls = configured_gateway(monkeypatch, responses)
     execution = GenericGitExecution(root, tmp_path)
@@ -317,7 +317,7 @@ async def test_real_candidate_validation_failure_retains_last_accepted_revision(
     else:
         assert not rejected.gatekeeper.passed
         assert rejected.reconciliation_progress
-        assert len(calls) == 6
+        assert len(calls) == 5
     assert len(execution.calls) == 2
     assert not responses
     assert git(root, "diff", baseline, renamed, "--", "tests/test_prior.py") == ""

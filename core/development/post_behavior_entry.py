@@ -8,12 +8,13 @@ from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
 from core.development.behavior_contract_domain import BehaviorContract
 from core.development.post_behavior_domain import PostBehaviorEntry, ValidationEvidence
 from core.development.post_behavior_git import PostBehaviorGit
+from core.development.test_material import TestMaterialAdapter, require_test_material
 from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
 from core.development.reconciliation_progress import evidence_digest
 from core.development.specification_domain import SpecificationGatekeeperRunState
 from core.development.assurance_completion import CompletionAuthority, assess_completion
 from core.development.specification_reconciliation import (
-    AcceptedTestEvidence, CompletedMicrocycleEvidenceCollector, GitAcceptedTestCatalog,
+    AcceptedTestEvidence, CompletedMicrocycleEvidenceCollector, GitAcceptedTestCatalog, TestCatalogRevision,
 )
 from core.development.strict_tdd_feature_domain import StrictTddFeatureState, StrictTddFeatureStatus
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
@@ -31,6 +32,7 @@ class AcceptedBehavioralDelivery:
 @dataclass(frozen=True)
 class AcceptedBehavioralDeliveryLoader:
     state_root: Path
+    test_material: TestMaterialAdapter | None = None
 
     def load(self, project_id: str) -> AcceptedBehavioralDelivery:
         feature = StrictTddFeatureRepository(self.state_root / "features").load(project_id)
@@ -63,7 +65,7 @@ class AcceptedBehavioralDeliveryLoader:
         if any(item is None for item in states):
             raise ValueError("completed microcycle evidence is unavailable")
         accepted = CompletedMicrocycleEvidenceCollector().collect(tuple(item for item in states if item is not None))
-        catalog = GitAcceptedTestCatalog(Path(project.repository_root), feature.canonical_development_base)
+        catalog = GitAcceptedTestCatalog(Path(project.repository_root), TestCatalogRevision(feature.canonical_development_base, require_test_material(self.test_material)))
         if len(accepted) != len(states) or any(catalog.verified_source(item) is None for item in accepted):
             raise ValueError("behavioral baseline does not preserve every accepted test")
         git = PostBehaviorGit(Path(project.repository_root))

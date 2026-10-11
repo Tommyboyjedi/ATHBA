@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from core.development.post_behavior_slice import FocusedProductionSlice
 from core.development.post_behavior_rename import declared_identifier_names
 from core.development.required_public_signature import RequiredPublicSignature
-from core.development.parameter_naming import ParameterNamingInspection, parameter_naming_mismatches, missing_signature_names
+from core.development.parameter_naming import ParameterNamingAdapter, ParameterNamingInspection, parameter_naming_mismatches, missing_signature_names
 from core.execution.local_only_post_behavior_reasoning import LocalOnlyPostBehaviorReasoning
 from core.execution.reasoning_gateway import ReasoningRequest
 
@@ -110,6 +110,7 @@ class NamingMaterial:
 class NamingAssessmentInput:
     material: NamingMaterial
     production: FocusedProductionSlice
+    parameter_naming: ParameterNamingAdapter | None = None
 
 
 class NamingAssessor:
@@ -197,7 +198,7 @@ def _signature_naming_decision(request: NamingAssessmentInput) -> NamingDecision
     signatures = request.material.required_signatures
     if not signatures:
         return None
-    inspection = ParameterNamingInspection(request.production.files, signatures)
+    inspection = ParameterNamingInspection(request.production.files, signatures, request.parameter_naming)
     mismatches = parameter_naming_mismatches(inspection)
     if mismatches:
         selected = mismatches[0]
@@ -222,12 +223,12 @@ def _signature_naming_decision(request: NamingAssessmentInput) -> NamingDecision
 
 def parse_naming_decision(raw: str, request: NamingAssessmentInput) -> NamingDecision:
     mismatches = parameter_naming_mismatches(ParameterNamingInspection(
-        request.production.files, request.material.required_signatures,
+        request.production.files, request.material.required_signatures, request.parameter_naming,
     )) if request.material.required_signatures else ()
     if raw.strip() == "NO":
         if mismatches:
             raise ValueError("explicit parameter naming mismatch remains")
-        if missing_signature_names(ParameterNamingInspection(request.production.files, request.material.required_signatures)):
+        if missing_signature_names(ParameterNamingInspection(request.production.files, request.material.required_signatures, request.parameter_naming)):
             raise ValueError("explicit operation naming mismatch remains")
         scoped_names = {name for item in request.material.required_signatures
                         for name in (item.owner, item.name, *item.parameters) if name is not None}

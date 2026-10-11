@@ -7,14 +7,13 @@ from dataclasses import dataclass, replace
 
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
 from core.development.behavior_replan_domain import (
-    BehaviorReplanBlocker, BehaviorReplanCorrectionRequest, BehaviorReplanDisposition,
+    BehavioralFailure, BehaviorReplanBlocker, BehaviorReplanCorrectionRequest, BehaviorReplanDisposition,
     BehaviorReplanPhase, BehaviorReplanRecord, BehaviorReplanRequest,
 )
-from core.development.behavior_replan_validation import BehaviorSplitValidationContext, replan_worthy, validate_split
+from core.development.behavior_replan_validation import BehaviorSplitValidationContext, validate_split
 from core.development.behavior_replanning import BehaviorReplanFailure
 from core.development.project_environment import DevelopmentProject
 from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
-from core.development.scenario_drafting_domain import ScenarioDraftRunState
 from core.development.strict_tdd_feature_application import StrictTddFeatureApplicationService
 from core.development.strict_tdd_feature_domain import StrictTddFeatureState, StrictTddFeatureStatus
 from core.development.strict_tdd_transitions import FeatureTransitionKind
@@ -26,31 +25,24 @@ class FeatureReplanContext:
     project: DevelopmentProject
 
 
-def require_replan(
-    state: StrictTddFeatureState,
-    draft: ScenarioDraftRunState,
-    developer_exhaustion: bool = False,
-    failure_evidence: tuple[str, ...] = (),
-) -> StrictTddFeatureState | None:
-    if not developer_exhaustion and not replan_worthy(draft):
-        return None
+def require_replan(state: StrictTddFeatureState, failure: BehavioralFailure) -> StrictTddFeatureState:
+    """The sole admission path for a valid obligation whose delivery failed."""
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}))
-    parent = next(item for item in contract.observable_requirements if item.ref == draft.behavior_ref)
-    if (draft.scenario_id != state.current_scenario_id
-            or draft.development_base_revision != state.canonical_development_base
-            or tuple(parent.source_refs) != draft.source_requirement_refs):
-        raise ValueError("exhausted draft differs from trusted feature identity")
+    parent = next(item for item in contract.observable_requirements if item.ref == failure.behavior_ref)
+    if parent.ref in {item.behavior_ref for item in state.completed_behaviors}:
+        raise ValueError("completed behavior cannot be replanned")
+    if any(parent.ref in item.depends_on for item in contract.observable_requirements
+           if item.ref in {done.behavior_ref for done in state.completed_behaviors}):
+        raise ValueError("completed behavior depends on an unresolved parent")
     if any(item.request.parent.ref == parent.ref for item in state.behavior_replans):
         raise ValueError("parent already has durable replan evidence")
-    completed = {item.behavior_ref for item in state.completed_behaviors}
     lineage = next(((*item.request.lineage, item.request.parent.ref)
                     for item in state.behavior_replans if parent.ref in item.child_refs), ())
     request = BehaviorReplanRequest(
-        state.project_id, contract.requirement_source, parent,
+        state.project_id, parent,
         tuple(item for item in contract.source_clauses if item.ref in parent.source_refs),
-        draft, tuple(item for item in contract.observable_requirements if item.ref in completed),
-        str(state.canonical_ref), str(state.canonical_development_base), lineage,
-        failure_evidence=failure_evidence,
+        str(state.canonical_ref), str(state.canonical_development_base), failure.summary,
+        failure.evidence_refs, lineage,
     )
     return replace(state, behavior_replans=(*state.behavior_replans, BehaviorReplanRecord(request)),
                    evidence_refs=(*state.evidence_refs, f"feature:{state.project_id}:behavior-replan:{parent.ref}"))
@@ -80,7 +72,7 @@ async def advance_replan(
                       detail="Planner correction submission has no durable response; human reconciliation required, no resubmission."))
     if phase == BehaviorReplanPhase.REQUIRED:
         if len(state.behavior_replans) > service.replan_policy.max_splits:
-            return _block(service, context, replace(record, blocker=BehaviorReplanBlocker.UNSPLITTABLE,
+            return _block(service, context, replace(record, blocker=BehaviorReplanBlocker.BUDGET_EXHAUSTED,
                           detail="Configured total split safety budget reached; human escalation required."))
         await wait_for_reasoning(service.contract_planner.gateway)
         started = replace(record, phase=BehaviorReplanPhase.STARTED)
@@ -91,6 +83,9 @@ async def advance_replan(
             service.states.save(state)
             raise
         except BehaviorReplanFailure as error:
+            if error.kind == BehaviorReplanBlocker.PROTOCOL_FAILURE and error.raw_response is not None:
+                return await _correct_invalid_split(service, context, state, project,
+                    replace(started, rejected_response=error.raw_response), error.detail, format_only=True)
             return _block(service, context, replace(started, blocker=error.kind, detail=error.detail,
                                                    rejected_response=error.raw_response))
         received = replace(started, phase=BehaviorReplanPhase.RECEIVED, response=response)
@@ -100,11 +95,14 @@ async def advance_replan(
                            behavior_ref=record.request.parent.ref, reasoning=True)
     if record.response is None:
         raise ValueError("received replan has no response")
-    if record.response.disposition == BehaviorReplanDisposition.UNSPLITTABLE:
-        return _block(service, context, replace(record, blocker=BehaviorReplanBlocker.UNSPLITTABLE,
-                                               detail=record.response.rationale))
+    if record.response.disposition != BehaviorReplanDisposition.SPLIT:
+        blocker = (BehaviorReplanBlocker.SOURCE_AUTHORITY_INSUFFICIENT
+                   if record.response.disposition == BehaviorReplanDisposition.SOURCE_AUTHORITY_INSUFFICIENT
+                   else BehaviorReplanBlocker.NOT_PRODUCED)
+        return _block(service, context, replace(record, blocker=blocker,
+            detail="No validated atomisation was obtained; atomicity is unproven. " + record.response.rationale))
     if len(record.response.children) > service.replan_policy.max_children_per_split:
-        return _block(service, context, replace(record, blocker=BehaviorReplanBlocker.UNSPLITTABLE,
+        return _block(service, context, replace(record, blocker=BehaviorReplanBlocker.BUDGET_EXHAUSTED,
                       detail="Configured child-count safety budget reached; human escalation required."))
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}))
     try:
@@ -152,10 +150,11 @@ async def _correct_invalid_split(
     project: DevelopmentProject,
     record: BehaviorReplanRecord,
     validation_error: str,
+    format_only: bool = False,
 ):
     from core.development.strict_tdd_feature_application_advance import _result_for
 
-    rejected = record.response.raw_response if record.response is not None else ""
+    rejected = record.response.raw_response if record.response is not None else (record.rejected_response or "")
     started = replace(
         record,
         phase=BehaviorReplanPhase.CORRECTION_STARTED,
@@ -167,7 +166,7 @@ async def _correct_invalid_split(
     service.states.save(_with_record(state, started))
     try:
         response = await service.contract_planner.correct_replan_requirement(
-            BehaviorReplanCorrectionRequest(record.request, rejected, validation_error)
+            BehaviorReplanCorrectionRequest(record.request, rejected, validation_error, format_only)
         )
     except RackAiResourceWait:
         service.states.save(state)
@@ -203,14 +202,11 @@ def _replace_parent(contract: BehaviorContract, record: BehaviorReplanRecord) ->
     if record.response is None:
         raise ValueError("parent replacement requires children")
     parent_ref = record.request.parent.ref
-    completed = {item.ref for item in record.request.completed_requirements}
     requirements: list[BehaviorContractRequirement] = []
     for behavior in contract.observable_requirements:
         if behavior.ref == parent_ref:
             requirements.extend(record.response.children)
         elif parent_ref in behavior.depends_on:
-            if behavior.ref in completed:
-                raise ValueError("completed behavior cannot depend on the unresolved parent")
             dependencies = [ref for dep in behavior.depends_on for ref in (record.child_refs if dep == parent_ref else (dep,))]
             requirements.append(replace(behavior, depends_on=dependencies))
         else:
@@ -228,7 +224,7 @@ def _block(service: StrictTddFeatureApplicationService, context: FeatureReplanCo
     state, project = context.state, context.project
     if record.blocker is None:
         raise ValueError("replan blocker requires a typed reason")
-    phase = BehaviorReplanPhase.UNSPLITTABLE if record.blocker == BehaviorReplanBlocker.UNSPLITTABLE else BehaviorReplanPhase.FAILED
+    phase = BehaviorReplanPhase.FAILED
     updated = replace(_with_record(state, replace(record, phase=phase)), status=StrictTddFeatureStatus.BLOCKED.value,
                       blocked_reason=record.blocker.value)
     service.states.save(updated)

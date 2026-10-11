@@ -6,7 +6,6 @@ from typing import Callable
 
 from core.development.reconciliation_progress import IndividualEvidenceProgress
 
-from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
 from core.development.specification_evidence_policy import (
     ChecklistItem, EvidencePolicyRouter, EvidenceResult, EvidenceStatus,
     SpecificationEvidenceAdapters,
@@ -26,7 +25,7 @@ class RoutedChecklistRequest:
     item: ChecklistItem
     original_source: str
     accepted: list[AcceptedTestEvidence]
-    language_id: str = "python"
+    language_id: str = ""
     required_subjects: tuple[str, ...] = ()
     progress: tuple[IndividualEvidenceProgress, ...] = ()
     checkpoint: Callable[[tuple[IndividualEvidenceProgress, ...]], None] | None = None
@@ -37,7 +36,7 @@ class RoutedChecklistRequest:
 class RoutedChecklistReconciler:
     behavioral: ChecklistItemReconciler
     catalog: GitAcceptedTestCatalog
-    adapters: SpecificationEvidenceAdapters = field(default_factory=lambda: SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
+    adapters: SpecificationEvidenceAdapters = field(default_factory=lambda: SpecificationEvidenceAdapters(()))
 
     async def reconcile(self, request: RoutedChecklistRequest) -> dict[str, object]:
         item = request.item

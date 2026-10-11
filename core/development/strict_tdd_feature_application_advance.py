@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from core.development.assurance_completion import CompletionAuthority, assess_completion
-from core.development.gatekeeper_signature_frontier import SignatureRepairContext, advance_signature_repair
+from core.development.gatekeeper_behavioral_gap import return_gatekeeper_gap
+from core.development.behavior_replan_domain import BehavioralFailure
 from core.development.strict_tdd_feature_execution import canonical_test_node_for
 
 from dataclasses import replace
@@ -16,6 +17,7 @@ from core.development.behavior_contract_coordinator import ContractPlanningReque
 from core.development.specification_assessment import GatekeeperStateRequest
 from core.development.specification_atomization import ChecklistAtomizationFailure
 from core.development.strict_tdd_feature_application import (
+    FeatureProjectPreparation,
     FeatureReconciliationRequest,
     FeatureScenarioRequest,
     StrictTddFeatureApplicationService,
@@ -39,10 +41,6 @@ from core.development.strict_tdd_transitions import (
 
 from core.development.strict_tdd_feature_replan import FeatureReplanContext, advance_replan, replan_pending, require_replan
 
-from core.development.strict_tdd_feature_requirement_repair import (
-    advance_repair, repair_pending, require_repair, selected_scenario_id,
-)
-
 MAX_FEATURE_COMPATIBILITY_TRANSITIONS = 100
 
 
@@ -50,10 +48,7 @@ async def advance(
     service: StrictTddFeatureApplicationService,
     request: StrictTddFeatureRequest,
 ) -> FeatureAdvanceResult:
-    project_load = service.environment.create_or_load_python_project_with_disposition(
-        request.project_id,
-        tuple(request.production_paths),
-    )
+    project_load = service.prepare_project(FeatureProjectPreparation(request.project_id, tuple(request.production_paths)))
     project = project_load.project
     state = service.states.load(request.project_id)
     if state is None:
@@ -76,8 +71,6 @@ async def advance(
         return _result_for(FeatureTransitionKind.FEATURE_COMPLETED, state, project)
     if state.status == StrictTddFeatureStatus.BLOCKED.value:
         return _result_for(FeatureTransitionKind.BLOCKED, state, project, state.blocked_reason)
-    if repair_pending(state):
-        return await advance_repair(service, FeatureReplanContext(state, project))
     if replan_pending(state):
         return await advance_replan(service, FeatureReplanContext(state, project))
     if state.pending_completed_behavior is not None:
@@ -101,9 +94,9 @@ async def advance(
             return _reconciliation_blocked(service, state, project, error)
     confidence = assess_completion(CompletionAuthority(state.final_reconciliation, contract.requirement_source))
     if not confidence.behaviorally_complete:
-        repair = advance_signature_repair(service, SignatureRepairContext(state, project))
-        if repair is not None:
-            return repair
+        returned = return_gatekeeper_gap(service, FeatureReplanContext(state, project))
+        if returned is not None:
+            return returned
         blocked = replace(state, status=StrictTddFeatureStatus.BLOCKED.value,
                           blocked_reason="specification_gatekeeper_failed")
         service.states.save(blocked)
@@ -172,7 +165,7 @@ def _select_behavior(
     project: DevelopmentProject,
     behavior_ref: str,
 ) -> FeatureAdvanceResult:
-    scenario_id = selected_scenario_id(state, behavior_ref)
+    scenario_id = f"{state.project_id}--{behavior_ref}"
     selected = replace(state, current_scenario_id=scenario_id)
     service.states.save(selected)
     return _result_for(FeatureTransitionKind.BEHAVIOR_SELECTED, selected, project, behavior_ref=behavior_ref)
@@ -206,10 +199,10 @@ async def _reconcile(
         final_reconciliation=reconciliation,
     )
     if not all_yes:
-        repair = advance_signature_repair(service, SignatureRepairContext(
-            replace(updated, status=StrictTddFeatureStatus.RUNNING.value, blocked_reason=None), project, True))
-        if repair is not None:
-            return repair
+        returned = return_gatekeeper_gap(service, FeatureReplanContext(
+            replace(updated, status=StrictTddFeatureStatus.RUNNING.value, blocked_reason=None), project))
+        if returned is not None:
+            return returned
     service.states.save(updated)
     if not all_yes:
         return _result_for(
@@ -287,23 +280,25 @@ async def _advance_scenario(
             behavior_ref=behavior.ref,
             scenario_transition=advanced,
         )
-    if outcome.status == "attempts_exhausted" and outcome.draft_state is not None:
-        developer_exhaustion = (
-            advanced.microcycle_kind == MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED
-            and advanced.blocker_or_replan_reason == "developer_attempts_exhausted"
-        )
-        repairing = None if developer_exhaustion else require_repair(state, outcome.draft_state)
-        if repairing is not None:
-            service.states.save(repairing)
-            return _result_for(FeatureTransitionKind.BEHAVIOR_REPAIR_REQUIRED, repairing, project,
-                               behavior_ref=behavior.ref, scenario_transition=advanced)
-        replanning = require_replan(
-            state, outcome.draft_state, developer_exhaustion, outcome.evidence_refs
-        )
-        if replanning is not None:
-            service.states.save(replanning)
-            return _result_for(FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED, replanning, project,
-                               behavior_ref=behavior.ref, scenario_transition=advanced)
+    if (advanced.microcycle_kind in {MicrocycleTransitionKind.ATTEMPTS_EXHAUSTED,
+                                     MicrocycleTransitionKind.BEHAVIOR_REPLAN_REQUIRED}
+            or outcome.status in {"attempts_exhausted", "replan_required"}):
+        if outcome.scenario_id != state.current_scenario_id:
+            raise ValueError("semantic failure differs from the selected scenario identity")
+        summary = outcome.blocked_reason or outcome.status
+        evidence = outcome.evidence_refs
+        if outcome.draft_state is not None and advanced.microcycle_kind is None:
+            summary += ": " + "; ".join(attempt.feedback or attempt.status
+                                        for attempt in outcome.draft_state.attempts)
+            evidence = tuple(dict.fromkeys((*evidence, *(attempt.evidence_location
+                for attempt in outcome.draft_state.attempts if attempt.evidence_location))))
+        base = replace(state, canonical_ref=outcome.canonical_ref,
+                       canonical_development_base=outcome.canonical_development_base,
+                       working_ref=None, working_revision=None)
+        replanning = require_replan(base, BehavioralFailure(behavior.ref, summary, evidence))
+        service.states.save(replanning)
+        return _result_for(FeatureTransitionKind.BEHAVIOR_REPLAN_REQUIRED, replanning, project,
+                           behavior_ref=behavior.ref, scenario_transition=advanced)
     if outcome.blocked_reason is not None or outcome.status in {"scenario_draft_blocked", "replan_required", "attempts_exhausted", "blocked"}:
         updated = service._after_scenario(state, outcome)
         service.states.save(updated)
@@ -363,7 +358,7 @@ class StrictTddFeatureRunLoop:
         state = self.service.states.load(request.project_id)
         if state is None:
             raise RuntimeError("feature compatibility loop did not persist state")
-        project = self.service.environment.create_or_load_python_project(request.project_id)
+        project = self.service.prepare_project(FeatureProjectPreparation(request.project_id, request.production_paths)).project
         blocked = replace(state, status=StrictTddFeatureStatus.BLOCKED.value, blocked_reason="transition_safety_guard_exhausted")
         self.service.states.save(blocked)
         return _result(project, blocked)
@@ -388,7 +383,7 @@ def _result_for(
         state.canonical_development_base if nested is None else nested.canonical_sha,
         state.working_revision if nested is None else nested.working_sha,
         _retry_counts(state, nested),
-        _pending_action(state) if nested is None or replan_pending(state) or repair_pending(state) else nested.pending_action,
+        _pending_action(state) if nested is None or replan_pending(state) else nested.pending_action,
     )
     path = StrictTddTransitionPath(
         kind,
@@ -431,8 +426,6 @@ def _retry_counts(state: StrictTddFeatureState, nested: TransitionFingerprint | 
 
 
 def _pending_action(state: StrictTddFeatureState) -> str:
-    if repair_pending(state):
-        return state.behavior_repairs[-1].phase.value
     if replan_pending(state):
         return state.behavior_replans[-1].phase.value
     if state.status == StrictTddFeatureStatus.PLANNING.value:

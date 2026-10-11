@@ -1,4 +1,5 @@
 """Regression reproductions for scoped Naming selection; no model execution."""
+from core.development.python_parameter_naming import PythonParameterNaming
 from dataclasses import replace
 import pytest
 from core.development.post_behavior_assessment import (
@@ -28,7 +29,7 @@ def assessment(source=SOURCE, names=("RunningTotal", "add", "amount", "total")):
     return NamingAssessmentInput(
         NamingMaterial("\n".join(item.source_quote for item in SIGNATURES), names, SIGNATURES),
         FocusedProductionSlice("a"*40, (RevisionFile("running_total.py", source),),
-            ProductionSliceScope("b"*40, "a"*40, ("running_total.py",))))
+            ProductionSliceScope("b"*40, "a"*40, ("running_total.py",))), parameter_naming=PythonParameterNaming())
 
 @pytest.mark.asyncio
 async def test_explicit_parameter_selected_despite_same_spelled_helper():
@@ -58,9 +59,9 @@ async def test_parameter_selection_does_not_change_call_shape():
 @pytest.mark.asyncio
 async def test_parameter_selection_requires_registered_language_adapter():
     request = assessment()
-    request = replace(request, production=replace(request.production,
+    request = replace(request, parameter_naming=None, production=replace(request.production,
         files=(RevisionFile("subject.js", "class RunningTotal {}"),)))
-    with pytest.raises(ValueError, match="no registered language adapter"):
+    with pytest.raises(ValueError, match="no configured language capability"):
         await NamingAssessor(NoModel()).reason(request)
 
 class Model:

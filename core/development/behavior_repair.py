@@ -1,7 +1,9 @@
 """Bounded Developer repair for a semantically rejected completed behavior."""
 from __future__ import annotations
+from core.execution.work_execution_boundary import ExecutionBoundaryRequest, assert_execution_boundary
 
 from core.development.required_public_signature import RequiredPublicSignature
+from core.development.test_material import TestMaterialAdapter, require_test_material
 
 import json
 import sys
@@ -29,7 +31,7 @@ from core.development.microcycle_domain import (
     FinalTestMaterialisationRequest,
     LanguageTestAdapter,
     MaterialisedTestArtifact,
-    MicrocycleState,
+    MicrocycleState, MicrocyclePendingAction,
     RegressionState,
 )
 from core.development.strict_tdd_execution_budget import (
@@ -97,6 +99,7 @@ class BehaviorRepairWorkUnitRequest:
 class BehaviorRepairWorkUnitFactory:
     """Creates a production-only packet for one completed canonical scenario."""
 
+    test_material: TestMaterialAdapter | None = None
     budget_policy: StrictTddExecutionBudgetPolicy = field(
         default_factory=StrictTddExecutionBudgetPolicy
     )
@@ -127,7 +130,7 @@ class BehaviorRepairWorkUnitFactory:
             objective=objective,
             allowed_paths=[request.production_path],
             acceptance=AcceptanceContract(
-                [[sys.executable, "-m", "pytest", "-q", request.artifact.canonical_test_identity]],
+                [require_test_material(self.test_material).acceptance_command(request.artifact.canonical_test_identity)],
                 required_artifacts=[request.production_path],
             ),
             max_implementation_attempts=1,
@@ -196,6 +199,7 @@ class BehaviorRepairService:
         if review.repair.attempts >= 4:
             exhausted = replace(
                 request.state,
+                pending_action=MicrocyclePendingAction.RETURN_TO_PLANNER.value,
                 behavior_review=replace(review, verdict=BehaviorReviewVerdict.ATTEMPTS_EXHAUSTED.value),
             )
             self.state_store.save(exhausted)
@@ -217,6 +221,7 @@ class BehaviorRepairService:
             )
         )
         result = await self.gateway.execute(unit, _working_binding(request, base))
+        assert_execution_boundary(ExecutionBoundaryRequest(unit, result))
         if result.work_unit_id != unit.id:
             raise ValueError("stale Rack AI packet does not match the active behavior repair")
         if result.accepted and result.accepted_revision is not None:

@@ -141,7 +141,7 @@ def _scenario_draft_request(
     scenario_id: str,
 ) -> ScenarioDraftRequest:
     ticket = _ticket_for(request)
-    language_id = "python"
+    language_id = request.project.runtime.kind
     source_evidence = _source_requirement_evidence(request)
     prior = executor.drafting.state_store.load(scenario_id)
     artifact = (prior.draft_artifact_path if prior is not None else draft_artifact_path(scenario_id, ticket.test_path))
@@ -150,7 +150,7 @@ def _scenario_draft_request(
         ticket,
         tuple(request.behavior.source_refs),
         language_id,
-        "pytest",
+        executor.drafting.adapter_catalog.for_language(language_id).framework_id,
         ticket.test_path,
         _facts(Path(request.project.repository_root), request.canonical_development_base, ticket),
         request.canonical_development_base,

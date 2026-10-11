@@ -6,9 +6,12 @@ from core.development.behavior_contract_domain import BehaviorContract
 from core.development.feature_signature_evidence import signature_evidence
 from core.development.reconciliation_source_authority import RECONCILIATION_SOURCE_SCHEMA
 from core.development.specification_revision_snapshot import GitSpecificationSnapshot
+from core.development.test_material import TestMaterialAdapter, require_test_material
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
+from core.development.specification_reconciliation import TestCatalogRevision
 
 import subprocess
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -78,6 +81,8 @@ class CompletedFeatureReconciler:
     repository_root: Path
     state_store: MicrocycleStateRepo
     reasoning_gateway: ReasoningGateway
+    test_material: TestMaterialAdapter | None = None
+    evidence_adapters: SpecificationEvidenceAdapters = field(default_factory=lambda: SpecificationEvidenceAdapters(()))
 
     async def reconcile(
         self, request: FeatureReconciliationRequest
@@ -85,8 +90,8 @@ class CompletedFeatureReconciler:
         gatekeeper = SpecificationGatekeeperRunState.from_dict(request.gatekeeper_payload)
         states = [self._state(item.scenario_id) for item in request.completed_behaviors]
         accepted = CompletedMicrocycleEvidenceCollector().collect(states)
-        catalog = GitAcceptedTestCatalog(self.repository_root, request.canonical_revision)
-        item_reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(self.reasoning_gateway, catalog), catalog)
+        catalog = GitAcceptedTestCatalog(self.repository_root, TestCatalogRevision(request.canonical_revision, require_test_material(self.test_material)))
+        item_reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(self.reasoning_gateway, catalog), catalog, self.evidence_adapters)
         requested_subjects = required_source_subjects(gatekeeper.checklist)
         languages = {state.model.language_id for state in states}
         language = next(iter(languages)) if len(languages) == 1 else ""
@@ -113,7 +118,7 @@ class CompletedFeatureReconciler:
                 completed = tuple(dict(entry.result) for entry in journal.items if entry.result is not None)
                 raise replace(error, completed_results=completed) from error
         functional_api = signature_evidence(request.contract.requirement_source,
-            GitSpecificationSnapshot(self.repository_root).read(request.canonical_revision), language)
+            GitSpecificationSnapshot(self.repository_root).read(request.canonical_revision), self.evidence_adapters.for_language(language))
         if functional_api is not None:
             results.append(functional_api)
         return tuple(results)

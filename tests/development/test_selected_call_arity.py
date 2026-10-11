@@ -80,7 +80,7 @@ async def test_selected_arity_rejection_enters_existing_candidate_repair_before_
     )
     repaired = invalid.replace("c.add('a',1,10)", "c.add('a')")
     service, gateway, reasoning, _ = components(
-        [accepted("draft-1", "b"*40, "draft-1"), accepted("draft-2", "c"*40, "draft-2")],
+        [accepted("catalog-ticket--scenario-draft-1", "b"*40, "draft-1"), accepted("catalog-ticket--scenario-draft-2", "c"*40, "draft-2")],
         [approval("SRC-CATALOG")], {"b"*40: invalid, "c"*40: repaired},
     )
     first = await service.draft(base, binding())

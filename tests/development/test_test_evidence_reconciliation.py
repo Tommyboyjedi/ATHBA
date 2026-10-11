@@ -1,3 +1,5 @@
+from core.development.specification_reconciliation import TestCatalogRevision
+from core.development.python_test_material import PythonTestMaterial
 import json
 import subprocess
 
@@ -125,7 +127,7 @@ async def test_reconciler_returns_yes_only_for_accepted_final_test(tmp_path):
         {"answer": "NO", "selected_test_names": [], "rationale": "no unit test proves readability"},
     ])
 
-    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, revision)).reconcile(_checklist(), _run_state(revision))
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))).reconcile(_checklist(), _run_state(revision))
 
     assert [item.answer for item in results] == ["YES", "NO"]
     assert results[0].accepted_test_names == ["tests/test_reservation_book.py::test_add_resource"]
@@ -141,7 +143,7 @@ async def test_reconciler_rejects_an_invented_test_identifier(tmp_path):
         {"answer": "NO", "selected_test_names": [], "rationale": "no"},
     ])
 
-    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, revision)).reconcile(_checklist(), _run_state(revision))
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))).reconcile(_checklist(), _run_state(revision))
 
     assert results[0].answer == "NO"
     assert results[0].accepted_test_names == []
@@ -158,7 +160,7 @@ async def test_reconciliation_is_pure_and_covers_every_checklist_item_once(tmp_p
         {"answer": "NO", "selected_test_names": [], "rationale": "not a unit test"},
     ])
 
-    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, revision)).reconcile(_checklist(), state)
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))).reconcile(_checklist(), state)
 
     assert [item.checklist_ref for item in results] == ["CHECK-1", "CHECK-2"]
     assert state.to_dict() == before
@@ -174,7 +176,7 @@ async def test_reconciler_rejects_accepted_test_missing_from_final_trusted_revis
         {"answer": "NO", "selected_test_names": [], "rationale": "no unit test proves readability"},
     ])
 
-    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, final_revision)).reconcile(_checklist(), _run_state(initial_revision))
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(final_revision, PythonTestMaterial()))).reconcile(_checklist(), _run_state(initial_revision))
 
     assert results[0].answer == "NO"
     assert results[0].accepted_test_names == []
@@ -194,7 +196,7 @@ async def test_reconciler_rejects_changed_test_body_at_final_trusted_revision(tm
         {"answer": "NO", "selected_test_names": [], "rationale": "no unit test proves readability"},
     ])
 
-    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, final_revision)).reconcile(_checklist(), _run_state(accepted_revision))
+    results = await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(final_revision, PythonTestMaterial()))).reconcile(_checklist(), _run_state(accepted_revision))
 
     assert results[0].answer == "NO"
     assert results[0].accepted_test_names == []
@@ -208,7 +210,7 @@ async def test_prompt_contains_only_verified_final_test_source(tmp_path):
         {"answer": "YES", "selected_test_names": ["tests/test_reservation_book.py::test_add_resource"], "rationale": "body proves it"},
         {"answer": "NO", "selected_test_names": [], "rationale": "no"},
     ])
-    await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, revision)).reconcile(
+    await TestEvidenceReconciler(gateway, GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(revision, PythonTestMaterial()))).reconcile(
         _checklist(), _run_state(revision)
     )
     payload = json.loads(gateway.requests[0].prompt)
@@ -230,6 +232,6 @@ async def test_changed_test_source_is_not_supplied_as_trusted_evidence(tmp_path)
         {"answer": "NO", "selected_test_names": [], "rationale": "no"},
     ])
     await TestEvidenceReconciler(
-        gateway, GitAcceptedTestCatalog(tmp_path, final_revision)
+        gateway, GitAcceptedTestCatalog(tmp_path, TestCatalogRevision(final_revision, PythonTestMaterial()))
     ).reconcile(_checklist(), _run_state(accepted_revision))
     assert gateway.requests == []

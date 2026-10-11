@@ -6,13 +6,13 @@ from enum import Enum
 from typing import Any
 
 from core.development.behavior_contract_domain import BehaviorContractRequirement
-from core.development.scenario_drafting_domain import ScenarioDraftRunState
 from core.development.specification_domain import SourceRequirementClause
 
 
 class BehaviorReplanDisposition(str, Enum):
     SPLIT = "split"
-    UNSPLITTABLE = "unsplittable"
+    NOT_PRODUCED = "not_produced"
+    SOURCE_AUTHORITY_INSUFFICIENT = "source_authority_insufficient"
 
 
 class BehaviorReplanPhase(str, Enum):
@@ -21,12 +21,13 @@ class BehaviorReplanPhase(str, Enum):
     RECEIVED = "behavior_split_received"
     CORRECTION_STARTED = "behavior_replan_correction_started"
     SUPERSEDED = "behavior_split"
-    UNSPLITTABLE = "behavior_unsplittable"
     FAILED = "behavior_replan_failed"
 
 
 class BehaviorReplanBlocker(str, Enum):
-    UNSPLITTABLE = "behavior_unsplittable"
+    NOT_PRODUCED = "behavior_atomisation_not_produced"
+    BUDGET_EXHAUSTED = "behavior_atomisation_budget_exhausted"
+    SOURCE_AUTHORITY_INSUFFICIENT = "behavior_source_authority_insufficient"
     INVALID_SPLIT = "behavior_replan_invalid_split"
     PROTOCOL_FAILURE = "behavior_replan_protocol_failure"
     PROVIDER_FAILURE = "behavior_replan_provider_failure"
@@ -45,56 +46,56 @@ class BehaviorReplanPolicy:
 
 
 @dataclass(frozen=True)
-class BehaviorReplanRequest:
-    project_id: str
-    source_requirement: str
-    parent: BehaviorContractRequirement
-    source_clauses: tuple[SourceRequirementClause, ...]
-    tester_failures: ScenarioDraftRunState
-    completed_requirements: tuple[BehaviorContractRequirement, ...]
-    canonical_ref: str
-    canonical_revision: str
-    lineage: tuple[str, ...] = ()
-    preservation_instruction: str = "Previously completed behavior must not be changed. Replan only the unresolved parent; do not redesign the Behavior Contract."
-    failure_evidence: tuple[str, ...] = ()
+class BehavioralFailure:
+    """Concise semantic evidence; transcripts and execution internals remain in their stores."""
+    behavior_ref: str
+    summary: str
+    evidence_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if any(not value.strip() for value in (self.project_id, self.source_requirement, self.canonical_ref,
-                                               self.canonical_revision, self.preservation_instruction)):
-            raise ValueError("replan request requires source, trusted revision and preservation instructions")
+        if not self.behavior_ref.strip() or not self.summary.strip():
+            raise ValueError("behavioral failure requires an obligation and a diagnosis")
+
+
+@dataclass(frozen=True)
+class BehaviorReplanRequest:
+    project_id: str
+    parent: BehaviorContractRequirement
+    source_clauses: tuple[SourceRequirementClause, ...]
+    canonical_ref: str
+    canonical_revision: str
+    failure_summary: str
+    failure_evidence: tuple[str, ...] = ()
+    lineage: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if any(not value.strip() for value in (self.project_id, self.canonical_ref,
+                                               self.canonical_revision, self.failure_summary)):
+            raise ValueError("replan requires trusted identity and semantic failure evidence")
         if {item.ref for item in self.source_clauses} != set(self.parent.source_refs):
             raise ValueError("replan source clauses must cover precisely the parent refs")
-        if (self.tester_failures.behavior_ref != self.parent.ref
-                or self.tester_failures.development_base_revision != self.canonical_revision):
-            raise ValueError("replan failure evidence differs from parent or trusted revision")
-        if self.parent.ref in {item.ref for item in self.completed_requirements}:
-            raise ValueError("completed behavior cannot be replanned")
         if self.parent.ref in self.lineage or len(set(self.lineage)) != len(self.lineage):
             raise ValueError("replan lineage contains a cycle")
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "project_id": self.project_id, "source_requirement": self.source_requirement,
-            "parent": self.parent.to_dict(),
+            "schema": "behavior-atomisation/v2",
+            "project_id": self.project_id, "parent": self.parent.to_dict(),
             "source_clauses": [item.to_dict() for item in self.source_clauses],
-            "tester_failures": self.tester_failures.to_dict(),
-            "completed_requirements": [item.to_dict() for item in self.completed_requirements],
             "canonical_ref": self.canonical_ref, "canonical_revision": self.canonical_revision,
-            "lineage": list(self.lineage), "preservation_instruction": self.preservation_instruction,
-            "failure_evidence": list(self.failure_evidence),
+            "failure_summary": self.failure_summary, "failure_evidence": list(self.failure_evidence),
+            "lineage": list(self.lineage),
         }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> BehaviorReplanRequest:
+        if value.get("schema") != "behavior-atomisation/v2":
+            raise ValueError("legacy semantic recovery state requires explicit migration")
         return cls(
-            value["project_id"], value["source_requirement"],
-            BehaviorContractRequirement.from_dict(value["parent"]),
+            value["project_id"], BehaviorContractRequirement.from_dict(value["parent"]),
             tuple(SourceRequirementClause.from_dict(item) for item in value["source_clauses"]),
-            ScenarioDraftRunState.from_dict(value["tester_failures"]),
-            tuple(BehaviorContractRequirement.from_dict(item) for item in value["completed_requirements"]),
-            value["canonical_ref"], value["canonical_revision"], tuple(value["lineage"]),
-            value["preservation_instruction"],
-            tuple(value.get("failure_evidence", ())),
+            value["canonical_ref"], value["canonical_revision"], value["failure_summary"],
+            tuple(value["failure_evidence"]), tuple(value["lineage"]),
         )
 
 
@@ -103,9 +104,10 @@ class BehaviorReplanCorrectionRequest:
     request: BehaviorReplanRequest
     rejected_response: str
     validation_error: str
+    format_only: bool = False
 
     def __post_init__(self) -> None:
-        if not self.rejected_response.strip() or not self.validation_error.strip():
+        if not isinstance(self.rejected_response, str) or not self.validation_error.strip():
             raise ValueError("replan correction requires rejected response and validation error")
 
 
@@ -121,9 +123,9 @@ class BehaviorReplanResponse:
     def __post_init__(self) -> None:
         if not self.rationale.strip():
             raise ValueError("replanning requires a rationale")
-        if self.disposition == BehaviorReplanDisposition.UNSPLITTABLE:
+        if self.disposition != BehaviorReplanDisposition.SPLIT:
             if self.children or self.narrowing_rationales:
-                raise ValueError("unsplittable cannot contain children")
+                raise ValueError("a no-split response cannot contain children")
         elif (len(self.children) < 2 or len(self.narrowing_rationales) != len(self.children)
               or not all(item.strip() for item in self.narrowing_rationales)
               or not self.coverage_rationale.strip()):

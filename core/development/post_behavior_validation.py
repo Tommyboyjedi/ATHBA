@@ -3,21 +3,31 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Protocol
 
 from core.development.deterministic_regression import (
     RuntimeCommandRequest, SubprocessProjectRuntimeExecutor, FULL_SUITE_TARGET,
 )
 from core.development.post_behavior_assessment import NamingDecision
 from core.development.post_behavior_authority import (
-    PythonPostBehaviorAuthority, RenameAuthorityRequest, RefactorAuthorityRequest,
+    RenameAuthorityRequest, RefactorAuthorityRequest, WriteAuthorityResult,
 )
 from core.development.post_behavior_domain import PostBehaviorEntry, PostBehaviorOutcome, PostBehaviorPass, PostBehaviorPhase, PostBehaviorState, ValidationEvidence
 from core.development.post_behavior_entry import AcceptedBehavioralDelivery
 from core.development.post_behavior_evidence import PostBehaviorEvidenceStore
 from core.development.post_behavior_git import PostBehaviorGit
 from core.development.post_behavior_slice import (
-    FocusedProductionSlice, PythonProductionSlice, ProductionSliceScope, SliceRequest,
+    FocusedProductionSlice, ProductionSliceScope, SliceRequest,
 )
+
+
+class ProductionSliceCapability(Protocol):
+    def derive(self, request: SliceRequest) -> FocusedProductionSlice: ...
+
+
+class CandidateAuthorityCapability(Protocol):
+    def rename(self, request: RenameAuthorityRequest) -> WriteAuthorityResult: ...
+    def refactor(self, request: RefactorAuthorityRequest) -> WriteAuthorityResult: ...
 
 
 @dataclass(frozen=True)
@@ -36,6 +46,7 @@ class PostBehaviorPassAuthority:
 @dataclass(frozen=True)
 class PostBehaviorSource:
     git: PostBehaviorGit
+    language_slice: ProductionSliceCapability | None = None
 
     def focused(self, state: PostBehaviorState) -> FocusedProductionSlice:
         phase = state.active_pass.phase if state.active_pass else None
@@ -44,7 +55,9 @@ class PostBehaviorSource:
     def for_revision(self, request: PostBehaviorProductionRevision) -> FocusedProductionSlice:
         scope = ProductionSliceScope(request.entry.trusted_entry_revision,
                                      request.entry.behaviorally_accepted_revision, request.entry.production_paths)
-        return PythonProductionSlice().derive(SliceRequest(
+        if self.language_slice is None:
+            raise ValueError("post-behavior slicing has no configured language capability")
+        return self.language_slice.derive(SliceRequest(
             self.git.snapshot(scope.entry_revision), self.git.snapshot(request.revision), scope,
             include_unchanged=request.phase == PostBehaviorPhase.NAMING))
 
@@ -52,6 +65,7 @@ class PostBehaviorSource:
 @dataclass(frozen=True)
 class PostBehaviorCandidateAuthority:
     source: PostBehaviorSource
+    language_authority: CandidateAuthorityCapability | None = None
 
     def verify(self, state: PostBehaviorState) -> None:
         if state.active_pass is None:
@@ -69,7 +83,9 @@ class PostBehaviorCandidateAuthority:
         trusted = self.source.git.snapshot(active.base_revision)
         candidate = self.source.git.snapshot(active.candidate.revision)
         decision = active.assessment.decision
-        authority = PythonPostBehaviorAuthority()
+        authority = self.language_authority
+        if authority is None:
+            raise ValueError("post-behavior authority has no configured language capability")
         if isinstance(decision, NamingDecision):
             if decision.rename is None:
                 raise ValueError("rename candidate lacks a mapping")

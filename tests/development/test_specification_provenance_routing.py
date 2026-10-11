@@ -1,9 +1,14 @@
 """Recorded live provenance through real persistence, routing and evidence adapters."""
+from core.development.specification_reconciliation import TestCatalogRevision
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
+from core.development.python_test_material import PythonTestMaterial
 from dataclasses import replace
 import json
 from pathlib import Path
 
 import pytest
+from core.development.reconciliation_response import ReconciliationFailure
 
 from core.development.checklist_reconciliation_tree import (
     ChecklistReconciliationTree, ChecklistTreeContext, validate_persisted_tree,
@@ -36,8 +41,8 @@ def fact(quote="Keep the implementation ... in memory", subject="in memory", mod
 
 
 def routed(root, revision, gateway):
-    catalog = GitAcceptedTestCatalog(root, revision)
-    return RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog)
+    catalog = GitAcceptedTestCatalog(root, TestCatalogRevision(revision, PythonTestMaterial()))
+    return RoutedChecklistReconciler(ChecklistItemReconciler(gateway, catalog), catalog, adapters=SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
 
 
 @pytest.mark.asyncio
@@ -79,7 +84,7 @@ async def test_recorded_live_response_atomization_disk_reload_and_real_evidence(
     monkeypatch.setattr(evidence, "storage_findings", storage)
     reconciler = routed(repo, revision, evidence_gateway)
     records = [await reconciler.reconcile(RoutedChecklistRequest(
-        "p", item, fixture["requirement_text"], accepted, required_subjects=subjects))
+        "p", item, fixture["requirement_text"], accepted, required_subjects=subjects, language_id="python"))
         for item in restored.checklist.items]
     assert len(evidence_gateway.requests) == 5
     assert len(observed) == 1
@@ -113,7 +118,7 @@ async def test_invalid_provenance_rejected_by_reload_collection_and_final_routin
     with pytest.raises(ValueError, match="provenance"):
         required_source_subjects(checklist)
     gateway = FakeReasoningGateway([])
-    record = await routed(tmp_path, "a" * 40, gateway).reconcile(RoutedChecklistRequest("p", item, source, []))
+    record = await routed(tmp_path, "a" * 40, gateway).reconcile(RoutedChecklistRequest("p", item, source, [], language_id="python"))
     assert record["answer"] == "NO"
     assert record["evidence_status"] == "unsupported_evidence_policy"
     assert "source provenance mismatch" in record["rationale"]
@@ -130,7 +135,7 @@ async def test_omitted_spliced_missing_or_invented_subject_cannot_route(tmp_path
     with pytest.raises(ValueError, match="provenance"):
         required_source_subjects(checklist)
     record = await routed(tmp_path, "a" * 40, FakeReasoningGateway([])).reconcile(
-        RoutedChecklistRequest("p", item, COMPOUND, []))
+        RoutedChecklistRequest("p", item, COMPOUND, [], language_id="python"))
     assert record["answer"] == "NO"
 
 
@@ -149,7 +154,7 @@ async def test_original_qualifier_rejects_strengthened_modality_on_all_downstrea
     with pytest.raises(ValueError, match="contradicts"):
         required_source_subjects(checklist)
     record = await routed(tmp_path, "a" * 40, FakeReasoningGateway([])).reconcile(
-        RoutedChecklistRequest("p", item, source, []))
+        RoutedChecklistRequest("p", item, source, [], language_id="python"))
     assert record["answer"] == "NO"
     assert "contradicts" in record["rationale"]
 
@@ -169,7 +174,7 @@ async def test_verified_original_wording_controls_public_surface_and_optional_sc
     keeper = SpecificationChecklist.from_dict(SpecificationChecklist("p", source, [item]).to_dict())
     assert required_source_subjects(keeper) == ()
     record = await routed(tmp_path, revision, FakeReasoningGateway([])).reconcile(
-        RoutedChecklistRequest("p", keeper.items[0], source, []))
+        RoutedChecklistRequest("p", keeper.items[0], source, [], language_id="python"))
     assert record["evidence_policy"] == expected_policy
     assert record["answer"] == answer
     assert record["findings"] == []
@@ -181,7 +186,7 @@ async def test_exact_and_multiple_omission_paths_produce_the_same_actual_storage
     revision = _repository(tmp_path)
     item = fact(quote)
     record = await routed(tmp_path, revision, FakeReasoningGateway([])).reconcile(
-        RoutedChecklistRequest("p", item, COMPOUND, []))
+        RoutedChecklistRequest("p", item, COMPOUND, [], language_id="python"))
     assert record["answer"] == "YES"
     assert record["evidence_policy"] == "no_storage"
 
@@ -204,17 +209,8 @@ async def test_persisted_split_child_with_cached_yes_is_revalidated_before_reuse
     )
     persisted = json.loads(json.dumps([item.to_dict() for item in progress]))
     journal = ReconciliationJournal(ReconciliationJournalRequest(revision, "identity", tuple(persisted), root_refs=("root",)))
-    validate_persisted_tree(journal, [parent])
-    gateway = FakeReasoningGateway([])
-    context = ChecklistTreeContext(routed(tmp_path, revision, gateway), "p", COMPOUND,
-                                    [], "python", (), revision, parent)
-    records = await ChecklistReconciliationTree(journal, gateway).reconcile(context)
-    assert records[1]["answer"] == ("YES" if valid else "NO")
-    if valid:
-        assert records[1]["cached"]
-    else:
-        assert "source provenance mismatch" in records[1]["rationale"]
-    assert gateway.requests == []
+    with pytest.raises(ReconciliationFailure, match="legacy behavioral checklist split"):
+        validate_persisted_tree(journal, [parent])
 
 
 def test_supported_legacy_routing_and_subject_authority_remain_unchanged():

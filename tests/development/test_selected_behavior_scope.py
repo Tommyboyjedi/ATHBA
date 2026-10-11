@@ -1,4 +1,6 @@
 """Selected interface form is behavioral; parameter spelling is not."""
+from core.development.python_test_material import PythonTestMaterial
+from core.development.strict_microcycle import DeveloperFrontierWorkUnitFactory, RegressionRepairWorkUnitFactory
 from types import SimpleNamespace
 from core.development.python_pytest_adapter import PythonCandidateAssessmentFactory
 from core.development.scenario_drafting import _authoring_contract
@@ -76,7 +78,7 @@ async def test_normal_frontier_observation_and_developer_submission_do_not_expos
     candidates = CandidateRepository(tmp_path, {"base": ""})
     gateway = Gateway(["type"])
     catalog = type("Catalog", (), {"for_language": lambda self, language: PythonPytestAdapter()})()
-    service = StrictMicrocycleService(StrictMicrocycleDependencies(store, candidates, gateway, catalog, regression()))
+    service = StrictMicrocycleService(StrictMicrocycleDependencies(store, candidates, gateway, catalog, regression(), developer_factory=DeveloperFrontierWorkUnitFactory(test_material=PythonTestMaterial()), regression_repair_factory=RegressionRepairWorkUnitFactory(test_material=PythonTestMaterial())))
     current = request(tmp_path, initial_state())
     await service.advance(current)
     observed = await service.advance(current)

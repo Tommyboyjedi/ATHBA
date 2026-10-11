@@ -1,17 +1,20 @@
 """Final functional API evidence derives only from original source."""
 from __future__ import annotations
 
-from core.development.required_public_signature import required_signatures
-from core.development.public_signature_validation import signature_adapter
+from core.development.required_public_signature import RequiredPublicSignature, required_signatures
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapter
+from core.development.specification_domain import SpecificationChecklistItem
 from core.development.specification_evidence_policy import SpecificationSnapshot
 
 
-def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id: str) -> dict[str, object] | None:
+def signature_evidence(source: str, snapshot: SpecificationSnapshot, adapter: SpecificationEvidenceAdapter | None) -> dict[str, object] | None:
     signatures = required_signatures(source)
     if not signatures:
         return None
-    failed, unknown, deferred, violated = [], [], [], []
-    adapter = signature_adapter(language_id)
+    failed: list[str] = []
+    unknown: list[str] = []
+    deferred: list[RequiredPublicSignature] = []
+    violated: list[RequiredPublicSignature] = []
     if adapter is None:
         unknown.append("required public signature has no language evidence adapter")
     else:
@@ -27,6 +30,7 @@ def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id
         unknown.append("required public signature snapshot is incomplete")
     findings = failed + unknown
     naming_only = bool(deferred) and not findings
+    remaining = signatures if unknown and adapter is not None and snapshot.complete else violated
     return {
         "checklist_ref": "source-required-public-signatures", "answer": "NO" if findings else "NOT_APPLICABLE" if naming_only else "YES",
         "accepted_test_names": [], "evidence_policy": "source_public_signature",
@@ -35,7 +39,9 @@ def signature_evidence(source: str, snapshot: SpecificationSnapshot, language_id
         "rationale": "Existing source-bound call shapes checked at the canonical revision; lexical identifiers reconcile in Naming.",
         "required_signatures": [item.to_dict() for item in signatures],
         "deferred_signatures": [item.to_dict() for item in deferred],
-        "signature_gap_schema": "athba/source-call-shape-gap/v1",
+        "remaining_obligations": [SpecificationChecklistItem(
+            "call-" + item.name, "Calling " + item.source_quote, "behavior",
+            source_quote=item.source_quote, subject=item.source_quote).to_dict() for item in remaining],
         "snapshot_complete": snapshot.complete,
         "failed_signatures": [item.to_dict() for item in violated],
         "unsupported_findings": unknown,

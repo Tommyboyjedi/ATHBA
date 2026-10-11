@@ -23,6 +23,9 @@ from core.development.microcycle_revision_store import MicrocycleRevisionReposit
 from core.development.project_environment import ProjectEnvironmentService
 from core.development.provider_behavior_reviewer import ProviderSeniorBehaviorReviewer
 from core.development.python_pytest_adapter import PythonPytestAdapter
+from core.development.python_test_material import PythonTestMaterial
+from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
+from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
 from core.development.scenario_drafting import GitCandidateScenarioSourceReader, ScenarioDraftingDependencies, ScenarioDraftingService, ScenarioIntentReviewer
 from core.development.scenario_drafting import ScenarioDraftWorkUnitFactory
 from core.development.specification_assessment import SpecificationGatekeeper
@@ -80,7 +83,8 @@ class StrictTddFeatureCompositionFactory:
         adapters = LanguageAdapterCatalog((PythonPytestAdapter(),))
         microcycle_store = MicrocycleStateRepo(root / "microcycles")
         regression = DeterministicRegressionService(SubprocessProjectRuntimeExecutor())
-        candidates = GitFrontierMaterialiser()
+        test_material = PythonTestMaterial()
+        candidates = GitFrontierMaterialiser(test_material)
         completion = BehaviorCompletionService(BehaviorCompletionDependencies(ProviderSeniorBehaviorReviewer(request.reasoning_gateway)))
         repair = BehaviorRepairService(
             BehaviorRepairDependencies(
@@ -88,7 +92,7 @@ class StrictTddFeatureCompositionFactory:
                 BehaviorRepairGitCandidateRepository(candidates),
                 gateway,
                 regression,
-                BehaviorRepairWorkUnitFactory(request.execution_budget_policy),
+                BehaviorRepairWorkUnitFactory(test_material, request.execution_budget_policy),
             )
         )
         strict = StrictMicrocycleService(
@@ -99,10 +103,10 @@ class StrictTddFeatureCompositionFactory:
                 adapters,
                 regression,
                 developer_factory=DeveloperFrontierWorkUnitFactory(
-                    request.execution_budget_policy
+                    test_material, request.execution_budget_policy
                 ),
                 regression_repair_factory=RegressionRepairWorkUnitFactory(
-                    request.execution_budget_policy
+                    test_material, request.execution_budget_policy
                 ),
                 behavior_completion=completion,
                 behavior_repair=repair,
@@ -117,12 +121,14 @@ class StrictTddFeatureCompositionFactory:
                 GitCandidateScenarioSourceReader(request.repository_root),
                 ScenarioDraftStateRepo(root / "scenario-drafts"),
                 ScenarioDraftWorkUnitFactory(
-                    budget_policy=request.execution_budget_policy
+                    test_material=test_material, budget_policy=request.execution_budget_policy
                 ),
             )
         )
         revisions = MicrocycleRevisionLifecycle(RevisionLifecycleDependencies(MicrocycleRevisionRepository(root / "revisions"), MicrocycleGitClient(request.repository_root)))
         scenarios = StrictFeatureScenarioExecutor(StrictFeatureScenarioDependencies(drafting, strict, revisions, environment))
-        reconciler = CompletedFeatureReconciler(request.repository_root, microcycle_store, request.reasoning_gateway)
-        application = StrictTddFeatureApplicationService(StrictTddFeatureDependencies(environment, StrictTddFeatureRepository(root / "features"), BehaviorContractPlanner(request.reasoning_gateway), SpecificationGatekeeper(request.reasoning_gateway), scenarios, reconciler, request.replan_policy))
+        reconciler = CompletedFeatureReconciler(request.repository_root, microcycle_store, request.reasoning_gateway,
+            test_material, SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
+        application = StrictTddFeatureApplicationService(StrictTddFeatureDependencies(environment, StrictTddFeatureRepository(root / "features"), BehaviorContractPlanner(request.reasoning_gateway), SpecificationGatekeeper(request.reasoning_gateway), scenarios, reconciler, request.replan_policy,
+            lambda value: environment.create_or_load_python_project_with_disposition(value.project_id, value.production_paths)))
         return StrictTddFeatureComposition(application, environment, revisions, gateway, application.contract_planner, application.gatekeeper, drafting, adapters, strict, regression, completion, repair, CompletedMicrocycleEvidenceCollector())

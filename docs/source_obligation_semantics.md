@@ -16,7 +16,8 @@ still sees accepted RED and specific failure, never original specification or cl
 
 Behavior Planner retains the existing initial proposal plus one corrective submission.
 Narrowing and coverage guards remain. Correction receives the rejected response,
-exact failed rule and schema; invalid exhaustion differs from genuinely unsplittable.
+exact failed rule and schema; invalid exhaustion is an atomisation failure and does not establish atomicity.
+See [recursive Behavioral Planner atomisation](recursive_behavioral_atomisation.md) for current routing.
 
 Mechanical compound subjects remain fail-closed until their source conjuncts are
 partitioned exactly once. No verifier approves half a compound. Read/nonmutation
