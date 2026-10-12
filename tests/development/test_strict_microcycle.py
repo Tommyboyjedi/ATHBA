@@ -299,6 +299,16 @@ async def test_timeout_attempt_one_resubmits_attempt_two_for_same_frontier(tmp_p
     assert first_unit.workspace_identity.work_id == second_unit.workspace_identity.work_id
     assert first_unit.id.endswith("developer-1")
     assert second_unit.id.endswith("developer-2")
+    first_payload = json.loads(first_unit.objective)
+    assert first_payload == json.loads(second_unit.objective)
+    assert "smallest production change needed" in first_payload["task"]
+    assert "Do not implement anticipated requirements" in first_payload["task"]
+    assert first_unit.allowed_paths == second_unit.allowed_paths == ["widget.py"]
+    assert first_unit.acceptance == second_unit.acceptance
+    assert first_unit.timeout_seconds == second_unit.timeout_seconds == 300
+    assert gateway.units[0][1].base_sha == gateway.units[1][1].base_sha
+    assert "Widget()" not in first_payload["materialised_active_frontier_test"]
+    assert "widget.grow()" not in first_payload["materialised_active_frontier_test"]
 
 
 @pytest.mark.asyncio
