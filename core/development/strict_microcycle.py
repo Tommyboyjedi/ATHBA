@@ -148,7 +148,13 @@ class DeveloperFrontierWorkUnitFactory:
         identifier = f"{request.artifact.scenario_id}--frontier-{request.artifact.frontier_index}--developer-{request.attempt_number}"
         objective = json.dumps(
             {
-                "task": "Make this accepted RED pass by changing permitted production code only. Do not modify tests.",
+                "task": (
+                    "Make the active frontier pass with the smallest production change needed, while "
+                    "preserving all previously passing tests. Do not implement anticipated requirements, "
+                    "later frontiers or unrelated functionality. Do not modify tests or refactor "
+                    "unrelated code. Stop once the current frontier passes and previously accepted "
+                    "behavior is preserved."
+                ),
                 "materialised_active_frontier_test": request.artifact.complete_source,
                 "boundary_diagnostic": _developer_diagnostic(request),
                 "production_path": request.production_path,

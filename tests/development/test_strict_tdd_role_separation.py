@@ -46,9 +46,31 @@ def test_developer_task_has_no_source_signature_authority_or_revision_essay():
     assert "secret_name" not in unit.objective
     assert "development_base_context" not in payload
     assert payload["materialised_active_frontier_test"] == artifact.complete_source
-    assert "Do not modify" in payload["task"]
+    assert payload["task"] == (
+        "Make the active frontier pass with the smallest production change needed, while "
+        "preserving all previously passing tests. Do not implement anticipated requirements, "
+        "later frontiers or unrelated functionality. Do not modify tests or refactor "
+        "unrelated code. Stop once the current frontier passes and previously accepted "
+        "behavior is preserved."
+    )
+    assert set(payload) == {
+        "task", "materialised_active_frontier_test", "boundary_diagnostic", "production_path",
+    }
+    assert payload["boundary_diagnostic"] == {
+        "kind": "collection_failure", "message": "ImportError: absent", "facts": [],
+    }
+    assert payload["production_path"] == "widget.py"
     assert unit.allowed_paths == ["widget.py"]
     assert unit.acceptance.required_artifacts == ["widget.py"]
+    assert unit.acceptance.commands == [
+        PythonTestMaterial().acceptance_command(artifact.canonical_test_identity),
+    ]
+    assert unit.timeout_seconds == 300
+    assert unit.max_implementation_attempts == 1
+    assert unit.network == "disabled"
+    assert unit.model_work_kind.value == "frontier_implementation"
+    assert unit.workspace_identity.work_id == "generic-scenario--frontier-0"
+    assert unit.workspace_identity.submission_id == "generic-scenario--frontier-0--developer-1"
 
 def test_equivalent_parameter_names_are_not_behavioral_signature_failure():
     sig = required_signatures("Provide a ShoppingBasket class. Calling add_item(name, price) adds an item.")
