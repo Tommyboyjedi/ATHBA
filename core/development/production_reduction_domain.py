@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from core.development.microcycle_domain import RegressionState
+from core.development.microcycle_domain import MaterialisedTestArtifact, RegressionState, ScenarioFragment
 
 
 @dataclass(frozen=True)
@@ -18,6 +18,15 @@ class ReductionPolicy:
             raise ValueError("invalid reduction bounds")
         if self.max_trials > 24:
             raise ValueError("reduction trial bound exceeds qualified policy")
+
+
+@dataclass(frozen=True)
+class ReductionFrontierAuthority:
+    artifact: MaterialisedTestArtifact
+    active_fragment: ScenarioFragment
+    prior_frontier_status: str | None
+    test_path: str
+    production_path: str
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,7 @@ class ProductionReductionRequest:
     prior_completed_test_nodes: tuple[str, ...]
     include_accepted_suite: bool
     adapter_id: str
+    frontier_authority: ReductionFrontierAuthority
     initial_regression: RegressionState
     required_artifacts: tuple[str, ...] = ()
     cancelled: Callable[[], bool] | None = field(default=None, compare=False, repr=False)

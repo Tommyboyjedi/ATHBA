@@ -7,9 +7,12 @@ import time
 
 from core.development.deterministic_regression import (
     ACCUMULATED_REGRESSION, REGRESSION_CLEAR, REGRESSION_INFRASTRUCTURE_FAILURE,
-    DeterministicRegressionRequest, DeterministicRegressionService,
+    DeterministicRegressionService,
 )
 from core.development.microcycle_domain import RegressionCommandReport, RegressionState
+from core.development.production_reduction_acceptance import (
+    FrontierReductionVerifier, ReductionFrontierCheckRequest, verify_reduction_acceptance,
+)
 from core.development.production_reduction_domain import ProductionReductionRequest
 from core.development.production_reduction_git import BoundedReductionGit, ReductionRepository
 from core.development.production_reduction_journal import ReductionJournal
@@ -37,6 +40,7 @@ class ReductionTrialDependencies:
     repository: ReductionRepository
     journal: ReductionJournal
     regression: DeterministicRegressionService
+    verifier: FrontierReductionVerifier
 
 
 class ReductionTrial:
@@ -79,11 +83,10 @@ class ReductionTrial:
                     "elapsed_seconds": time.monotonic() - started,
                 }))
                 return ReductionTrialResult(None, regression, time.monotonic() - started)
-            result = deps.regression.run(DeterministicRegressionRequest(
-                workspace, source.regression_command, source.current_frontier_test,
-                source.prior_completed_test_nodes, source.include_accepted_suite,
-                deadline=request.deadline,
-            ))
+            frontier, result = verify_reduction_acceptance(
+                ReductionFrontierCheckRequest(source, workspace, request.deadline),
+                (deps.verifier, deps.regression),
+            )
             if git.run(("diff-files", "--name-only")).strip():
                 raise ValueError("acceptance mutated a tracked reduction trial file")
             if git.run(("ls-files", "--others", "--exclude-standard")).strip():
@@ -99,6 +102,7 @@ class ReductionTrial:
             deps.journal.record((f"{name}.json", {
                 **pending, "decision": "retained" if revision else "discarded",
                 "revision": revision, "tree": tree, "regression": regression.to_dict(),
+                "frontier": asdict(frontier),
                 "elapsed_seconds": elapsed, "syntax": "adapter-validated",
             }))
             if result.status == REGRESSION_INFRASTRUCTURE_FAILURE and time.monotonic() < request.deadline:

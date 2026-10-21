@@ -9,9 +9,10 @@ from core.development.frontier_reduction_integration import (
     FrontierReductionContext, reduce_frontier_candidate,
 )
 from core.development.microcycle_domain import (
-    DeveloperAttempt, LanguageAdapterDescriptor, MicrocyclePendingAction,
+    DeveloperAttempt, FragmentSourceSpan, LanguageAdapterDescriptor, MaterialisedTestArtifact,
+    MicrocyclePendingAction,
     MicrocycleState, RegressionState, RetryCounts, ScenarioCompletion,
-    ScenarioFragment, ScenarioFrontier, ScenarioIntentResult, ScenarioModel,
+    ScenarioFragment, ScenarioFrontier, ScenarioIntentResult, ScenarioModel, SourceSpan,
     TestScenarioDraft,
 )
 from core.development.production_reduction import ProductionReductionResult
@@ -20,6 +21,19 @@ from core.development.strict_microcycle import (
 )
 from core.development.strict_tdd_transitions import MicrocycleTransitionKind
 from core.execution.rack_ai_contract import RepositoryBinding
+
+
+class OpaqueFrontierAdapter:
+    descriptor = LanguageAdapterDescriptor("opaque-adapter", "1", "opaque")
+
+    def materialise_frontier(self, request):
+        return MaterialisedTestArtifact(
+            self.descriptor.adapter_id, "1", request.model.scenario_id,
+            request.frontier.index, request.model.canonical_test_identity,
+            request.model.complete_source, request.frontier.active_fragment_id,
+            (FragmentSourceSpan(request.frontier.active_fragment_id, SourceSpan(1, 1)),),
+            request.base_revision,
+        )
 
 
 class RecordingReducer:
@@ -69,7 +83,7 @@ def context(tmp_path, state):
         RepositoryBinding("project", "main", "B"), state,
         ("tests/prior::accepted",), True,
     )
-    return FrontierReductionContext(request, state, "opaque-adapter")
+    return FrontierReductionContext(request, state, OpaqueFrontierAdapter())
 
 
 def result(state, revision="V"):
@@ -91,12 +105,40 @@ def test_exact_baseline_red_input_candidate_and_acceptance_are_forwarded(tmp_pat
     assert request.prior_completed_test_nodes == ("tests/prior::accepted",)
     assert request.include_accepted_suite is True
     assert request.adapter_id == "opaque-adapter"
+    assert request.frontier_authority.artifact.base_revision == "C"
+    assert request.frontier_authority.artifact.complete_source == state.model.complete_source
+    assert request.frontier_authority.active_fragment == state.fragments[state.frontier.index]
+    assert request.frontier_authority.prior_frontier_status is None
+    assert request.frontier_authority.test_path == state.model.test_path
+    assert request.frontier_authority.production_path == "source.unit"
     assert request.initial_regression == state.regression
     assert reduced.state.candidate_chain_revision == "V"
     assert reduced.state.development_base_revision == "B"
     assert reduced.state.developer_attempts == state.developer_attempts
     assert reduced.state.retry_counts == state.retry_counts
     assert state.developer_attempts[-1].candidate_revision == "C"
+
+
+def test_later_frontier_keeps_prior_green_and_its_own_red_authority(tmp_path):
+    state = promotion_state()
+    second = ScenarioFragment("two", "scenario", "opaque", "next operation", "next", ("one",))
+    state = replace(
+        state,
+        fragments=(*state.fragments, second),
+        frontier=ScenarioFrontier("scenario", 1, "two", ("one", "two")),
+        development_base_revision="B2",
+        developer_attempts=(*state.developer_attempts,
+                            DeveloperAttempt(1, 1, "R2", "C2")),
+        candidate_chain_revision="C2",
+    )
+    reducer = RecordingReducer(result(state, "V2"))
+    reduce_frontier_candidate(reducer, context(tmp_path, state))
+    request = reducer.requests[0]
+    assert (request.baseline_revision, request.accepted_red_revision,
+            request.developer_input_revision, request.candidate_revision) == ("B2", "R2", "R2", "C2")
+    assert request.frontier_authority.prior_frontier_status == "green"
+    assert request.frontier_authority.active_fragment == second
+    assert request.frontier_authority.artifact.frontier_index == 1
 
 
 @pytest.mark.parametrize("change", [
@@ -136,7 +178,7 @@ def test_optional_seam_preserves_existing_fake_composition(tmp_path):
 
 def service_for(state, reducer):
     store = MemoryStore(state)
-    adapter = SimpleNamespace(descriptor=LanguageAdapterDescriptor("opaque-adapter", "1", "opaque"))
+    adapter = OpaqueFrontierAdapter()
     catalog = SimpleNamespace(for_language=lambda language: adapter)
     forbidden = SimpleNamespace(execute=lambda *args: pytest.fail("model/runtime not required here"))
     service = StrictMicrocycleService(StrictMicrocycleDependencies(

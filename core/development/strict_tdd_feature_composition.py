@@ -24,6 +24,7 @@ from core.development.project_environment import ProjectEnvironmentService
 from core.development.provider_behavior_reviewer import ProviderSeniorBehaviorReviewer
 from core.development.python_pytest_adapter import PythonPytestAdapter
 from core.development.python_production_reduction import PythonProductionReductionAdapter
+from core.development.production_reduction_acceptance import FrontierReductionVerifier
 from core.development.production_reduction import ProductionChangeReducer, ProductionReductionDependencies
 from core.development.python_test_material import PythonTestMaterial
 from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
@@ -115,6 +116,7 @@ class StrictTddFeatureCompositionFactory:
                 behavior_production_reader=GitBehaviorProductionReader(),
                 production_reducer=ProductionChangeReducer(ProductionReductionDependencies(
                     root / "production-reductions", PythonProductionReductionAdapter(), regression,
+                    FrontierReductionVerifier(adapters.for_language("python")),
                 )),
             )
         )

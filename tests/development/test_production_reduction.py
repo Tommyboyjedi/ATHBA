@@ -17,9 +17,16 @@ from core.development.deterministic_regression import (
 from core.development.production_reduction import (
     ProductionChangeReducer, ProductionReductionDependencies,
 )
-from core.development.production_reduction_domain import ProductionReductionRequest, ReductionPolicy, ReductionCheckpoint
+from core.development.production_reduction_domain import (
+    ProductionReductionRequest, ReductionPolicy, ReductionCheckpoint, ReductionFrontierAuthority,
+)
+from core.development.production_reduction_acceptance import FrontierReductionVerifier
 from core.development.production_reduction_journal import ReductionJournal
-from core.development.microcycle_domain import RegressionCommandReport
+from core.development.microcycle_domain import (
+    RegressionCommandReport, TestScenarioDraft as ScenarioDraft, ScenarioParseRequest, FragmentationRequest,
+    ScenarioFrontier, FrontierMaterialisationRequest,
+)
+from core.development.python_pytest_adapter import PythonPytestAdapter
 from core.development.production_reduction_syntax import ReductionOpportunity, ReductionPlan
 from core.development.python_production_reduction import PythonProductionReductionAdapter
 
@@ -44,6 +51,23 @@ def commit(root, message):
     return git(root, "rev-parse", "HEAD")
 
 
+def frontier_authority(test, red, production_path):
+    adapter = PythonPytestAdapter()
+    import_only = test == IMPORT_TEST
+    parse_source = test.replace("    pass\n", "    assert True\n") if import_only else test
+    draft = ScenarioDraft("one-scenario", "selected-behavior", "python",
+                              parse_source, CURRENT, "tests/test_current.py")
+    model = adapter.parse_scenario(ScenarioParseRequest(draft))
+    fragments = adapter.fragment_scenario(FragmentationRequest(model))
+    index = 0 if import_only else len(fragments) - 1
+    frontier = ScenarioFrontier(draft.scenario_id, index, fragments[index].fragment_id,
+                                tuple(item.fragment_id for item in fragments[:index + 1]))
+    artifact = adapter.materialise_frontier(FrontierMaterialisationRequest(model, fragments, frontier, red))
+    assert artifact.complete_source == test, "fixture must preserve the exact accepted test"
+    return ReductionFrontierAuthority(artifact, fragments[index], "green" if index else None,
+                                      draft.test_path, production_path)
+
+
 def example(tmp_path, candidate=OVERBUILT, baseline='"""seed"""\n',
             test=IMPORT_TEST, prior=None, production_path="app.py"):
     root = tmp_path / "project"
@@ -66,9 +90,11 @@ def example(tmp_path, candidate=OVERBUILT, baseline='"""seed"""\n',
     regression = DeterministicRegressionService(SubprocessProjectRuntimeExecutor())
     initial = regression.run(DeterministicRegressionRequest(root, COMMAND, CURRENT, prior_nodes))
     assert initial.status == REGRESSION_CLEAR
+    authority = frontier_authority(test, red, production_path)
     request = ProductionReductionRequest(
-        root, "one-scenario", 0, base, red, red, original, (production_path,),
-        CURRENT, COMMAND, prior_nodes, True, "python-pytest", initial.state(COMMAND), required_artifacts=(production_path,),
+        root, "one-scenario", authority.artifact.frontier_index, base, red, red, original, (production_path,),
+        CURRENT, COMMAND, prior_nodes, True, "python-pytest", authority, initial.state(COMMAND),
+        required_artifacts=(production_path,),
     )
     return root, request, regression
 
@@ -76,7 +102,7 @@ def example(tmp_path, candidate=OVERBUILT, baseline='"""seed"""\n',
 def reduce(tmp_path, request, regression, adapter=None, policy=None):
     dependencies = ProductionReductionDependencies(
         tmp_path / "reduction-evidence", adapter or PythonProductionReductionAdapter(),
-        regression, policy or ReductionPolicy(),
+        regression, FrontierReductionVerifier(PythonPytestAdapter()), policy or ReductionPolicy(),
     )
     return ProductionChangeReducer(dependencies).reduce(request)
 
@@ -237,7 +263,8 @@ def test_non_python_fake_capability_drives_same_generic_reducer(tmp_path):
                     item.candidate.replace(b"EXTRA\n", b""), "remove added toy declaration"),))
             return ReductionPlan()
 
-    result = reduce(tmp_path, replace(request, adapter_id="toy"), regression, adapter=ToyCapability())
+    # The production syntax is opaque toy source; its accepted test still uses the configured Python test adapter.
+    result = reduce(tmp_path, request, regression, adapter=ToyCapability())
 
     assert source(root, result.revision, "app.toy") == "CORE"
     assert result.regression.status == REGRESSION_CLEAR
@@ -400,7 +427,7 @@ def test_deadline_after_trial_execution_never_promotes_partial_trial(tmp_path):
 
 
 def test_required_artifact_deletion_is_discarded_even_if_test_passes(tmp_path):
-    _root, request, regression = example(tmp_path, test="def test_current():\n    pass\n")
+    _root, request, regression = example(tmp_path, test="def test_current():\n    assert True\n")
 
     class RemoveFile:
         def plan(self, item):
@@ -465,3 +492,41 @@ def test_cleanup_interruption_resume_does_not_promote_uncheckpointed_trial(tmp_p
         if workspace.exists():
             git(root, "worktree", "remove", "--force", str(workspace))
         parent.rmdir()
+
+
+def test_reduction_that_enables_unittest_skip_is_not_green_despite_zero_pytest_exit(tmp_path):
+    baseline = (
+        "import unittest\n\n"
+        "class Basket:\n"
+        "    def value(self):\n"
+        "        raise unittest.SkipTest('disabled behavior')\n"
+    )
+    candidate = baseline.replace(
+        "        raise unittest.SkipTest('disabled behavior')",
+        "        return 7\n        raise unittest.SkipTest('disabled behavior')",
+    )
+    test = "from app import Basket\n\ndef test_current():\n    assert Basket().value() == 7\n"
+    root, request, regression = example(tmp_path, candidate, baseline, test)
+    assert subprocess.run(COMMAND + (CURRENT,), cwd=root, capture_output=True).returncode == 0
+
+    result = reduce(tmp_path, request, regression)
+
+    assert result.revision == request.candidate_revision
+    assert result.regression.status == REGRESSION_CLEAR
+    trials = [json.loads(path.read_text()) for path in
+              (tmp_path / "reduction-evidence").rglob("trial-[0-9][0-9][0-9][0-9].json")]
+    assert trials
+    skipped = [trial for trial in trials if any(
+        fact["name"] == "call_outcome" and fact["value"] == "skipped"
+        for fact in trial.get("frontier", {}).get("diagnostic", {}).get("facts", ())
+    )]
+    assert skipped, json.dumps(trials)
+    assert all(trial["decision"] == "discarded" for trial in skipped)
+    assert all(trial["frontier"]["outcome"] != "green" for trial in skipped)
+    assert source(root, request.candidate_revision) == candidate.strip()
+    # Direct pytest deliberately demonstrates the false approval that structured verification prevents.
+    (root / "app.py").write_text(baseline)
+    skipped_process = subprocess.run(COMMAND + (CURRENT,), cwd=root, capture_output=True, text=True)
+    assert skipped_process.returncode == 0
+    assert "skipped" in skipped_process.stdout
+    assert git(root, "show", f"{request.candidate_revision}:tests/test_current.py") == test.strip()

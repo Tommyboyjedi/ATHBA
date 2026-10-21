@@ -7,6 +7,7 @@ import hashlib
 from pathlib import Path
 
 from core.development.deterministic_regression import REGRESSION_CLEAR, DeterministicRegressionService
+from core.development.production_reduction_acceptance import FrontierReductionVerifier
 from core.development.production_reduction_domain import (
     ProductionReductionRequest, ProductionReductionResult, ReductionCheckpoint,
     ReductionDeadlineReached, ReductionPolicy,
@@ -24,6 +25,7 @@ class ProductionReductionDependencies:
     evidence_root: Path
     adapter: ProductionReductionAdapter
     regression: DeterministicRegressionService
+    verifier: FrontierReductionVerifier
     policy: ReductionPolicy = ReductionPolicy()
 
 
@@ -43,6 +45,10 @@ class ProductionChangeReducer:
             raise ValueError("only an independently verified GREEN candidate can be reduced")
         if request.initial_regression.command != request.regression_command:
             raise ValueError("reduction cannot change acceptance commands")
+        if request.frontier_authority.artifact.adapter_id != request.adapter_id:
+            raise ValueError("reduction frontier language authority changed")
+        if request.frontier_authority.artifact.canonical_test_identity != request.current_frontier_test:
+            raise ValueError("reduction frontier test authority changed")
         journal = ReductionJournal(deps.evidence_root, request)
         with journal.locked(), journal.measured(deps.policy):
             checkpoint = journal.load(deps.policy)
@@ -66,7 +72,7 @@ class ProductionChangeReducer:
             if remaining <= MINIMUM_TRIAL_WINDOW:
                 checkpoint = replace(checkpoint, termination="deadline_reached")
             else:
-                trial = ReductionTrial(ReductionTrialDependencies(repository, journal, deps.regression))
+                trial = ReductionTrial(ReductionTrialDependencies(repository, journal, deps.regression, deps.verifier))
                 checkpoint = self._search((request, checkpoint), (journal, repository, trial))
             journal.save((checkpoint, deps.policy))
             return ProductionReductionResult(checkpoint.best_revision, checkpoint.regression,

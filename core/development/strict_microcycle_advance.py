@@ -405,7 +405,7 @@ def _promote_canonical_base(
 ) -> MicrocycleAdvanceResult:
     reduction = reduce_frontier_candidate(
         service.production_reducer, FrontierReductionContext(
-            request, state, service.adapters.for_language(state.model.language_id).descriptor.adapter_id,
+            request, state, service.adapters.for_language(state.model.language_id),
         ),
     )
     if reduction.state is not state:

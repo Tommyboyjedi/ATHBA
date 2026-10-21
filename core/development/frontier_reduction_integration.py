@@ -5,8 +5,11 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from core.development.deterministic_regression import REGRESSION_CLEAR
-from core.development.microcycle_domain import MicrocycleState
+from core.development.microcycle_domain import (
+    BoundaryOutcome, FrontierMaterialisationRequest, LanguageTestAdapter, MicrocycleState,
+)
 from core.development.production_reduction import ProductionReductionRequest, ProductionReductionResult
+from core.development.production_reduction_domain import ReductionFrontierAuthority
 
 if TYPE_CHECKING:
     from core.development.strict_microcycle import StrictMicrocycleRequest
@@ -20,7 +23,7 @@ class FrontierProductionReducer(Protocol):
 class FrontierReductionContext:
     request: StrictMicrocycleRequest
     state: MicrocycleState
-    adapter_id: str
+    adapter: LanguageTestAdapter
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,14 @@ def reduce_frontier_candidate(
         return FrontierReductionPromotion(state)
     current = matching[-1]
     request = context.request
+    artifact = context.adapter.materialise_frontier(FrontierMaterialisationRequest(
+        state.model, state.fragments, state.frontier, candidate,
+    ))
+    frontier_authority = ReductionFrontierAuthority(
+        artifact, state.fragments[state.frontier.index],
+        BoundaryOutcome.GREEN.value if state.frontier.index else None,
+        state.model.test_path, request.production_path,
+    )
     reduction = reducer.reduce(ProductionReductionRequest(
         repository_root=request.repository_root,
         scenario_id=state.scenario_draft.scenario_id,
@@ -59,7 +70,8 @@ def reduce_frontier_candidate(
         regression_command=state.regression.command,
         prior_completed_test_nodes=request.prior_completed_test_nodes,
         include_accepted_suite=request.include_accepted_regression_suite,
-        adapter_id=context.adapter_id,
+        adapter_id=context.adapter.descriptor.adapter_id,
+        frontier_authority=frontier_authority,
         initial_regression=state.regression,
         required_artifacts=(request.production_path,),
     ))

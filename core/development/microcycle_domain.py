@@ -863,6 +863,8 @@ class FrontierExecutionRequest:
     project_root: str
     test_path: str
     production_path: str | None = None
+    deadline: float | None = None
+    materialise_test: bool = True
 
 
 @dataclass(frozen=True)

@@ -79,3 +79,13 @@ deadline, unsupported syntax and failed deletion are never proofs of minimality.
 Joint removals may be missed. Future frontiers are not tested as acceptance, and
 incidental future GREEN is permitted. No claim is made about untested correctness
 or complete enforcement of the third law of TDD.
+
+
+The trial reuses both existing acceptance layers: the configured language adapter's
+independent current-frontier execution/classification must be GREEN, then the
+unchanged accumulated regression commands must pass. A successful process exit
+alone is insufficient (a skipped test can exit successfully). The independent
+probe reads the existing immutable merged test file without rematerialising it.
+Its opt-in deadline is bounded by the existing probe limit and remaining reduction
+time; ordinary calls retain their previous defaults. Both structured frontier
+evidence and regression reports are retained per trial.
