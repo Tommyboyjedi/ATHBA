@@ -163,3 +163,18 @@ def test_subprocess_deadline_timeout_remains_infrastructure_failure(monkeypatch)
     assert result.status == "infrastructure_failure"
     assert result.return_code is None
     assert "0.5" in result.evidence_ref
+
+def test_subprocess_executor_preserves_existing_hard_cap_for_explicit_override(monkeypatch):
+    observed = []
+
+    def run(command, **kwargs):
+        observed.append(kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, "passed", "")
+
+    monkeypatch.setattr(regression_module.subprocess, "run", run)
+    command = RuntimeCommandRequest(Path("/project"), "test", ("runner", "test"), 600.0)
+
+    result = SubprocessProjectRuntimeExecutor().execute(command)
+
+    assert result.status == "passed"
+    assert observed == [RUNTIME_TIMEOUT_SECONDS]

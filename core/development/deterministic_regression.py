@@ -41,7 +41,7 @@ class SubprocessProjectRuntimeExecutor:
                 cwd=request.project_root,
                 capture_output=True,
                 text=True,
-                timeout=request.timeout_seconds,
+                timeout=min(RUNTIME_TIMEOUT_SECONDS, request.timeout_seconds),
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
