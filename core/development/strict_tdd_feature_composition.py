@@ -23,6 +23,8 @@ from core.development.microcycle_revision_store import MicrocycleRevisionReposit
 from core.development.project_environment import ProjectEnvironmentService
 from core.development.provider_behavior_reviewer import ProviderSeniorBehaviorReviewer
 from core.development.python_pytest_adapter import PythonPytestAdapter
+from core.development.python_production_reduction import PythonProductionReductionAdapter
+from core.development.production_reduction import ProductionChangeReducer, ProductionReductionDependencies
 from core.development.python_test_material import PythonTestMaterial
 from core.development.python_specification_evidence import PythonSpecificationEvidenceAdapter
 from core.development.specification_evidence_policy import SpecificationEvidenceAdapters
@@ -111,6 +113,9 @@ class StrictTddFeatureCompositionFactory:
                 behavior_completion=completion,
                 behavior_repair=repair,
                 behavior_production_reader=GitBehaviorProductionReader(),
+                production_reducer=ProductionChangeReducer(ProductionReductionDependencies(
+                    root / "production-reductions", PythonProductionReductionAdapter(), regression,
+                )),
             )
         )
         drafting = ScenarioDraftingService(

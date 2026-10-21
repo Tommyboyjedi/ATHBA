@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -13,6 +14,7 @@ ACCUMULATED_REGRESSION = "accumulated_regression"
 REGRESSION_INFRASTRUCTURE_FAILURE = "regression_infrastructure_failure"
 FULL_SUITE_TARGET = "accepted_regression_suite"
 RUNTIME_TIMEOUT_SECONDS = 60
+DEADLINE_NOT_EXECUTED = "regression deadline expired; command not executed"
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,7 @@ class RuntimeCommandRequest:
     project_root: Path
     target: str
     command: tuple[str, ...]
+    timeout_seconds: float = RUNTIME_TIMEOUT_SECONDS
 
 
 class ProjectRuntimeExecutor(Protocol):
@@ -38,7 +41,7 @@ class SubprocessProjectRuntimeExecutor:
                 cwd=request.project_root,
                 capture_output=True,
                 text=True,
-                timeout=RUNTIME_TIMEOUT_SECONDS,
+                timeout=request.timeout_seconds,
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
@@ -57,6 +60,7 @@ class DeterministicRegressionRequest:
     current_frontier_test: str
     prior_completed_test_nodes: tuple[str, ...] = ()
     include_accepted_suite: bool = True
+    deadline: float | None = None
 
     def __post_init__(self) -> None:
         if not self.command or not self.current_frontier_test.strip():
@@ -83,7 +87,20 @@ class DeterministicRegressionService:
         self.runtime = runtime
 
     def run(self, request: DeterministicRegressionRequest) -> DeterministicRegressionResult:
-        reports = tuple(self.runtime.execute(item) for item in self._commands(request))
+        observed: list[RegressionCommandReport] = []
+        for item in self._commands(request):
+            if request.deadline is not None:
+                remaining = request.deadline - time.monotonic()
+                if remaining <= 0:
+                    skipped = RegressionCommandReport(
+                        item.target, item.command, None, "infrastructure_failure", DEADLINE_NOT_EXECUTED
+                    )
+                    return DeterministicRegressionResult(
+                        REGRESSION_INFRASTRUCTURE_FAILURE, (*observed, skipped), ()
+                    )
+                item = replace(item, timeout_seconds=min(item.timeout_seconds, remaining))
+            observed.append(self.runtime.execute(item))
+        reports = tuple(observed)
         if any(item.status == "infrastructure_failure" for item in reports):
             return DeterministicRegressionResult(REGRESSION_INFRASTRUCTURE_FAILURE, reports, ())
         failing = tuple(
