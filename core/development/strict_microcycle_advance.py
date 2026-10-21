@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from core.development.behavior_completion import APPROVED, REPAIR_REQUIRED, REPLAN_REQUIRED, BehaviorCompletionCommand
 from core.development.behavior_repair import BehaviorRepairRequest
 from core.development.behavior_review_material import BehaviorProductionReadRequest
+from core.development.frontier_reduction_integration import FrontierReductionContext, reduce_frontier_candidate
 from core.development.deterministic_regression import (
     ACCUMULATED_REGRESSION,
     REGRESSION_CLEAR,
@@ -402,8 +403,20 @@ def _promote_canonical_base(
     state: MicrocycleState,
     prior_status: str,
 ) -> MicrocycleAdvanceResult:
+    reduction = reduce_frontier_candidate(
+        service.production_reducer, FrontierReductionContext(
+            request, state, service.adapters.for_language(state.model.language_id),
+        ),
+    )
+    if reduction.state is not state:
+        state = reduction.state
+        _advance_working_revision(
+            request, state.candidate_chain_revision or state.development_base_revision,
+            RevisionTransitionKind.DEVELOPER_CANDIDATE_ACCEPTED.value, reduction.evidence_ref,
+        )
+        service.state_store.save(state)
     revision = state.candidate_chain_revision or state.development_base_revision
-    _promote_canonical_revision(request, revision, None)
+    _promote_canonical_revision(request, revision, reduction.evidence_ref)
     updated = replace(
         state,
         development_base_revision=revision,

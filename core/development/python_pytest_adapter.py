@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import time
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -35,6 +36,7 @@ from core.development.microcycle_domain import (
 PYTHON_LANGUAGE_ID = "python"
 PYTEST_ADAPTER_VERSION = "1.0.0"
 PYTHON_PYTEST_ADAPTER_ID = "python-pytest"
+FRONTIER_EXECUTION_TIMEOUT_SECONDS = 30.0
 
 
 class PythonFragmentKind(str, Enum):
@@ -705,12 +707,17 @@ class PytestStructuredExecutor:
     """Runs pytest through hooks and converts facts without trusting console wording."""
 
     def execute(self, request: FrontierExecutionRequest) -> BoundaryDiagnostic:
+        if request.deadline is not None and request.deadline <= time.monotonic():
+            return BoundaryDiagnostic("infrastructure", "frontier execution deadline expired")
         root = Path(request.project_root).resolve()
         path = (root / request.test_path).resolve()
         if root not in path.parents:
             return BoundaryDiagnostic("infrastructure", "test path escapes project root")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(request.artifact.complete_source, encoding="utf-8")
+        if request.materialise_test:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(request.artifact.complete_source, encoding="utf-8")
+        elif not path.is_file():
+            return BoundaryDiagnostic("infrastructure", "immutable frontier test is missing")
         self._invalidate_project_caches(root)
         syntax = self._syntax(path, request.test_path)
         if syntax is not None:
@@ -718,7 +725,18 @@ class PytestStructuredExecutor:
         node = request.artifact.canonical_test_identity
         command = [sys.executable, "-m", "core.development.python_pytest_probe", str(root), node, request.production_path or ""]
         environment = os.environ | {"PYTHONPATH": str(Path(__file__).resolve().parents[2])}
-        completed = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=30)
+        timeout = FRONTIER_EXECUTION_TIMEOUT_SECONDS
+        if request.deadline is not None:
+            remaining = request.deadline - time.monotonic()
+            if remaining <= 0:
+                return BoundaryDiagnostic("infrastructure", "frontier execution deadline expired")
+            timeout = min(timeout, remaining)
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, env=environment, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            if request.deadline is None:
+                raise
+            return BoundaryDiagnostic("infrastructure", "frontier execution deadline exhausted")
         facts = PytestProbeOutput().parse(completed.stdout) if completed.returncode == 0 else None
         if facts is None:
             return PytestProbeOutput().failure(completed, command)

@@ -3,6 +3,7 @@ from __future__ import annotations
 from core.execution.work_execution_boundary import ExecutionBoundaryRequest, assert_execution_boundary
 
 from core.development.required_public_signature import RequiredPublicSignature
+from core.development.frontier_reduction_integration import FrontierProductionReducer
 
 import json
 import shutil
@@ -245,6 +246,7 @@ class StrictMicrocycleDependencies:
     behavior_completion: BehaviorCompletionService | None = None
     behavior_repair: BehaviorRepairService | None = None
     behavior_production_reader: BehaviorProductionReader | None = None
+    production_reducer: FrontierProductionReducer | None = None
 
 
 @dataclass(frozen=True)
@@ -408,6 +410,7 @@ class StrictMicrocycleService:
         self.behavior_completion = dependencies.behavior_completion
         self.behavior_repair = dependencies.behavior_repair
         self.behavior_production_reader = dependencies.behavior_production_reader
+        self.production_reducer = dependencies.production_reducer
 
     async def run(self, request: StrictMicrocycleRequest) -> StrictMicrocycleOutcome:
         from core.development.strict_microcycle_runner import StrictMicrocycleRunLoop
