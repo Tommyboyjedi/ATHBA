@@ -32,6 +32,7 @@ from core.development.microcycle_domain import (
 from core.development.scenario_drafting_domain import (
     MAX_TESTER_SCENARIO_ATTEMPTS,
     ScenarioAuthoringContract,
+    ScenarioAuthoringIdentity,
     ScenarioCandidateAssessment,
     ScenarioCandidateAssessmentRequest,
     ScenarioCandidateIssue,
@@ -782,7 +783,7 @@ def _approved_analysis(prepared: ScenarioCandidatePreparation) -> ScenarioStatic
     return prepared.static_analysis
 
 
-def _authoring_contract(request: ScenarioDraftRequest) -> ScenarioAuthoringContract:
+def _authoring_contract(request: ScenarioDraftRequest | ScenarioAuthoringIdentity) -> ScenarioAuthoringContract:
     return ScenarioAuthoringContract(
         request.language_id, request.test_framework, 1,
         ("imports", "module data assignments", "one ordinary test function"),

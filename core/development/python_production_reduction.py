@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from core.development.production_reduction_syntax import (
     ReductionOpportunity, ReductionPlan, ReductionSource,
 )
+from core.development.python_reduction_provenance import constrain_completion_plan
 from core.development.python_production_reduction_spans import (
     PythonReductionBuffer, child_suites, named_declaration, statement_key,
 )
@@ -166,7 +167,7 @@ class PythonProductionReductionAdapter:
             opportunity = ReductionOpportunity(
                 hashlib.sha256((request.path + ":restore_file").encode()).hexdigest(),
                 request.path, request.baseline, "restore deleted baseline file")
-            return ReductionPlan((opportunity,))
+            return constrain_completion_plan(request, ReductionPlan((opportunity,)))
         before = PythonReductionBuffer(request.baseline or b"")
         current = PythonReductionBuffer(request.candidate)
         try:
@@ -177,4 +178,5 @@ class PythonProductionReductionAdapter:
         if request.baseline is None:
             builder.add(("file", "delete"), ("delete added file", None))
         _SuiteReducer(builder).reduce(_Suite(tuple(old_tree.body), tuple(new_tree.body), ("module",), True))
-        return ReductionPlan(tuple(builder.opportunities), tuple(dict.fromkeys(builder.limitations)))
+        return constrain_completion_plan(request, ReductionPlan(
+            tuple(builder.opportunities), tuple(dict.fromkeys(builder.limitations))))

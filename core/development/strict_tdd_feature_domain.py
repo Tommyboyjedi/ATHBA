@@ -7,6 +7,7 @@ from enum import Enum
 from hashlib import sha256
 from typing import Any
 
+from core.development.consolidation_evidence import SupersessionRecord
 from core.development.reconciliation_response import ReconciliationFailure
 from core.development.behavior_replan_domain import BehaviorReplanRecord
 from core.development.specification_domain import ChecklistAtomizationAttempt
@@ -102,6 +103,8 @@ class StrictTddFeatureState:
     atomization_failure: tuple[ChecklistAtomizationAttempt, ...] = ()
     behavioral_entry_revision: str | None = None
     reconciliation_history: tuple[dict[str, object], ...] = ()
+    evidence_consolidations: tuple[SupersessionRecord, ...] = ()
+    consolidation_checks: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -124,6 +127,8 @@ class StrictTddFeatureState:
             "reconciliation_failure": None if self.reconciliation_failure is None else self.reconciliation_failure.to_dict(),
             "completed_behaviors": [asdict(item) for item in self.completed_behaviors],
             "atomization_failure": [item.to_dict() for item in self.atomization_failure],
+            "evidence_consolidations": [item.to_dict() for item in self.evidence_consolidations],
+            "consolidation_checks": list(self.consolidation_checks),
         }
 
     @classmethod
@@ -153,6 +158,8 @@ class StrictTddFeatureState:
             tuple(ChecklistAtomizationAttempt.from_dict(dict(item)) for item in payload.get("atomization_failure", ())),
             payload.get("behavioral_entry_revision"),
             tuple(dict(item) for item in payload.get("reconciliation_history", ())),
+            tuple(SupersessionRecord.from_dict(dict(item)) for item in payload.get("evidence_consolidations", ())),
+            tuple(str(item) for item in payload.get("consolidation_checks", ())),
         )
 
 

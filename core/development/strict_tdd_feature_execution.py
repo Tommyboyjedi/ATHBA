@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.development.consolidation_evidence import ActiveAcceptedEvidenceResolver, ActiveEvidenceRequest
 from core.development.behavior_contract_domain import BehaviorContract
 from core.development.feature_signature_evidence import signature_evidence
 from core.development.reconciliation_source_authority import RECONCILIATION_SOURCE_SCHEMA
@@ -31,6 +32,7 @@ from core.development.checklist_reconciliation_tree import (
 from core.development.reconciliation_progress import ReconciliationJournal, ReconciliationJournalRequest, evidence_digest
 from core.development.specification_domain import SpecificationChecklistItem
 from core.development.specification_reconciliation import (
+    AcceptedTestEvidence,
     ChecklistItemReconciler,
     CompletedMicrocycleEvidenceCollector,
     GitAcceptedTestCatalog,
@@ -89,13 +91,14 @@ class CompletedFeatureReconciler:
     ) -> tuple[dict[str, object], ...]:
         gatekeeper = SpecificationGatekeeperRunState.from_dict(request.gatekeeper_payload)
         states = [self._state(item.scenario_id) for item in request.completed_behaviors]
-        accepted = CompletedMicrocycleEvidenceCollector().collect(states)
+        accepted = list(self._accepted(request))
         catalog = GitAcceptedTestCatalog(self.repository_root, TestCatalogRevision(request.canonical_revision, require_test_material(self.test_material)))
         item_reconciler = RoutedChecklistReconciler(ChecklistItemReconciler(self.reasoning_gateway, catalog), catalog, self.evidence_adapters)
         requested_subjects = required_source_subjects(gatekeeper.checklist)
         languages = {state.model.language_id for state in states}
         language = next(iter(languages)) if len(languages) == 1 else ""
-        identity = evidence_digest({"source_authority_schema": RECONCILIATION_SOURCE_SCHEMA,
+        identity = evidence_digest({**({"evidence_consolidations": [record.to_dict() for record in request.evidence_consolidations]} if request.evidence_consolidations else {}),
+            "source_authority_schema": RECONCILIATION_SOURCE_SCHEMA,
             "checklist": gatekeeper.checklist.to_dict(), "language": language,
             "repository": str(self.repository_root.resolve()),
             "accepted": [{"evidence": evidence.to_dict(), "verified_source": catalog.verified_source(evidence)}
@@ -122,6 +125,18 @@ class CompletedFeatureReconciler:
         if functional_api is not None:
             results.append(functional_api)
         return tuple(results)
+
+    def active_test_nodes(self, request: FeatureReconciliationRequest) -> tuple[str, ...]:
+        return tuple(item.test_name for item in self._accepted(request))
+
+    def _accepted(self, request: FeatureReconciliationRequest) -> tuple[AcceptedTestEvidence, ...]:
+        states = [self._state(item.scenario_id) for item in request.completed_behaviors]
+        original = tuple(CompletedMicrocycleEvidenceCollector().collect(states))
+        if not request.evidence_consolidations:
+            return original
+        resolver = ActiveAcceptedEvidenceResolver(self.repository_root, require_test_material(self.test_material))
+        return resolver.resolve(ActiveEvidenceRequest(
+            original, request.evidence_consolidations, request.canonical_revision))
 
     def _state(self, scenario_id: str):
         state = self.state_store.load(scenario_id)

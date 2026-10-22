@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.development.git_behavior_review_material import GitBehaviorProductionReader
+from core.development.consolidation_composition import ConsolidationCompositionRequest, compose_consolidation
 from dataclasses import dataclass, field
 from pathlib import Path
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
@@ -137,5 +138,8 @@ class StrictTddFeatureCompositionFactory:
         reconciler = CompletedFeatureReconciler(request.repository_root, microcycle_store, request.reasoning_gateway,
             test_material, SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),)))
         application = StrictTddFeatureApplicationService(StrictTddFeatureDependencies(environment, StrictTddFeatureRepository(root / "features"), BehaviorContractPlanner(request.reasoning_gateway), SpecificationGatekeeper(request.reasoning_gateway), scenarios, reconciler, request.replan_policy,
-            lambda value: environment.create_or_load_python_project_with_disposition(value.project_id, value.production_paths)))
+            lambda value: environment.create_or_load_python_project_with_disposition(value.project_id, value.production_paths),
+            compose_consolidation(ConsolidationCompositionRequest(
+                root, request.repository_root, environment, adapters.for_language("python"),
+                PythonProductionReductionAdapter(), test_material, regression, request.reasoning_gateway))))
         return StrictTddFeatureComposition(application, environment, revisions, gateway, application.contract_planner, application.gatekeeper, drafting, adapters, strict, regression, completion, repair, CompletedMicrocycleEvidenceCollector())

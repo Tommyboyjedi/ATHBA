@@ -12,6 +12,14 @@ class TestModuleMergeRequest:
 
 
 @dataclass(frozen=True)
+class TestModuleReplacementRequest:
+    trusted_source: str
+    scenario_source: str
+    canonical_test_identity: str
+    replaced_test_identities: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class TestSourceRequest:
     source: str
     identity: str
@@ -23,6 +31,7 @@ class TestMaterialAdapter(Protocol):
     framework: str
 
     def merge(self, request: TestModuleMergeRequest) -> str: ...
+    def replace(self, request: TestModuleReplacementRequest) -> str: ...
     def extract(self, request: TestSourceRequest) -> str | None: ...
     def test_path(self, identity: str) -> str: ...
     def acceptance_command(self, identity: str) -> list[str]: ...
