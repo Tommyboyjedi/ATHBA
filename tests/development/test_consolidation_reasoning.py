@@ -7,7 +7,7 @@ import pytest
 from core.development.consolidation_reasoning import (
     AUTHOR_PURPOSE, FORMAT_PURPOSE, MAX_CONSOLIDATION_CONTEXT_BYTES, MAX_CONSOLIDATION_PROMPT_BYTES, PROPOSAL_PURPOSE,
     REVIEW_PURPOSE, ConsolidationContextLimit, ConsolidationCorrection, ConsolidationReasoning,
-    ConsolidationReasoningContext,
+    ConsolidationReasoningContext, ConsolidationCoverageMissing,
 )
 from core.execution.reasoning_gateway import ReasoningResult
 
@@ -90,11 +90,11 @@ def test_strict_flat_protocol_preserves_every_authority_and_reuses_intent_verdic
         {**payload, "wrapper": "unrequested"},
     ]
     for invalid in variants:
-        with pytest.raises(ValueError):
+        with pytest.raises((ValueError, ConsolidationCoverageMissing)):
             reasoning.decode_replacement(selected, json.dumps(invalid))
     fence = chr(96) * 3
-    with pytest.raises(ValueError):
-        reasoning.decode_replacement(selected, fence + "json\n" + json.dumps(payload) + "\n" + fence)
+    assert reasoning.decode_replacement(
+        selected, fence + "json\n" + json.dumps(payload) + "\n" + fence) == replacement
     with pytest.raises(ConsolidationContextLimit):
         replace(selected, semantic_context_json=json.dumps({"oversized": "x" * MAX_CONSOLIDATION_CONTEXT_BYTES}))
 
@@ -133,7 +133,7 @@ async def test_format_correction_cannot_become_a_second_semantic_submission(tmp_
     proposal = {"decision": "NO", "description": "preservation cannot be established"}
     review = {"disposition": "repair_required", "feedback": "independent setup was lost", "evidence_refs": []}
     cases = [
-        ("fenced", fenced, json.dumps(payload), AUTHOR_PURPOSE, True, 2),
+        ("fenced", fenced, json.dumps(payload), AUTHOR_PURPOSE, True, 1),
         ("coverage", invalid_coverage, json.dumps(payload), AUTHOR_PURPOSE, True, 2),
         ("changed-source", invalid_coverage, json.dumps({**payload, "source": "different semantics"}), AUTHOR_PURPOSE, False, 2),
         ("decision", json.dumps({**proposal, "extra": True}), json.dumps({**proposal, "decision": "YES"}), PROPOSAL_PURPOSE, False, 2),

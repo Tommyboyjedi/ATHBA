@@ -16,7 +16,7 @@ from core.development.consolidation_material import (
     ConsolidationContext, ConsolidationMaterial, SelectedConsolidation, checkpoint_identity,
 )
 from core.development.consolidation_reasoning import (
-    ConsolidationContextLimit, ConsolidationReasoning, ConsolidationReplacement,
+    ConsolidationContextLimit, ConsolidationCoverageMissing, ConsolidationReasoning, ConsolidationReplacement,
 )
 from core.development.consolidation_submission import ConsolidationProtocolFailure, ConsolidationSubmission
 from core.development.consolidation_validation import ConsolidationValidation, ConsolidationValidationInput
@@ -105,7 +105,7 @@ class ConsolidationCandidate:
         if proposal is None:
             return _decline(journal, "Proposal declined consolidation", no_change=True)
         replacement = await submission.decode(("replacement", deps.reasoning.author_request(context, proposal)),
-            lambda text: deps.reasoning.decode_replacement(context, text))
+            lambda text: self._replacement((selected, journal), text))
         progress = journal.load()
         if progress is None:
             raise ValueError("consolidation checkpoint disappeared")
@@ -144,6 +144,26 @@ class ConsolidationCandidate:
             supersession=record.to_dict(), reduction_evidence=reduced.evidence_ref)
         journal.save(progress)
         return progress
+
+    def _replacement(self, value: tuple[SelectedConsolidation, ConsolidationJournal],
+                     text: str) -> ConsolidationReplacement:
+        selected, journal = value
+        context = selected.reasoning
+        try:
+            return self.dependencies.reasoning.decode_replacement(context, text)
+        except ConsolidationCoverageMissing as omission:
+            progress = journal.load()
+            if progress is None:
+                raise ValueError("consolidation checkpoint disappeared")
+            try:
+                self.dependencies.language.validate(ConsolidationTestSource(
+                    context.checkpoint_id, context.replacement_test_name, omission.replacement.source,
+                    selected.production_paths[0], progress.baseline_revision))
+            except (ValueError, SyntaxError) as error:
+                raise ConsolidationProtocolFailure(
+                    str(omission) + "; replacement syntax/static validation: " + str(error)
+                ) from error
+            raise
 
 
 def _freeze(journal: ConsolidationJournal, item: tuple[str, object]) -> None:

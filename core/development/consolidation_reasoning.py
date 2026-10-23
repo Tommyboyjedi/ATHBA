@@ -6,7 +6,7 @@ import json
 
 from core.development.consolidation_evidence import CoverageLink
 from core.development.microcycle_domain import ScenarioIntentResult
-from core.development.scenario_intent_review import ScenarioIntentResponseDecoder
+from core.development.scenario_intent_review import ScenarioIntentResponseDecoder, _normalise_json_object
 from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
 
 MAX_CONSOLIDATION_CONTEXT_BYTES = 32768
@@ -54,6 +54,15 @@ class ConsolidationProposal:
 class ConsolidationReplacement:
     source: str
     coverage: tuple[CoverageLink, ...]
+
+
+class ConsolidationCoverageMissing(Exception):
+    """A valid replacement envelope omits a known subset of required references."""
+
+    def __init__(self, replacement: ConsolidationReplacement, missing_refs: tuple[str, ...]):
+        self.replacement = replacement
+        self.missing_refs = missing_refs
+        super().__init__("coverage must map every selected authority exactly once")
 
 
 @dataclass(frozen=True)
@@ -114,7 +123,12 @@ class ConsolidationReasoning:
         if len(source) > MAX_CONSOLIDATION_SOURCE_CHARACTERS:
             raise ValueError("consolidation replacement source exceeds its bounded size")
         coverage = _coverage(context, payload["coverage"])
-        return ConsolidationReplacement(source, coverage)
+        replacement = ConsolidationReplacement(source, coverage)
+        present = {link.authority_ref for link in coverage}
+        missing = tuple(ref for ref in context.authority_refs if ref not in present)
+        if missing:
+            raise ConsolidationCoverageMissing(replacement, missing)
+        return replacement
 
     def review_request(self, context: ConsolidationReasoningContext, replacement: ConsolidationReplacement) -> ReasoningRequest:
         return _request(context, {
@@ -179,7 +193,7 @@ def _rules() -> list[str]:
 
 def _object(text: str) -> dict[str, object]:
     try:
-        value = json.loads(text, object_pairs_hook=_unique_pairs)
+        value = json.loads(_normalise_json_object(text), object_pairs_hook=_unique_pairs)
     except (json.JSONDecodeError, RecursionError) as error:
         raise ValueError("consolidation response must be exactly one valid JSON object: " + str(error)) from error
     if not isinstance(value, dict):
@@ -213,7 +227,7 @@ def _coverage(context: ConsolidationReasoningContext, value: object) -> tuple[Co
             raise ValueError("coverage targets a different replacement test")
         links.append(link)
     refs = [link.authority_ref for link in links]
-    if len(refs) != len(set(refs)) or set(refs) != set(context.authority_refs):
+    if len(refs) != len(set(refs)) or not set(refs).issubset(context.authority_refs):
         raise ValueError("coverage must map every selected authority exactly once")
     return tuple(links)
 

@@ -6,8 +6,15 @@ Relatedness only selects a bounded candidate; it never establishes equivalence.
 No partner, oversized context, unsupported syntax, NO, semantic rejection or failed
 unchanged-production execution leaves the accepted baseline unchanged and advances
 ordinary delivery. There is one proposal and one test submission, with at most one
-format-only correction per response. Corrections cannot rewrite recovered test
-source or change decisions. No Developer, Planner repair or alternate-partner
+corrective submission per response. One complete outer unlabelled/JSON Markdown
+fence is presentation only and consumes no correction. Other ambiguous wrappers,
+prose, duplicate keys and schema violations remain rejected. A valid coverage
+subset with source accepted by the configured authoring adapter may receive one
+metadata-only completion using the original selected evidence and exact missing
+references; source and existing entries are immutable.
+This shares the existing correction slot with format correction, not another retry.
+Raw replies and initial/corrective validation results remain journaled. Corrections
+cannot rewrite recovered test source or change decisions. No Developer, Planner repair or alternate-partner
 search is introduced.
 
 The dedicated reasoning inputs contain only selected obligations/source clauses,
