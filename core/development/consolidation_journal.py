@@ -65,6 +65,9 @@ class ConsolidationJournal:
         name, value = item
         write_json_atomically(self.root / name, value)
 
+    def has_call(self, phase: str) -> bool:
+        return (self.root / (phase + ".json")).exists()
+
     def recorded_call(self, item: tuple[str, ReasoningRequest]) -> ReasoningResult | None:
         phase, request = item
         path = self.root / (phase + ".json")

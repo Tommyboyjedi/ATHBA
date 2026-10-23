@@ -167,3 +167,67 @@ async def test_format_correction_cannot_become_a_second_semantic_submission(tmp_
         if calls == 2:
             repair_record = json.loads((journal.root / "phase-format-correction.json").read_text())
             assert repair_record["result"]["text"] == corrected
+
+
+@pytest.mark.asyncio
+async def test_readiness_wait_resumes_before_admission_but_transport_wait_cannot_replay(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from core.development.consolidation_journal import ConsolidationJournal
+    from core.development.consolidation_submission import ConsolidationSubmission
+    from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
+    from core.execution.rack_ai_runtime import RackAiResourceWait
+    from core.llm.contracts.provider import NormalizedResult
+
+    ready = Mock(side_effect=RackAiResourceWait("service is preparing"))
+    dispatch = Mock(return_value=NormalizedResult(text="accepted response", usage={}, raw={}))
+
+    def invoke(request):
+        ready("test-service")  # The provider also checks readiness before transport.
+        return dispatch(request)
+
+    provider = SimpleNamespace(
+        runtime_access=SimpleNamespace(reservation=SimpleNamespace(ready=ready), service="test-service"),
+        invoke=invoke,
+    )
+    gateway = ProviderReasoningGateway(provider, "test-model")
+    reasoning = ConsolidationReasoning(gateway)
+    journal = ConsolidationJournal(tmp_path, "readiness-checkpoint")
+    request = reasoning.proposal_request(context())
+    submission = ConsolidationSubmission(reasoning, journal)
+    with pytest.raises(RackAiResourceWait, match="preparing"):
+        await submission.submit(request, "proposal")
+    assert dispatch.call_count == 0
+    assert not (journal.root / "proposal.json").exists()
+    assert reasoning.invocation_count == 0
+
+    ready.side_effect = None
+    resumed = ConsolidationSubmission(
+        ConsolidationReasoning(gateway), ConsolidationJournal(tmp_path, "readiness-checkpoint"))
+    assert await resumed.submit(request, "proposal") == "accepted response"
+    assert dispatch.call_count == 1
+    assert json.loads((journal.root / "proposal.json").read_text())["status"] == "completed"
+
+    ready.side_effect = RackAiResourceWait("service no longer ready")
+    calls_before_cache = ready.call_count
+    assert await resumed.submit(request, "proposal") == "accepted response"
+    assert ready.call_count == calls_before_cache and dispatch.call_count == 1
+
+    ready.side_effect = None
+    dispatch.side_effect = RackAiResourceWait("scoped model transport: ReadTimeout")
+    with pytest.raises(RackAiResourceWait, match="transport"):
+        await resumed.submit(request, "review")
+    pending_path = journal.root / "review.json"
+    pending = pending_path.read_bytes()
+    assert json.loads(pending)["status"] == "pending"
+    assert dispatch.call_count == 2
+
+    ready.side_effect = RackAiResourceWait("service no longer ready")
+    calls_before_resume = ready.call_count
+    another_resume = ConsolidationSubmission(
+        ConsolidationReasoning(gateway), ConsolidationJournal(tmp_path, "readiness-checkpoint"))
+    with pytest.raises(ValueError, match="uncertain; submission will not replay"):
+        await another_resume.submit(request, "review")
+    assert pending_path.read_bytes() == pending
+    assert ready.call_count == calls_before_resume and dispatch.call_count == 2

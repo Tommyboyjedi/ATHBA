@@ -9,6 +9,7 @@ from core.development.consolidation_reasoning import (
     AUTHOR_PURPOSE, PROPOSAL_PURPOSE, REVIEW_PURPOSE, ConsolidationCorrection,
     ConsolidationReasoning, _object,
 )
+from core.execution.provider_reasoning_gateway import wait_for_reasoning
 from core.execution.reasoning_gateway import ReasoningRequest
 
 T = TypeVar("T")
@@ -24,6 +25,8 @@ class ConsolidationSubmission:
     journal: ConsolidationJournal
 
     async def submit(self, request: ReasoningRequest, phase: str) -> str:
+        if not self.journal.has_call(phase):
+            await wait_for_reasoning(self.reasoning.gateway)
         result = self.journal.recorded_call((phase, request))
         if result is None:
             result = await self.reasoning.invoke(request)
