@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from core.development.consolidation_evidence import ActiveAcceptedEvidenceResolver, ActiveEvidenceRequest
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
 from core.development.behavior_contract_domain import BehaviorContract
 from core.development.post_behavior_domain import PostBehaviorEntry, ValidationEvidence
@@ -64,14 +65,22 @@ class AcceptedBehavioralDeliveryLoader:
         states = [store.load(item.scenario_id) for item in feature.completed_behaviors]
         if any(item is None for item in states):
             raise ValueError("completed microcycle evidence is unavailable")
-        accepted = CompletedMicrocycleEvidenceCollector().collect(tuple(item for item in states if item is not None))
+        original = CompletedMicrocycleEvidenceCollector().collect(tuple(item for item in states if item is not None))
+        if len(original) != len(states):
+            raise ValueError("behavioral baseline does not preserve every completed origin")
+        accepted = original
+        if feature.evidence_consolidations:
+            accepted = list(ActiveAcceptedEvidenceResolver(Path(project.repository_root),
+                require_test_material(self.test_material)).resolve(ActiveEvidenceRequest(
+                    tuple(original), feature.evidence_consolidations, feature.canonical_development_base)))
         catalog = GitAcceptedTestCatalog(Path(project.repository_root), TestCatalogRevision(feature.canonical_development_base, require_test_material(self.test_material)))
-        if len(accepted) != len(states) or any(catalog.verified_source(item) is None for item in accepted):
+        if any(catalog.verified_source(item) is None for item in accepted):
             raise ValueError("behavioral baseline does not preserve every accepted test")
         git = PostBehaviorGit(Path(project.repository_root))
         git.snapshot(feature.behavioral_entry_revision)
         git.snapshot(feature.canonical_development_base)
-        digest = evidence_digest({"contract": contract.to_dict(), "gatekeeper": feature.gatekeeper_payload,
+        digest = evidence_digest({**({"evidence_consolidations": [record.to_dict() for record in feature.evidence_consolidations]} if feature.evidence_consolidations else {}),
+                                  "contract": contract.to_dict(), "gatekeeper": feature.gatekeeper_payload,
                                   "results": feature.final_reconciliation,
                                   "tests": [item.to_dict() for item in accepted]})
         entry = PostBehaviorEntry(project_id, feature.behavioral_entry_revision,

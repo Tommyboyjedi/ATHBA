@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from core.development.assurance_completion import CompletionAuthority, assess_completion
+from core.development.consolidation_material import ConsolidationContext
 from core.development.gatekeeper_behavioral_gap import return_gatekeeper_gap
 from core.development.behavior_replan_domain import BehavioralFailure
 from core.development.strict_tdd_feature_execution import canonical_test_node_for
@@ -75,6 +76,14 @@ async def advance(
         return await advance_replan(service, FeatureReplanContext(state, project))
     if state.pending_completed_behavior is not None:
         return _record_completed_behavior(service, state, project)
+    if service.consolidation is not None:
+        calls_before = service.consolidation.dependencies.reasoning.invocation_count
+        consolidated = await service.consolidation.advance(ConsolidationContext(state, project))
+        if consolidated is not None:
+            service.states.save(consolidated)
+            invoked = service.consolidation.dependencies.reasoning.invocation_count > calls_before
+            return _result_for(FeatureTransitionKind.CONSOLIDATION_CHECKED,
+                consolidated, project, reasoning=invoked)
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
     behavior = _next_behavior(state, contract)
     if state.current_scenario_id is not None and behavior is not None:
@@ -87,7 +96,8 @@ async def advance(
         try:
             restored = await service.reconciler.reconcile(FeatureReconciliationRequest(
                 contract, state.completed_behaviors, dict(state.gatekeeper_payload or {}),
-                str(state.canonical_development_base), state.reconciliation_progress))
+                str(state.canonical_development_base), state.reconciliation_progress,
+                evidence_consolidations=state.evidence_consolidations))
             if restored != state.final_reconciliation:
                 raise incompatible("completed reconciliation differs from durable progress")
         except ReconciliationFailure as error:
@@ -187,6 +197,7 @@ async def _reconcile(
             FeatureReconciliationRequest(
                 contract, state.completed_behaviors, dict(state.gatekeeper_payload or {}),
                 str(state.canonical_development_base), state.reconciliation_progress, checkpoint,
+                state.evidence_consolidations,
             )
         )
     except ReconciliationFailure as error:
@@ -248,10 +259,16 @@ async def _advance_scenario(
     behavior: BehaviorContractRequirement,
 ) -> FeatureAdvanceResult:
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
+    prior_nodes = tuple(canonical_test_node_for(contract, item.behavior_ref) for item in state.completed_behaviors)
+    if state.evidence_consolidations:
+        prior_nodes = service.reconciler.active_test_nodes(FeatureReconciliationRequest(
+            contract, state.completed_behaviors, dict(state.gatekeeper_payload or {}),
+            state.canonical_development_base or project.trusted_base_sha,
+            evidence_consolidations=state.evidence_consolidations))
     request = FeatureScenarioRequest(
         project, contract, behavior,
         state.canonical_development_base or project.trusted_base_sha,
-        tuple(canonical_test_node_for(contract, item.behavior_ref) for item in state.completed_behaviors),
+        prior_nodes,
         scenario_id=state.current_scenario_id,
     )
     advanced = await service.scenarios.advance(request)
@@ -417,7 +434,9 @@ def _result_for(
 
 
 def _retry_counts(state: StrictTddFeatureState, nested: TransitionFingerprint | None) -> tuple[int, ...]:
-    counts = (len(state.completed_behaviors),)
+    counts: tuple[int, ...] = (len(state.completed_behaviors),)
+    if state.consolidation_checks:
+        counts = (*counts, len(state.consolidation_checks))
     if nested is not None:
         return (*counts, *nested.retry_counts)
     if replan_pending(state):

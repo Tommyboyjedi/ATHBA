@@ -12,9 +12,10 @@ import time
 from typing import Callable, Iterator
 
 from core.development.production_reduction_domain import (
-    ProductionReductionRequest, ReductionDeadlineReached,
+    ConsolidatedReductionRequest, ReductionRequest, ReductionDeadlineReached,
 )
 from core.development.production_reduction_syntax import ReductionOpportunity, ReductionSource
+from core.development.production_reduction_scope import validate_contributions, scoped_source
 
 GIT_COMMAND_LIMIT = 15.0
 CLEANUP_LIMIT = 5.0
@@ -61,7 +62,7 @@ class BoundedReductionGit:
 class ReductionRepository:
     """Keeps test/config trees fixed and records descendants of the source candidate."""
 
-    def __init__(self, request: ProductionReductionRequest, deadline: float):
+    def __init__(self, request: ReductionRequest, deadline: float):
         self.request = request
         self.cleanup_deadline = deadline
         remaining = max(0.0, deadline - time.monotonic())
@@ -70,8 +71,13 @@ class ReductionRepository:
 
     def validate(self, revision: str) -> None:
         request = self.request
-        revisions = (request.baseline_revision, request.accepted_red_revision,
-                     request.developer_input_revision, request.candidate_revision, revision)
+        revisions: tuple[str, ...]
+        if isinstance(request, ConsolidatedReductionRequest):
+            revisions = (request.baseline_revision, request.tests_revision, revision)
+            validate_contributions(self.git, request)
+        else:
+            revisions = (request.baseline_revision, request.accepted_red_revision,
+                         request.developer_input_revision, request.candidate_revision, revision)
         for value in revisions:
             if self.git.run(("rev-parse", "--verify", f"{value}^{{commit}}")).decode().strip() != value:
                 raise ValueError("reduction requires exact immutable commit identities")
@@ -86,7 +92,8 @@ class ReductionRepository:
                 raise ValueError("unsafe reduction production path")
         if not allowed:
             raise ValueError("reduction requires explicit production paths")
-        fixed = self.git.entries(request.accepted_red_revision)
+        fixed_revision = request.tests_revision if isinstance(request, ConsolidatedReductionRequest) else request.accepted_red_revision
+        fixed = self.git.entries(fixed_revision)
         candidate = self.git.entries(revision)
         if {k: v for k, v in fixed.items() if k not in allowed} != {
                 k: v for k, v in candidate.items() if k not in allowed}:
@@ -98,9 +105,8 @@ class ReductionRepository:
                 raise ValueError("unsupported reduction production entry mode")
 
     def sources(self, revision: str) -> tuple[ReductionSource, ...]:
-        return tuple(ReductionSource(
-            path, self.git.source((self.request.baseline_revision, path)),
-            self.git.source((revision, path))) for path in self.request.production_paths)
+        return tuple(scoped_source(self.git, (self.request, path, revision))
+                     for path in self.request.production_paths)
 
     @contextmanager
     def trial(self, item: tuple[str, ReductionOpportunity],

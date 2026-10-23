@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Protocol
 
 from core.development.behavior_replan_domain import BehaviorReplanPolicy
+from core.development.completed_req_consolidation import CompletedReqConsolidation
 from core.development.scenario_drafting_domain import ScenarioDraftRunState
 
 from core.development.behavior_contract_coordinator import BehaviorContractPlanner, ContractPlanningRequest
@@ -21,6 +22,7 @@ from core.development.strict_tdd_feature_domain import (
     StrictTddFeatureStatus,
 )
 from core.development.strict_tdd_feature_store import StrictTddFeatureRepository
+from core.development.consolidation_evidence import SupersessionRecord
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,7 @@ class FeatureReconciliationRequest:
     canonical_revision: str
     reconciliation_progress: tuple[dict[str, object], ...] = ()
     checkpoint: Callable[[tuple[dict[str, object], ...]], None] | None = None
+    evidence_consolidations: tuple[SupersessionRecord, ...] = ()
 
 
 class FeatureScenarioExecutor(Protocol):
@@ -68,6 +71,8 @@ class FeatureScenarioExecutor(Protocol):
 
 
 class FeatureReconciler(Protocol):
+    def active_test_nodes(self, request: FeatureReconciliationRequest) -> tuple[str, ...]: ...
+
     async def reconcile(
         self, request: FeatureReconciliationRequest
     ) -> tuple[dict[str, object], ...]: ...
@@ -89,6 +94,7 @@ class StrictTddFeatureDependencies:
     reconciler: FeatureReconciler
     replan_policy: BehaviorReplanPolicy = field(default_factory=BehaviorReplanPolicy)
     prepare_project: Callable[[FeatureProjectPreparation], ProjectLoadDisposition] | None = None
+    consolidation: CompletedReqConsolidation | None = None
 
 
 class StrictTddFeatureApplicationService:
@@ -103,6 +109,7 @@ class StrictTddFeatureApplicationService:
         self.reconciler = dependencies.reconciler
         self.replan_policy = dependencies.replan_policy
         self.project_preparer = dependencies.prepare_project
+        self.consolidation = dependencies.consolidation
 
     def prepare_project(self, request: FeatureProjectPreparation) -> ProjectLoadDisposition:
         if self.project_preparer is None:

@@ -27,10 +27,14 @@ class AcceptedTestEvidence:
     test_path: str
     step_id: str
     requirement_refs: list[str]
-    red_revision: str
+    red_revision: str | None
     semantic_revision: str
     test_source: str | None = None
     final_revision_verified: bool = False
+    evidence_kind: str = "red_green"
+    supersession_id: str | None = None
+    superseded_tests: tuple[str, ...] = ()
+    covered_requirement_refs: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -42,6 +46,10 @@ class AcceptedTestEvidence:
             "semantic_revision": self.semantic_revision,
             "test_source": self.test_source,
             "final_revision_verified": self.final_revision_verified,
+            **({"evidence_kind": self.evidence_kind, "supersession_id": self.supersession_id,
+                "superseded_tests": list(self.superseded_tests),
+                "covered_requirement_refs": list(self.covered_requirement_refs)}
+               if self.evidence_kind != "red_green" else {}),
         }
 
 

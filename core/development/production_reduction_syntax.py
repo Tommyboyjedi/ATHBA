@@ -2,6 +2,14 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
+from core.development.required_public_signature import RequiredPublicSignature
+
+
+@dataclass(frozen=True)
+class ReductionContributionSource:
+    before: bytes | None
+    after: bytes | None
+    selected: bool
 
 
 @dataclass(frozen=True)
@@ -9,6 +17,8 @@ class ReductionSource:
     path: str
     baseline: bytes | None
     candidate: bytes | None
+    contributions: tuple[ReductionContributionSource, ...] = ()
+    protected_identifiers: tuple[RequiredPublicSignature, ...] = ()
 
 
 @dataclass(frozen=True)

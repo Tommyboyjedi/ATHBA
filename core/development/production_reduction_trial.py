@@ -11,9 +11,9 @@ from core.development.deterministic_regression import (
 )
 from core.development.microcycle_domain import RegressionCommandReport, RegressionState
 from core.development.production_reduction_acceptance import (
-    FrontierReductionVerifier, ReductionFrontierCheckRequest, verify_reduction_acceptance,
+    ReductionVerifier, ReductionFrontierCheckRequest, verify_reduction_acceptance,
 )
-from core.development.production_reduction_domain import ProductionReductionRequest
+from core.development.production_reduction_domain import ReductionRequest
 from core.development.production_reduction_git import BoundedReductionGit, ReductionRepository
 from core.development.production_reduction_journal import ReductionJournal
 from core.development.production_reduction_syntax import ReductionOpportunity
@@ -21,7 +21,7 @@ from core.development.production_reduction_syntax import ReductionOpportunity
 
 @dataclass(frozen=True)
 class ReductionTrialRequest:
-    authority: ProductionReductionRequest
+    authority: ReductionRequest
     best_revision: str
     opportunity: ReductionOpportunity
     number: int
@@ -40,7 +40,7 @@ class ReductionTrialDependencies:
     repository: ReductionRepository
     journal: ReductionJournal
     regression: DeterministicRegressionService
-    verifier: FrontierReductionVerifier
+    verifier: ReductionVerifier
 
 
 class ReductionTrial:

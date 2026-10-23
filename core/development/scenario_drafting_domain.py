@@ -522,3 +522,9 @@ class ScenarioDraftOutcome:
     @property
     def approved(self) -> bool:
         return self.state.approved_microcycle is not None
+
+
+@dataclass(frozen=True)
+class ScenarioAuthoringIdentity:
+    language_id: str
+    test_framework: str

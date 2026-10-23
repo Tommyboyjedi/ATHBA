@@ -2,7 +2,7 @@
 from __future__ import annotations
 import ast
 import sys
-from core.development.test_material import TestModuleMergeRequest, TestSourceRequest
+from core.development.test_material import TestModuleMergeRequest, TestModuleReplacementRequest, TestSourceRequest
 from core.development.python_pytest_adapter import PythonPytestModuleMerger, PythonPytestModuleMergeRequest
 
 
@@ -14,6 +14,10 @@ class PythonTestMaterial:
     def merge(self, request: TestModuleMergeRequest) -> str:
         return PythonPytestModuleMerger().merge(PythonPytestModuleMergeRequest(
             request.trusted_source, request.scenario_source, request.canonical_test_identity))
+
+    def replace(self, request: TestModuleReplacementRequest) -> str:
+        from core.development.python_test_replacement import PythonTestModuleReplacement
+        return PythonTestModuleReplacement().replace(request)
 
     def extract(self, request: TestSourceRequest) -> str | None:
         function = request.identity.partition("::")[2]

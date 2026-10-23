@@ -60,6 +60,7 @@ class FeatureTransitionKind(str, Enum):
     BEHAVIOR_SELECTED = "behavior_selected"
     SCENARIO_ADVANCED = "scenario_advanced"
     BEHAVIOR_RECORDED = "behavior_recorded"
+    CONSOLIDATION_CHECKED = "completed_evidence_consolidation_checked"
     BEHAVIOR_REPLAN_REQUIRED = "behavior_replan_required"
     BEHAVIOR_SPLIT_RECEIVED = "behavior_split_received"
     BEHAVIOR_SPLIT = "behavior_split"
@@ -97,6 +98,7 @@ class StrictTddTransitionPath:
             FeatureTransitionKind.GATEKEEPER_PERSISTED,
             FeatureTransitionKind.BEHAVIOR_SELECTED,
             FeatureTransitionKind.BEHAVIOR_RECORDED,
+            FeatureTransitionKind.CONSOLIDATION_CHECKED,
             FeatureTransitionKind.RECONCILIATION_COMPLETED,
             FeatureTransitionKind.FEATURE_COMPLETED,
         } and (self.scenario_kind is not None or self.microcycle_kind is not None):

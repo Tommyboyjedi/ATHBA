@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.development.microcycle_domain import MaterialisedTestArtifact, RegressionState, ScenarioFragment
+from core.development.required_public_signature import RequiredPublicSignature
 
 
 @dataclass(frozen=True)
@@ -74,3 +75,48 @@ class ReductionCheckpoint:
 
 class ReductionDeadlineReached(Exception):
     """An optional experiment cannot start or finish within its remaining bound."""
+
+
+@dataclass(frozen=True)
+class ContributionWindow:
+    before_revision: str
+    after_revision: str
+    selected: bool
+
+
+@dataclass(frozen=True)
+class ContributionScope:
+    windows: tuple[ContributionWindow, ...]
+    protected_identifiers: tuple[RequiredPublicSignature, ...] = ()
+
+
+@dataclass(frozen=True)
+class ConsolidatedReductionRequest:
+    """Already-approved completion authority, without a RED or Developer attempt."""
+    repository_root: Path
+    checkpoint_id: str
+    baseline_revision: str
+    tests_revision: str
+    production_paths: tuple[str, ...]
+    test_authorities: tuple[ReductionFrontierAuthority, ...]
+    regression_command: tuple[str, ...]
+    prior_completed_test_nodes: tuple[str, ...]
+    adapter_id: str
+    initial_regression: RegressionState
+    required_artifacts: tuple[str, ...]
+    scope: ContributionScope
+    include_accepted_suite: bool = True
+    cancelled: Callable[[], bool] | None = field(default=None, compare=False, repr=False)
+
+    @property
+    def candidate_revision(self) -> str:
+        return self.tests_revision
+
+    @property
+    def current_frontier_test(self) -> str:
+        if not self.test_authorities:
+            raise ValueError("completion reduction requires approved test authority")
+        return self.test_authorities[0].artifact.canonical_test_identity
+
+
+ReductionRequest = ProductionReductionRequest | ConsolidatedReductionRequest

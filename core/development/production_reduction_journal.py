@@ -13,11 +13,11 @@ from typing import Any, Iterator
 from core.atomic_json_file import read_json_file, write_json_atomically
 from core.development.microcycle_domain import RegressionState
 from core.development.production_reduction_domain import (
-    ProductionReductionRequest, ReductionCheckpoint, ReductionPolicy,
+    ReductionRequest, ReductionCheckpoint, ReductionPolicy,
 )
 
 
-def authority(request: ProductionReductionRequest) -> dict[str, Any]:
+def authority(request: ReductionRequest) -> dict[str, Any]:
     payload = asdict(request)
     payload.pop("cancelled")
     payload["repository_root"] = str(request.repository_root.resolve())
@@ -27,7 +27,7 @@ def authority(request: ProductionReductionRequest) -> dict[str, Any]:
 class ReductionJournal:
     """Locks and serializes only one frozen B/R/I/C and acceptance identity."""
 
-    def __init__(self, root: Path, request: ProductionReductionRequest):
+    def __init__(self, root: Path, request: ReductionRequest):
         self.authority = authority(request)
         encoded = json.dumps(self.authority, sort_keys=True).encode()
         self.identity = hashlib.sha256(encoded).hexdigest()

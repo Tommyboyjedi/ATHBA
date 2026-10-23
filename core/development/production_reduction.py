@@ -7,9 +7,9 @@ import hashlib
 from pathlib import Path
 
 from core.development.deterministic_regression import REGRESSION_CLEAR, DeterministicRegressionService
-from core.development.production_reduction_acceptance import FrontierReductionVerifier
+from core.development.production_reduction_acceptance import ReductionVerifier
 from core.development.production_reduction_domain import (
-    ProductionReductionRequest, ProductionReductionResult, ReductionCheckpoint,
+    ConsolidatedReductionRequest, ProductionReductionRequest, ReductionRequest, ProductionReductionResult, ReductionCheckpoint,
     ReductionDeadlineReached, ReductionPolicy,
 )
 from core.development.production_reduction_git import ReductionRepository, opportunity_digest
@@ -25,7 +25,7 @@ class ProductionReductionDependencies:
     evidence_root: Path
     adapter: ProductionReductionAdapter
     regression: DeterministicRegressionService
-    verifier: FrontierReductionVerifier
+    verifier: ReductionVerifier
     policy: ReductionPolicy = ReductionPolicy()
 
 
@@ -39,16 +39,21 @@ class ProductionChangeReducer:
     def __init__(self, dependencies: ProductionReductionDependencies):
         self.dependencies = dependencies
 
-    def reduce(self, request: ProductionReductionRequest) -> ProductionReductionResult:
+    def reduce(self, request: ReductionRequest) -> ProductionReductionResult:
         deps = self.dependencies
         if request.initial_regression.status != REGRESSION_CLEAR:
             raise ValueError("only an independently verified GREEN candidate can be reduced")
         if request.initial_regression.command != request.regression_command:
             raise ValueError("reduction cannot change acceptance commands")
-        if request.frontier_authority.artifact.adapter_id != request.adapter_id:
-            raise ValueError("reduction frontier language authority changed")
-        if request.frontier_authority.artifact.canonical_test_identity != request.current_frontier_test:
-            raise ValueError("reduction frontier test authority changed")
+        authorities = request.test_authorities if isinstance(request, ConsolidatedReductionRequest) else (request.frontier_authority,)
+        if not authorities:
+            raise ValueError("reduction requires accepted immutable test authority")
+        for item in authorities:
+            if item.artifact.adapter_id != request.adapter_id:
+                raise ValueError("reduction frontier language authority changed")
+        if isinstance(request, ProductionReductionRequest):
+            if request.frontier_authority.artifact.canonical_test_identity != request.current_frontier_test:
+                raise ValueError("reduction frontier test authority changed")
         journal = ReductionJournal(deps.evidence_root, request)
         with journal.locked(), journal.measured(deps.policy):
             checkpoint = journal.load(deps.policy)
@@ -80,7 +85,7 @@ class ProductionChangeReducer:
 
     def _search(
         self,
-        value: tuple[ProductionReductionRequest, ReductionCheckpoint],
+        value: tuple[ReductionRequest, ReductionCheckpoint],
         effects: tuple[ReductionJournal, ReductionRepository, ReductionTrial],
     ) -> ReductionCheckpoint:
         request, checkpoint = value
