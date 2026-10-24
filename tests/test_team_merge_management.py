@@ -203,6 +203,67 @@ def test_conflict_and_explicit_resolution_use_the_same_combined_acceptance_pipel
     assert any(item["status"] == MergeStatus.CONFLICT for item in history)
 
 
+def test_pre_publication_intent_recovers_same_approved_candidate(tmp_path, monkeypatch):
+    from core.delivery_management.merge_service import CandidateEvaluation, MergeApprovals
+    from core.delivery_management.publication import CheckedPublication, checkout_matches
+
+    fixture = managed(tmp_path)
+    fixture.delivery(ControlledObservation("first"))
+    operation = fixture.prepare("first")
+    assert operation.status == MergeStatus.VALIDATED
+    identity = RecordIdentity("application", operation.id)
+    approval = fixture.service.approve(identity, "controlled-manager")
+    project = fixture.environment.repo.load("application")
+    catalog = fixture.store.catalog("application")
+    delivery_key = RecordIdentity("application", "first")
+    delivery = fixture.store.delivery(delivery_key)
+    files = {name: (fixture.repository / name).read_bytes()
+             for name in git(GitCommand(fixture.repository, ("ls-files",))).splitlines()}
+
+    def interrupt_before_git(self, request):
+        assert fixture.store.merge(identity).publication_intent
+        raise OSError("controlled interruption before Git publication")
+
+    with monkeypatch.context() as context:
+        context.setattr(CheckedPublication, "promote", interrupt_before_git)
+        with pytest.raises(OSError, match="before Git publication"):
+            fixture.service.promote(identity, approval)
+
+    pending = fixture.store.merge(identity)
+    assert pending.publication_intent and pending.status == MergeStatus.APPROVED
+    assert pending.candidate_revision == operation.candidate_revision
+    assert pending.approval == approval
+    assert git(GitCommand(fixture.repository, ("rev-parse", "HEAD"))) == operation.main_revision
+    assert checkout_matches(fixture.repository, operation.main_revision)
+    assert files == {name: (fixture.repository / name).read_bytes() for name in files}
+    assert fixture.environment.repo.load("application") == project
+    assert fixture.store.catalog("application") == catalog
+    assert fixture.store.delivery(delivery_key) == delivery
+
+    def forbidden_replay(self, *args):
+        pytest.fail("recovery must not regenerate a candidate or obtain another approval")
+
+    with monkeypatch.context() as context:
+        context.setattr(CandidateEvaluation, "evaluate", forbidden_replay)
+        context.setattr(MergeApprovals, "approve", forbidden_replay)
+        recovered = fixture.service.recover(identity)
+        assert recovered.status == MergeStatus.PUBLISHED
+        assert recovered.id == operation.id
+        assert recovered.candidate_revision == operation.candidate_revision
+        assert recovered.approval == approval
+        assert fixture.service.recover(identity) == recovered
+        assert fixture.service.promote(identity, approval) == recovered
+
+    assert checkout_matches(fixture.repository, operation.candidate_revision)
+    assert git(GitCommand(fixture.repository, ("rev-parse", "HEAD"))) == operation.candidate_revision
+    assert fixture.environment.repo.load("application").trusted_base_sha == operation.candidate_revision
+    published_catalog = fixture.store.catalog("application")
+    assert published_catalog["revision"] == operation.candidate_revision
+    assert published_catalog["authority_files"] == list(operation.authority_files)
+    assert published_catalog["integrated_deliveries"] == ["first"]
+    assert fixture.store.delivery(delivery_key).integration_records == (operation.id,)
+
+
 def test_interrupted_publication_recovers_exact_candidate_without_overwriting_newer_main(tmp_path, monkeypatch):
     fixture = managed(tmp_path)
     fixture.delivery(ControlledObservation("first"))

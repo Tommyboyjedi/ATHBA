@@ -314,7 +314,7 @@ class MergeManagement:
                     return operation
                 context = MergeAuthority(deps).load(operation)
                 if operation.publication_intent:
-                    return MergePublication(deps).recover(context)
+                    return MergePublication(deps).recover(context, self._recovery_authority)
                 try:
                     MergeApprovals(deps).current(context)
                 except ValueError as error:
@@ -332,7 +332,14 @@ class MergeManagement:
             with deps.store.locked((identity.project_id, "worker-" + operation.delivery_id)):
                 if operation.status == MergeStatus.PUBLISHED:
                     return operation
-                return MergePublication(deps).recover(MergeAuthority(deps).load(operation))
+                return MergePublication(deps).recover(
+                    MergeAuthority(deps).load(operation), self._recovery_authority)
+
+    def _recovery_authority(self, context: MergeAuthorityContext) -> None:
+        if (context.operation.kind == MergeKind.SYNCHRONIZATION
+                and context.delivery.phase not in PUBLIC_SYNCHRONIZATION_PHASES):
+            raise ValueError("publication recovery requires a publicly quiescent delivery")
+        MergeApprovals(self.dependencies).current(context)
 
     def validate_resolution(self, identity: RecordIdentity, revision: str) -> MergeRecord:
         return ResolutionManagement(self.dependencies).validate(identity, revision)

@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from pathlib import Path
+from typing import Callable
 
 from core.atomic_json_file import read_json_file, write_json_atomically
 from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
@@ -12,7 +13,7 @@ from core.delivery_management.domain import (
     DeliveryPhase, ManagementApproval, MergeKind, MergeRecord, MergeStatus, TeamDelivery,
 )
 from core.delivery_management.evidence import AcceptedContribution
-from core.delivery_management.git_workspaces import require_owned
+from core.delivery_management.git_workspaces import GitCommand, git, require_owned
 from core.delivery_management.publication import CheckedPublication, PromotionRequest
 from core.delivery_management.store import ManagementStore, RecordIdentity
 from core.delivery_management.validation import IntegrationValidator
@@ -130,11 +131,18 @@ class MergePublication:
         CheckedPublication().promote(promotion)
         return self._finish(replace(context, operation=intent))
 
-    def recover(self, context: MergeAuthorityContext) -> MergeRecord:
+    def recover(self, context: MergeAuthorityContext,
+                revalidate: Callable[[MergeAuthorityContext], None]) -> MergeRecord:
         if not context.operation.publication_intent or context.operation.approval is None:
             raise ValueError("merge publication has no durable exact approval/intent")
         self._approval(PublicationInput(context, context.operation.approval))
-        CheckedPublication().recover(self._promotion(context))
+        promotion = self._promotion(context)
+        current = git(GitCommand(promotion.canonical_root, ("rev-parse", promotion.target_ref)))
+        if current == promotion.expected_revision:
+            revalidate(context)
+            CheckedPublication().promote(promotion)
+        else:
+            CheckedPublication().recover(promotion)
         return self._finish(context)
 
     def _approval(self, request: PublicationInput) -> None:
