@@ -110,12 +110,12 @@ class ProjectSetupWorkspace:
         seed = checkpoint.seed
         _write_files(context, plan)
         progress = replace(checkpoint.progress, files_written=True)
-        SetupProgressVerifier(self.authority.run).verify(progress)
+        SetupProgressVerifier(self.authority.run, request.profile.generated_paths).verify(progress)
         checkpoint.journal.save(progress)
         commands = _smoke_commands(context, self.runner)
         revision = progress.scaffold_revision or self.authority.scaffold_revision(context, seed)
         progress = replace(progress, scaffold_revision=revision)
-        SetupProgressVerifier(self.authority.run).verify(progress)
+        SetupProgressVerifier(self.authority.run, request.profile.generated_paths).verify(progress)
         checkpoint.journal.save(progress)
         project = DevelopmentProject(
             project_id=request.decision.project_id,
@@ -144,7 +144,7 @@ class ProjectSetupWorkspace:
         journal = SetupProgressJournal(context.paths.project_root)
         if journal.load() is not None:
             raise ValueError("setup already has progress authority; use normal preparation")
-        verifier = SetupProgressVerifier(self.authority.run)
+        verifier = SetupProgressVerifier(self.authority.run, request.preparation.profile.generated_paths)
         record = HistoricalSetupRecovery(verifier).verify(
             HistoricalSetupContext(work, request.approval), request.evidence)
         journal.save(record)
@@ -284,7 +284,7 @@ def _owned_seed(context: _WorkspaceContext, authority: _WorkspaceGitAuthority) -
     progress = journal.load()
     seed = authority.seed(context) if progress is None else None
     work = _setup_work(context, authority)
-    verifier = SetupProgressVerifier(authority.run)
+    verifier = SetupProgressVerifier(authority.run, context.request.profile.generated_paths)
     if progress is None:
         _validate_files(context, _file_plan(context.request))
         progress = journal.start(work)

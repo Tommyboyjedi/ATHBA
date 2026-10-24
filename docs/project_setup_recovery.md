@@ -31,3 +31,18 @@ execution or delivery dispatch. An interruption during Git initialization before
 a seed checkpoint remains ambiguous and requires separate evidence review.
 An unchanged successful smoke check does not establish pytest/configuration
 isolation; that question remains separate.
+
+Approved profile generated-output declarations permit only their literal,
+confined root-relative locations and descendants as operational build material.
+Subtrees are still inspected for symlinks and non-regular files. Overlap with
+protected source, scaffold, tests or tracked baseline material is refused;
+source-content, index, Git identity and ref checks remain unchanged. Generated
+output is not accepted source, proof of a successful build, or eligible for the
+trusted scaffold commit. Smoke checks must still succeed.
+
+No progress-record schema migration is needed: the existing stored hash covers
+the entire resolved profile, including these declarations. Resume requires the
+same profile hash; no output authority is inferred from ignored or existing files.
+Standalone verification without an approved profile remains restrictive. Existing
+READY records need no rewrite, and this correction does not migrate ambiguous
+or mismatching records.

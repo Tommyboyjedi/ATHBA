@@ -173,3 +173,90 @@ async def test_prejournal_failed_setup_requires_exact_evidence_before_recovering
     assert progress["seed_revision"] == seed
     assert progress["provenance"] == [[str(reference.path), reference.sha256]
                                      for reference in (failed, run, snapshot)]
+
+
+@pytest.mark.asyncio
+async def test_approved_generated_output_survives_failed_smoke_and_retry_without_entering_scaffold(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from core.project_setup.profile_domain import ProfileKind, ProfileSelection, ToolKind, ToolSelection
+    from core.project_setup.profiles import SetupProfileResolver
+    from core.project_setup.workspace import WorkspacePreparationError
+    from tests.test_approved_project_setup import reapprove
+
+    managed = tmp_path / "managed"
+    managed.mkdir()
+    for name in ("rustc", "cargo"):
+        (managed / name).write_bytes(b"controlled managed-tool fixture")
+    selection = ProfileSelection(ProfileKind.RUST, ("rust",), (
+        ToolSelection(ToolKind.RUSTC, str(managed / "rustc"), "1.98.0"),
+        ToolSelection(ToolKind.CARGO, str(managed / "cargo"), "1.98.0"),
+    ), "library", framework="cargo")
+    initial = approved()
+    behaviors = tuple(replace(item, production_paths=("src/" + item.id + ".rs",),
+                              test_paths=("tests/" + item.id + ".rs",))
+                      for item in initial.decision.behaviors)
+    handoff = reapprove(initial, replace(initial.decision, profile=selection, behaviors=behaviors))
+    _, _, app = environment(tmp_path, handoff)
+    profile = SetupProfileResolver().resolve(selection)
+    root = tmp_path / "projects" / handoff.decision.project_id
+    repository = root / "repository"
+    progress_path = root / "setup-progress.json"
+    output = repository / profile.generated_paths[0] / "debug" / "deps" / "application.rlib"
+    probe_versions = {item.argv: item.tool.version for item in profile.tools}
+    runner = app.setup.dependencies.runner
+    real_run = runner.run
+    init_snapshots, smoke_calls = [], []
+    fail_smoke = True
+
+    def controlled_run(request):
+        if request.argv[:2] == ("git", "init"):
+            init_snapshots.append(json.loads(progress_path.read_text()))
+        if request.argv in probe_versions:
+            return CommandResult(request.argv, 0, probe_versions[request.argv] + "\n", "")
+        if request.argv in profile.smoke_commands:
+            smoke_calls.append(request.argv)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"representative generated build output")
+            return CommandResult(request.argv, 1 if fail_smoke else 0,
+                                 "controlled build failed" if fail_smoke else "controlled check passed", "")
+        return real_run(request)
+
+    monkeypatch.setattr(runner, "run", controlled_run)
+    with pytest.raises(WorkspacePreparationError, match="smoke"):
+        await app.setup.prepare(handoff)
+    failed = app.records.load(handoff.decision.project_id)
+    assert failed.status == SetupStatus.FAILED and not failed.environment_verified
+    assert not (root / "project.json").exists() and output.is_file()
+    assert len(init_snapshots) == 1 and init_snapshots[0]["seed_revision"] is None
+    progress = json.loads(progress_path.read_text())
+    seed = git(repository, "rev-parse", "HEAD")
+    assert progress["seed_revision"] == seed
+    protected = {name: (repository / name).read_bytes() for name in progress["expected_files"]}
+    assert set(init_snapshots[0]["expected_files"]) == set(protected)
+    git_identity = (repository / ".git").stat().st_dev, (repository / ".git").stat().st_ino
+    generated = output.read_bytes()
+
+    # Declared output must not conceal a protected source/scaffold change.
+    manifest = repository / "Cargo.toml"
+    manifest.write_bytes(protected["Cargo.toml"] + b"\n# unrelated edit\n")
+    fail_smoke = False
+    with pytest.raises(ValueError):
+        await app.setup.prepare(handoff)
+    assert smoke_calls == [profile.build_command] and output.read_bytes() == generated
+    assert git(repository, "rev-parse", "HEAD") == seed and not (root / "project.json").exists()
+    manifest.write_bytes(protected["Cargo.toml"])
+
+    ready = await app.setup.prepare(handoff)
+    assert ready.status == SetupStatus.READY and ready.environment_verified
+    assert Path(ready.repository_root) == repository
+    assert git_identity == ((repository / ".git").stat().st_dev, (repository / ".git").stat().st_ino)
+    assert git(repository, "rev-parse", "HEAD~1") == seed and len(init_snapshots) == 1
+    assert smoke_calls == [profile.build_command, *profile.smoke_commands]
+    assert all(command.returncode == 0 for command in ready.commands)
+    assert output.read_bytes() == generated
+    assert protected == {name: (repository / name).read_bytes() for name in protected}
+    tracked = set(git(repository, "ls-files").splitlines())
+    scaffold = set(git(repository, "ls-tree", "-r", "--name-only", ready.scaffold_revision).splitlines())
+    assert tracked == scaffold == set(protected)
+    assert not any(name == profile.generated_paths[0] or name.startswith(profile.generated_paths[0] + "/")
+                   for name in tracked | scaffold)

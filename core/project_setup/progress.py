@@ -9,6 +9,7 @@ import stat
 from typing import Callable
 
 from core.atomic_json_file import read_json_file, write_json_atomically
+from core.project_setup.architecture import validate_scope
 
 
 PROGRESS_FILE = "setup-progress.json"
@@ -92,8 +93,9 @@ class SetupProgressJournal:
 class SetupProgressVerifier:
     """Verify only the exact seed, scaffold and file effects recorded by setup."""
 
-    def __init__(self, run: Callable[..., str]):
+    def __init__(self, run: Callable[..., str], generated_paths: tuple[str, ...] = ()):
         self.run = run
+        self.generated_paths = generated_paths
 
     def snapshot(self, record: SetupProgress) -> SetupProgress:
         root = Path(record.work.repository_root)
@@ -135,7 +137,7 @@ class SetupProgressVerifier:
         if record.references.get(record.canonical_ref) != record.seed_revision:
             raise ValueError("setup seed reference snapshot is inconsistent")
         baseline = _tree(self.run(root, "ls-tree", "-r", "-z", record.seed_revision))
-        authority = _FileAuthority(record, baseline, self.run)
+        authority = _FileAuthority(record, baseline, self.run, self.generated_paths)
         _verify_files(authority)
         _verify_index(authority)
         _verify_scaffold(authority)
@@ -204,25 +206,50 @@ class _FileAuthority:
     record: SetupProgress
     baseline: dict[str, tuple[str, str]]
     run: Callable[..., str]
+    generated_paths: tuple[str, ...] = ()
+
+
+def _generated_paths(authority: _FileAuthority) -> tuple[Path, ...]:
+    root = Path(authority.record.work.repository_root)
+    protected = {Path(name) for name in _allowed_paths(authority.record, authority.baseline)
+                 | set(authority.record.work.test_paths)}
+    generated = []
+    for name in authority.generated_paths:
+        validate_scope(name)
+        output = Path(name)
+        if not (root / output).resolve().is_relative_to(root):
+            raise ValueError("generated setup output escaped its owned root")
+        if any(output == path or output in path.parents or path in output.parents for path in protected):
+            raise ValueError("generated setup output overlaps protected source, scaffold, test or baseline")
+        generated.append(output)
+    return tuple(generated)
+
+
+def _is_generated(relative: Path, generated: tuple[Path, ...]) -> bool:
+    return ".git" not in relative.parts and any(
+        relative == output or output in relative.parents for output in generated)
 
 
 def _verify_files(authority: _FileAuthority) -> None:
     record, baseline, run = authority.record, authority.baseline, authority.run
     root = Path(record.work.repository_root)
     allowed = _allowed_paths(record, baseline)
-    directories = {str(parent) for name in allowed | set(record.work.test_paths)
+    generated = _generated_paths(authority)
+    directories = {str(parent) for name in allowed | set(record.work.test_paths) | {str(path) for path in generated}
                    for parent in Path(name).parents if str(parent) != "."}
     for parent, child_dirs, files in os.walk(root, followlinks=False):
         if Path(parent) == root:
             child_dirs[:] = [name for name in child_dirs if name != ".git"]
         for name in child_dirs:
             path = Path(parent) / name
-            if path.is_symlink() or path.relative_to(root).as_posix() not in directories:
+            directory = path.relative_to(root)
+            if path.is_symlink() or (directory.as_posix() not in directories and not _is_generated(directory, generated)):
                 raise ValueError("setup contains an unrecorded directory or symlink")
         for name in files:
             path = Path(parent) / name
             relative = path.relative_to(root).as_posix()
-            if relative not in allowed or not stat.S_ISREG(path.lstat().st_mode):
+            if not stat.S_ISREG(path.lstat().st_mode) or (
+                    relative not in allowed and not _is_generated(Path(relative), generated)):
                 raise ValueError("setup contains an unrecorded or non-regular file")
     for relative in allowed:
         path = root / relative
