@@ -11,6 +11,7 @@ from core.development.post_behavior_domain import PostBehaviorEntry, ValidationE
 from core.development.post_behavior_git import PostBehaviorGit
 from core.development.test_material import TestMaterialAdapter, require_test_material
 from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.reconciliation_progress import evidence_digest
 from core.development.specification_domain import SpecificationGatekeeperRunState
 from core.development.assurance_completion import CompletionAuthority, assess_completion
@@ -34,12 +35,16 @@ class AcceptedBehavioralDelivery:
 class AcceptedBehavioralDeliveryLoader:
     state_root: Path
     test_material: TestMaterialAdapter | None = None
+    prepared_environment: PreparedProjectEnvironment | None = None
 
     def load(self, project_id: str) -> AcceptedBehavioralDelivery:
         feature = StrictTddFeatureRepository(self.state_root / "features").load(project_id)
-        project = ProjectEnvironmentService(self.state_root / "projects").repo.load(project_id)
+        environment = self.prepared_environment or ProjectEnvironmentService(self.state_root / "projects")
+        project = environment.repo.load(project_id)
         if feature is None or project is None:
             raise ValueError("existing behavioral feature and project state required")
+        if feature.canonical_ref != f"refs/heads/{project.default_ref}":
+            raise ValueError("post-behavior delivery branch requires explicit compatibility review")
         if feature.status not in {StrictTddFeatureStatus.COMPLETED.value, StrictTddFeatureStatus.COMPLETED_WITH_UNPROVEN_ASSURANCE.value}:
             raise ValueError("post-behavior requires completed behavioral delivery")
         contract = BehaviorContract.from_dict(dict(feature.contract_payload or {}))

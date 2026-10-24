@@ -7,7 +7,7 @@ from pathlib import Path
 from core.development.consolidation_evidence import CaseSnapshot
 from core.development.microcycle_revision_git import MicrocycleGitClient, RevisionResolveRequest
 from core.development.post_behavior_git import PostBehaviorGit
-from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
 from core.development.test_material import TestMaterialAdapter, TestModuleReplacementRequest
 
@@ -79,7 +79,7 @@ class ConsolidationGit:
         if git.command(("status", "--porcelain", "--untracked-files=all")).strip():
             raise ValueError("consolidation acceptance mutated immutable candidate material")
 
-    def publish(self, request: ConsolidationPromotion, environment: ProjectEnvironmentService) -> None:
+    def publish(self, request: ConsolidationPromotion, environment: PreparedProjectEnvironment) -> None:
         project = environment.repo.load(request.project_id)
         if project is None or project.trusted_base_sha not in {request.baseline, request.revision}:
             raise ValueError("consolidation project authority diverged")

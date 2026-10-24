@@ -1,4 +1,4 @@
-"""Preflight an explicitly test-scoped approved project; live BDE remains blocked."""
+"""Preflight approved project setup; explicitly opt in to standard branch delivery."""
 from __future__ import annotations
 
 import argparse
@@ -19,7 +19,7 @@ from core.project_setup.composition import ProjectSetupCompositionRequest, compo
 from core.project_setup.delivery import DeliveryRequest
 from core.project_setup.fixture import FixtureBinding, load_test_architecture
 from core.project_setup.records import SetupStatus
-from core.project_setup.service import SHARED_BDE_BLOCKER
+from core.delivery_management.domain import DeliveryPhase
 
 BACKEND_LOOKUP_TIMEOUT_SECONDS = 10.0
 REPORT_SCHEMA = "athba/approved-project-campaign/v1"
@@ -45,9 +45,9 @@ def _arguments() -> CampaignArguments:
     parser.add_argument("--project-id", required=True, help="Existing Mongo-backed ATHBA test project ID.")
     parser.add_argument("--state-root", type=Path, required=True)
     parser.add_argument("--evidence-root", type=Path, required=True)
-    parser.add_argument("--prepare", action="store_true", help="Prepare only the approved scaffold/environment.")
+    parser.add_argument("--prepare", action="store_true", help="Prepare the approved environment and dependency-ready behavior branches; no models.")
     parser.add_argument("--enable-live", action="store_true",
-                        help="Request the normal handoff; currently reports the frozen BDE capability blocker.")
+                        help="Explicitly dispatch dependency-ready behavior branches through standard BDE; never integrate main.")
     values = parser.parse_args()
     return CampaignArguments(values.project_id, values.state_root.resolve(),
                              values.evidence_root.resolve(), values.prepare, values.enable_live)
@@ -94,7 +94,10 @@ async def execute(arguments: CampaignArguments) -> int:
         "model_interactions": 0,
         "bde_execution_attempted": False,
         "bde_shared_handoff_supported": False,
-        "bde_handoff_reason": SHARED_BDE_BLOCKER,
+        "bde_branch_handoff_supported": True,
+        "delivery_model": "parallel_behavior_branches",
+        "application_main_integration_requested": False,
+        "public_linked_workspace_runtime_qualification": "not_established_by_launcher",
         "status": "preflight",
     }
     write_json_atomically(report_file, report)
@@ -139,17 +142,43 @@ async def execute(arguments: CampaignArguments) -> int:
         else:
             report["status"] = "preflight_ready"
             exit_code = EXIT_READY
+        requests = tuple(DeliveryRequest(handoff, item.id) for item in handoff.decision.behaviors)
+        if (arguments.prepare or arguments.enable_live) and setup is not None and setup.status == SetupStatus.READY:
+            prepared = []
+            for request in requests:
+                try:
+                    branch = await composition.deliveries.prepare(request)
+                    prepared.append({"behavior_id": request.behavior_id, "delivery": asdict(branch)})
+                except ValueError as error:
+                    prepared.append({"behavior_id": request.behavior_id, "waiting_reason": str(error)})
+            report["branch_preparation"] = prepared
+            if arguments.prepare and not arguments.enable_live:
+                blocked = any("waiting_reason" in item for item in prepared)
+                report["status"] = "branches_waiting_or_blocked" if blocked else "branches_prepared"
+                exit_code = EXIT_BLOCKED if blocked else EXIT_READY
         if arguments.enable_live:
-            report["status"] = "bde_handoff_blocked"
-            exit_code = EXIT_BLOCKED
             if setup is None or setup.status != SetupStatus.READY:
-                report["reason"] = "Approved setup is not ready; the frozen shared-project BDE handoff is unsupported."
+                report["status"] = "setup_not_ready"
+                report["reason"] = "Approved setup must be READY before explicit behavior dispatch."
+                exit_code = EXIT_BLOCKED
             else:
-                first = handoff.decision.behaviors[0]
-                delivery = await composition.deliveries.dispatch(DeliveryRequest(handoff, first.id))
-                report["delivery"] = asdict(delivery)
-                report["reason"] = delivery.reason
-                report["remaining_deliveries"] = "not_dispatched_after_first_blocker"
+                report["status"] = "dispatching"
+                report["bde_execution_attempted"] = True
+                report["model_interactions"] = None
+                write_json_atomically(report_file, report)
+                outcomes = await composition.deliveries.dispatch_ready(requests)
+                report["deliveries"] = [asdict(item) for item in outcomes]
+                phases = [item.delivery.phase if item.delivery is not None else None for item in outcomes]
+                if all(phase == DeliveryPhase.COMPLETE for phase in phases):
+                    report["status"] = "branches_complete_not_integrated"
+                    exit_code = EXIT_READY
+                elif DeliveryPhase.FAILED in phases:
+                    report["status"] = "branch_failure"
+                    exit_code = EXIT_FAILED
+                else:
+                    report["status"] = "branches_waiting_or_blocked"
+                    exit_code = EXIT_BLOCKED
+                report["delivery_management"] = composition.deliveries.inspect(arguments.project_id)
         return exit_code
     except Exception as error:
         report["status"] = "failed"

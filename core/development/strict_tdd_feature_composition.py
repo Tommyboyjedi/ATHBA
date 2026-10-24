@@ -22,6 +22,8 @@ from core.development.microcycle_revision_git import MicrocycleGitClient
 from core.development.microcycle_revision_service import MicrocycleRevisionLifecycle, RevisionLifecycleDependencies
 from core.development.microcycle_revision_store import MicrocycleRevisionRepository
 from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
+from core.development.feature_management_checkpoint import FeatureManagementCheckpoint
 from core.development.provider_behavior_reviewer import ProviderSeniorBehaviorReviewer
 from core.development.python_pytest_adapter import PythonPytestAdapter
 from core.development.python_production_reduction import PythonProductionReductionAdapter
@@ -59,11 +61,14 @@ class StrictTddCompositionRequest:
         default_factory=StrictTddExecutionBudgetPolicy
     )
     replan_policy: BehaviorReplanPolicy = field(default_factory=BehaviorReplanPolicy)
+    prepared_environment: PreparedProjectEnvironment | None = None
+    scenario_namespace: str | None = None
+    management_checkpoint: FeatureManagementCheckpoint | None = None
 
 @dataclass(frozen=True)
 class StrictTddFeatureComposition:
     application: StrictTddFeatureApplicationService
-    environment: ProjectEnvironmentService
+    environment: PreparedProjectEnvironment
     revisions: MicrocycleRevisionLifecycle
     rack_ai: WorkUnitExecutionGateway
     behavior_planner: BehaviorContractPlanner
@@ -83,7 +88,7 @@ class StrictTddFeatureCompositionFactory:
         if request.execution_gateway is None:
             raise ValueError("live RackAI execution requires the durable run composition")
         gateway = request.execution_gateway
-        environment = ProjectEnvironmentService(root / "projects")
+        environment: PreparedProjectEnvironment = request.prepared_environment or ProjectEnvironmentService(root / "projects")
         adapters = LanguageAdapterCatalog((PythonPytestAdapter(),))
         microcycle_store = MicrocycleStateRepo(root / "microcycles")
         regression = DeterministicRegressionService(SubprocessProjectRuntimeExecutor())
@@ -141,5 +146,6 @@ class StrictTddFeatureCompositionFactory:
             lambda value: environment.create_or_load_python_project_with_disposition(value.project_id, value.production_paths),
             compose_consolidation(ConsolidationCompositionRequest(
                 root, request.repository_root, environment, adapters.for_language("python"),
-                PythonProductionReductionAdapter(), test_material, regression, request.reasoning_gateway))))
+                PythonProductionReductionAdapter(), test_material, regression, request.reasoning_gateway)),
+            request.scenario_namespace, request.management_checkpoint))
         return StrictTddFeatureComposition(application, environment, revisions, gateway, application.contract_planner, application.gatekeeper, drafting, adapters, strict, regression, completion, repair, CompletedMicrocycleEvidenceCollector())

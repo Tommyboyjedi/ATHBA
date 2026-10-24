@@ -26,10 +26,11 @@ from core.development.post_behavior_validation import (
     PostBehaviorSource, PostBehaviorCandidateAuthority, PostBehaviorTestValidation,
 )
 from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.execution.local_only_post_behavior_reasoning import LocalOnlyPostBehaviorReasoning
 from core.execution.provider_reasoning_gateway import ProviderReasoningGateway
 from core.execution.rack_ai_runtime import RackAiRuntimeClient, RackAiRuntimeConfiguration
-from core.execution.rack_ai_reservation import RackAiReservation
+from core.execution.rack_ai_reservation import RackAiReservation, runtime_identity
 from core.execution.rack_ai_reservation_state import ReservationBinding
 from core.execution.rack_ai_scoped_access import RackAiScopedAccess
 from core.llm.providers.openai_provider import OpenAIProvider
@@ -46,6 +47,8 @@ class PostBehaviorCompositionRequest:
     project_id: str
     reasoning: ProviderReasoningGateway
     execution: AiWorkspaceExecutionPort | None = None
+    prepared_environment: PreparedProjectEnvironment | None = None
+    reservation_identity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -64,9 +67,17 @@ class PostBehaviorCompositionFactory:
     """Wire existing provider, regression, Gatekeeper and generic execution capabilities."""
 
     def build(self, request: PostBehaviorCompositionRequest) -> PostBehaviorLifecycle:
-        delivery = AcceptedBehavioralDeliveryLoader(request.state_root, PythonTestMaterial()).load(request.project_id)
+        environment: PreparedProjectEnvironment = request.prepared_environment or ProjectEnvironmentService(request.state_root / "projects")
+        delivery = AcceptedBehavioralDeliveryLoader(request.state_root, PythonTestMaterial(), environment).load(request.project_id)
         repository = PostBehaviorStateRepository(request.state_root / "post-behavior")
         evidence = PostBehaviorEvidenceStore(repository.root / request.project_id / "evidence")
+        if request.reservation_identity is not None:
+            if delivery.feature.delivery_identity != request.reservation_identity:
+                raise ValueError("post-behavior reservation differs from its durable delivery identity")
+            prior_state = repository.load(delivery.entry.delivery_id)
+            access = None if prior_state is None else prior_state.rack_ai
+            if access is not None and access.work_id != runtime_identity(request.reservation_identity):
+                raise ValueError("historical post-behavior reservation requires explicit compatibility review")
         reservation = None
         execution = request.execution
         if execution is None:
@@ -96,13 +107,15 @@ class PostBehaviorCompositionFactory:
             PostBehaviorValidators(PostBehaviorTestValidation(delivery, authority, evidence),
                 PostBehaviorGatekeeper(PostBehaviorGatekeeperDependencies(delivery, authority, evidence, local,
                     PythonTestMaterial(), SpecificationEvidenceAdapters((PythonSpecificationEvidenceAdapter(),))))),
-            PostBehaviorPromotion(ProjectEnvironmentService(request.state_root / "projects"), git))
+            PostBehaviorPromotion(environment, git))
         lifecycle = PostBehaviorLifecycle(repository, ports)
         current = lifecycle.start(delivery.entry)
         lifecycle.reservation = reservation
         lifecycle.reasoning_service = request.reasoning.model
         if reservation is not None:
-            reservation.bind(ReservationBinding(repository, delivery.entry.delivery_id))
+            reservation.bind(ReservationBinding(repository,
+                request.reservation_identity or delivery.entry.delivery_id,
+                delivery.entry.delivery_id if request.reservation_identity is not None else None))
         legal = {current.current_post_behavior_revision}
         active = current.active_pass
         if active is not None and active.candidate is not None and active.tests is not None and active.gatekeeper is not None:

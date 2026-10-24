@@ -5,13 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import Callable, Protocol
 
+from core.development.feature_management_checkpoint import FeatureManagementCheckpoint
 from core.development.behavior_replan_domain import BehaviorReplanPolicy
 from core.development.completed_req_consolidation import CompletedReqConsolidation
 from core.development.scenario_drafting_domain import ScenarioDraftRunState
 
 from core.development.behavior_contract_coordinator import BehaviorContractPlanner, ContractPlanningRequest
 from core.development.behavior_contract_domain import BehaviorContract, BehaviorContractRequirement
-from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
+from core.development.project_environment import DevelopmentProject
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.project_environment_lifecycle import ProjectLoadDisposition
 from core.development.specification_assessment import GatekeeperStateRequest, SpecificationGatekeeper
 from core.development.strict_tdd_feature_domain import (
@@ -86,7 +88,7 @@ class FeatureProjectPreparation:
 
 @dataclass(frozen=True)
 class StrictTddFeatureDependencies:
-    environment: ProjectEnvironmentService
+    environment: PreparedProjectEnvironment
     state_repository: StrictTddFeatureRepository
     contract_planner: BehaviorContractPlanner
     gatekeeper: SpecificationGatekeeper
@@ -95,6 +97,8 @@ class StrictTddFeatureDependencies:
     replan_policy: BehaviorReplanPolicy = field(default_factory=BehaviorReplanPolicy)
     prepare_project: Callable[[FeatureProjectPreparation], ProjectLoadDisposition] | None = None
     consolidation: CompletedReqConsolidation | None = None
+    scenario_namespace: str | None = None
+    management_checkpoint: FeatureManagementCheckpoint | None = None
 
 
 class StrictTddFeatureApplicationService:
@@ -110,6 +114,8 @@ class StrictTddFeatureApplicationService:
         self.replan_policy = dependencies.replan_policy
         self.project_preparer = dependencies.prepare_project
         self.consolidation = dependencies.consolidation
+        self.scenario_namespace = dependencies.scenario_namespace
+        self.management_checkpoint = dependencies.management_checkpoint
 
     def prepare_project(self, request: FeatureProjectPreparation) -> ProjectLoadDisposition:
         if self.project_preparer is None:
@@ -129,6 +135,8 @@ class StrictTddFeatureApplicationService:
     ) -> StrictTddFeatureState:
         existing = self.states.load(request.project_id)
         if existing is not None:
+            if existing.delivery_identity != self.scenario_namespace:
+                raise ValueError("persisted feature delivery identity requires explicit compatibility review")
             if existing.source_requirement_hash != request.source_requirement_hash:
                 raise ValueError("feature state source requirement identity diverged")
             return existing
@@ -144,6 +152,7 @@ class StrictTddFeatureApplicationService:
             contract.to_dict(), checklist.to_dict(), canonical_ref=f"refs/heads/{project.default_ref}",
             canonical_development_base=project.trusted_base_sha,
             behavioral_entry_revision=project.trusted_base_sha,
+            delivery_identity=self.scenario_namespace,
         )
         self.states.save(state)
         return state

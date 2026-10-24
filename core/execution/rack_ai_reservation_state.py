@@ -86,12 +86,13 @@ class ReservationStateRepository(Protocol):
 class ReservationBinding:
     repository: ReservationStateRepository
     identity: str
+    storage_identity: str | None = None
 
     def load(self) -> RackAiReservationState | None:
-        return self.repository.load_reservation(self.identity)
+        return self.repository.load_reservation(self.storage_identity or self.identity)
 
     def save(self, state: RackAiReservationState) -> None:
-        self.repository.save_reservation(self.identity, state)
+        self.repository.save_reservation(self.storage_identity or self.identity, state)
 
 
 class ReservationRecord:

@@ -22,7 +22,7 @@ from core.development.microcycle_revision_state import (
     RevisionInitialisationRequest,
     RevisionRecoveryRequest,
 )
-from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
 from core.development.scenario_drafting import ScenarioDraftingService
 from core.development.scenario_drafting_domain import ScenarioDraftRequest, ScenarioRepositoryFacts
@@ -55,7 +55,7 @@ class StrictFeatureScenarioDependencies:
     drafting: ScenarioDraftingService
     microcycles: StrictMicrocycleService
     revisions: MicrocycleRevisionLifecycle
-    environment: ProjectEnvironmentService
+    environment: PreparedProjectEnvironment
 
 
 class StrictFeatureScenarioExecutor:

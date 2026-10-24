@@ -1,0 +1,80 @@
+{
+  "base_pr": 73,
+  "files": {
+    "core/development/completed_req_consolidation.py": {
+      "baseline_sha256": "fdbc17754c4ccbd463241bfb4e36bd500f072bb90524f5eeebce92db1db737fd",
+      "reviewed_sha256": "3f1de0592c07cdf8dcebe30b8fa3b1a4b28f8b45f6fbc899fb746c632e35b3dc",
+      "mechanical_reason": "Prepared-environment protocol typing only; consolidation rules unchanged."
+    },
+    "core/development/consolidation_composition.py": {
+      "baseline_sha256": "fde55cb1a9bb3aebbe39bfff6b3ae9b4a444215042ca75acb87d9660df205304",
+      "reviewed_sha256": "65ecd0f9eedfffaa8b796c55d9bc89e71ffdb1051c5beb8f76e2af29bdbb4cff",
+      "mechanical_reason": "Inject same prepared branch environment; consolidation semantics unchanged."
+    },
+    "core/development/consolidation_git.py": {
+      "baseline_sha256": "733229cc7f4ce1ee20d2de95039b72ba260944fb3626f9306f0d6f62d33f687c",
+      "reviewed_sha256": "3c659ffffbed7b1a75d61fc22da7e710bbd85099858d1b6be6032e61b1b1b535",
+      "mechanical_reason": "Prepared-environment protocol typing only; promotion targets injected branch."
+    },
+    "core/development/post_behavior_composition.py": {
+      "baseline_sha256": "350142dbe461449063891d8f3df4b153a076760b5dfbf4b333b4d85bc7071fbd",
+      "reviewed_sha256": "9557e20d2d505dfc7a6318c4f24604c5aa3691b0696377e2301ba14f52aa8937",
+      "mechanical_reason": "Bind loader/promotion to delivery environment; distinct runtime reservation identity/local storage key."
+    },
+    "core/development/post_behavior_entry.py": {
+      "baseline_sha256": "186b032b4281a807e3189a96f0e43bafe654a1dc5e3cc99f2f7da49b6af3e7ac",
+      "reviewed_sha256": "130ab4c465bbc296b0ccd65b61e667025e09cfcf0fc6ddf218f86f00732f8445",
+      "mechanical_reason": "Load injected environment and require exact canonical branch binding."
+    },
+    "core/development/post_behavior_git.py": {
+      "baseline_sha256": "f58471ea46e2cb67d3fbb58896973850e7275b9bb57c3f012625f6e4da7df4f2",
+      "reviewed_sha256": "00d51c410f70886475a60c0620558db68a5d8d391a20724d19d2eb2fab6c2910",
+      "mechanical_reason": "Prepared-environment protocol typing only for existing promotion."
+    },
+    "core/development/project_revision_synchronization.py": {
+      "baseline_sha256": "003b86f0655ed85b300ba87850a67f2b5bd5716efc6f11444d4a91191062d37f",
+      "reviewed_sha256": "015f09ecb6cf6f97f2589a55a06d7b7a1bce82e50e30a7210fc72c0a3029b466",
+      "mechanical_reason": "Prepared-environment protocol typing only for trusted synchronization."
+    },
+    "core/development/strict_tdd_feature_application.py": {
+      "baseline_sha256": "814b843b66b52c17e0f24f303bbe8ed12b0d050cb4ea71e4964eff42d5202dd0",
+      "reviewed_sha256": "bb845ac0fc8099f9aa2b239672bd050640261f638a455494b95aed0f2c3b4344",
+      "mechanical_reason": "Inject environment/checkpoint/scenario namespace, persist and guard delivery identity."
+    },
+    "core/development/strict_tdd_feature_application_advance.py": {
+      "baseline_sha256": "32aae0b39f129529a36fa6395e482c6a6566cc254216e6208b63f71347c0871d",
+      "reviewed_sha256": "beeffabd6d3bf793ee956a91a362d2cf83c76d2d0621d3bec3510f480b8d8223",
+      "mechanical_reason": "Delivery-scoped scenario identity and quiescent management hook after completed REQ."
+    },
+    "core/development/strict_tdd_feature_composition.py": {
+      "baseline_sha256": "efa0656b20a7b0fbb2d4dd07c76ab26a3964eb959e0ba34af627a611f30c81aa",
+      "reviewed_sha256": "a43fe05c336c5547fb45836a8794f70ea904bba2800c7c774432791f87d2b389",
+      "mechanical_reason": "Inject prepared environment, namespace and checkpoint into unchanged inner capabilities."
+    },
+    "core/development/strict_tdd_feature_domain.py": {
+      "baseline_sha256": "91516fe75717096f7930ee9c65beae366a7e946e541e4c82fa1f3b31784aed59",
+      "reviewed_sha256": "25a38883aa9924e773f4e353bd4e91e3866e9ea4b7863d06400ae0ca3e5c7d63",
+      "mechanical_reason": "Persist optional delivery identity, legacy defaults unchanged."
+    },
+    "core/development/strict_tdd_feature_execution.py": {
+      "baseline_sha256": "b087e855d827af38b01565a0f59e5f36f57b051a782a3c0099e7d82aaa208ca2",
+      "reviewed_sha256": "8beb20d7db9edbe0eb808d33b821071af08b807d21e5baddcf0b22db78c8e77e",
+      "mechanical_reason": "Prepared-environment protocol typing only for same strict feature executor."
+    },
+    "core/development/strict_tdd_live_run_composition.py": {
+      "baseline_sha256": "fb6685e16efd63c0713c4ba1127a1ab9e309bdbd0836f23298e8995c6468432b",
+      "reviewed_sha256": "395fa811650f9ff2327c08c502949cebd1fb02a7212774c8a978aeb7707c3f61",
+      "mechanical_reason": "Pass optional branch environment/namespace/checkpoint through live composition."
+    },
+    "core/execution/rack_ai_reservation_state.py": {
+      "baseline_sha256": "4f83d53f3ff9968ded30d9fd78c30339ed43fb6ae5908e499e73fab109f4516b",
+      "reviewed_sha256": "8953b93cfd757d49ed8a334fe2eafd9894dcf883ae98ddff71b392ab99b8f6de",
+      "mechanical_reason": "Separate opaque reservation runtime identity from local persisted project record key; policy unchanged."
+    },
+    "core/development/strict_tdd_run_controller.py": {
+      "baseline_sha256": "18b441f3a1925dd85cdc19adb1962fc438f1c78c67382582e0b2dbc537d640bd",
+      "mechanical_reason": "Optional default-off recovery admission only for exact durable published management synchronization receipts; legacy unknown in-flight work still fails closed.",
+      "reviewed_sha256": "a7a46c78425dba6047c9ccba42f5f0c489bcf64faee226d8ca5386c85309a2d0"
+    }
+  }
+}
