@@ -28,15 +28,17 @@ def recover_accepted_checkpoint(environment: BranchEnvironment) -> DevelopmentPr
     project = environment.repo.load(binding.identity.project_id)
     if record is None or project is None:
         raise ValueError("unknown delivery cannot recover accepted BDE authority")
+    feature = StrictTddFeatureRepository(Path(record.state_root) / "features").load(record.project_id)
+    if feature is not None and (feature.delivery_identity != record.id
+            or feature.source_requirement_hash != record.behavior.source_sha256
+            or feature.canonical_ref != record.branch_ref):
+        raise ValueError("persisted feature differs from delivery source/branch authority")
     actual = git(GitCommand(Path(record.worktree), ("rev-parse", record.branch_ref)))
     if actual == record.trusted_revision:
         return project
     if record.revision_intent is not None:
         return environment.recover_trusted_revision()
-    feature = StrictTddFeatureRepository(Path(record.state_root) / "features").load(record.project_id)
-    if (feature is None or feature.delivery_identity != record.id
-            or feature.source_requirement_hash != record.behavior.source_sha256
-            or feature.canonical_ref != record.branch_ref):
+    if feature is None:
         raise ValueError("branch advance lacks exact durable delivery/source authority")
     accepted = _microcycle_revision(record, feature) or _post_revision(record, feature)
     if accepted != actual:

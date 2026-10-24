@@ -268,6 +268,14 @@ async def test_standard_executor_runs_real_bde_to_post_completion_and_reuses_res
     assert (await executor.deliver(BdeDispatch(record, environment))).contribution == outcome.contribution
     assert feature.calls == post.calls == 1
     assert before == (len(reasoning.purposes), len(execution.bindings), len(provider_calls))
+    # Equal SHAs do not authorize a persisted BDE to target application main.
+    features = StrictTddFeatureRepository(Path(record.state_root) / "features")
+    accepted_feature = features.load(PROJECT)
+    features.save(replace(accepted_feature, canonical_ref="refs/heads/main"))
+    with pytest.raises(ValueError, match="source/branch authority"):
+        environment.create_or_load_python_project_with_disposition(PROJECT)
+    features.save(accepted_feature)
+    assert git(canonical, "rev-parse", "main") == project.trusted_base_sha
 
 
 def test_parallel_post_compositions_keep_distinct_runtime_identity_and_same_local_project_key(tmp_path, monkeypatch):
