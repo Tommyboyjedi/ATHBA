@@ -1,119 +1,143 @@
-# Approved project setup and bounded handoff
+# Approved project setup and team delivery
 
-This outer setup path uses the existing Mongo-backed ATHBA project and specification
-records. It does not create another project database. An approved architecture
-selects the toolchain; setup does not choose technology from unapproved preferences.
-The source-controlled fixture is explicitly test-only, not a human approval.
+Setup uses the existing ATHBA project/specification backend and a pinned upstream
+architecture approval. It does not issue human approval, create another project
+database, provision Mongo, install SDKs or write business implementations.
 
-The checked-in fixture contains the unchanged ProductCatalogue, ShoppingBasket and
-OrderRegister sources with separate behavior identities and disjoint source/test
-paths. The launcher requires an existing **test project** whose current specification
-version and content hash match that fixture. It does not create the project, insert a
-specification, provision Mongo, install dependencies or invent a successful delivery.
+One approved project owns one application repository and its configured canonical
+branch. Each full behavior has a stable branch, linked worktree, trusted revision,
+BDE state namespace and evidence. Display order does not create dependencies.
+A declared dependency becomes ready only after its prerequisite is integrated
+into accepted application main.
 
-## Dry-run preflight
+## Fixture launcher
 
-Run on gpurack, from the canonical checkout:
+The unchanged ProductCatalogue, ShoppingBasket and OrderRegister fixture remains
+explicitly test-only. It requires an existing test project whose persisted
+specification version/content hash matches the fixture. No project/specification
+is inserted by this script.
 
-~~~bash
-cd /srv/ATHBA
-/srv/ATHBA/.venv/bin/python -B -m scripts.run_approved_project_campaign \
-  --test-fixture \
-  --project-id EXISTING_MONGO_TEST_PROJECT_ID \
-  --state-root /srv/ATHBA/state/approved-project-setup \
-  --evidence-root /srv/ATHBA/qualification-evidence/approved-project-preflight-UNIQUE_TIMESTAMP
-~~~
-
-Replace the project ID and evidence suffix. Mongo configuration must already be
-available through ATHBA's normal environment. Do not put credentials in command
-arguments. The --test-fixture flag is required; there is no production approval bypass.
-
-Default operation validates the frozen fixture, looks up the real project and
-checks its latest specification. It records a timestamped campaign-*.json; it
-does not prepare an environment or invoke BDE. Each invocation retains its own
-report. The database lookup is bounded without changing Mongo or model settings.
-
-Mongo is currently unavailable/unprovisioned on the rack. Missing configuration,
-connection failure or timeout is recorded as backend_unavailable before any
-provisioning. This is an honest integration blocker. No alternative store, fake
-project or Mongo installation is used. A missing project or mismatched
-specification also blocks setup.
-
-## Explicit preparation
-
-Add --prepare to the same command only when the existing test project and exact
-fixture specification are present. This calls the normal outer setup service. It
-verifies the approved managed tool versions, creates/reuses one confined canonical
-repository and runs bounded environment smoke checks. Repeating matching setup
-reuses the existing environment and repository. A conflicting architecture,
-unrelated repository content or changed trusted revision fails closed.
-
-The fixture currently selects managed Python/pytest. Other setup profiles report
-tool availability, environment verification and BDE compatibility separately.
-A prepared non-Python environment does not imply a compatible behavioral adapter.
-
-## Live handoff remains blocked
-
-The --enable-live flag explicitly requests the same outer delivery boundary. It
-cannot start models with this implementation. With ready setup, the normal
-ProjectBehaviorDeliveries.dispatch uses FrozenSharedProjectBde, persists the
-first delivery as blocked and stops. Without ready setup, no delivery is
-dispatched. The report always distinguishes this capability gap from environment
-readiness. No reservation or model interaction is created.
-
-The frozen full-lifecycle factories bind feature state to project_id, derive
-scenario identities from project plus REQ, and load accepted post-behavior
-project/feature authority from one co-located state root. They lack the required
-shared-project environment injection and independently scoped full-delivery
-identity. Separate state directories alone do not provide this capability.
-Changing project IDs, copying authority records, deleting prior state or adding
-filesystem aliases is not an acceptable workaround.
-
-Setup/delivery records are associated metadata beneath the existing user-facing
-project identity. They do not replace that project or create a parallel project store.
-
-Exit codes: 0 means dry-run preflight or requested setup succeeded; 2 means
-backend/setup/handoff blocked; 1 means invalid authority or an unexpected failure.
-Neither successful preflight nor successful setup means a full behavior was
-delivered. Known frozen planning failures remain out of scope.
-
-
-## Scope and verification limits
-
-The six controlled profiles cover Python, Rust, TypeScript, .NET, JavaScript and
-static HTML/CSS assets, including combined TypeScript/HTML/CSS. They accept exact
-preapproved managed tool versions and never install packages or SDKs. Missing
-tools block preparation. .NET currently resolves an explicit SDK/framework,
-language and template, but remains blocked because an approved test-harness
-selection is absent; a successful zero-test dotnet test is not treated as proof.
-
-On this rack, Python/pytest tools and a disposable Git/runtime environment were
-actually verified with controlled existing-project storage. Rust tools were found;
-no Rust application environment was prepared. Other toolchains were not available.
-Controlled storage/BDE tests are not proof of real frontend persistence or three
-successful application builds. Mongo-backed setup remains unverified here because
-the normal backend is not configured.
-
-The additive ProjectsService(setup_root=STATE_ROOT / "projects") query
-get_development_setup(project_id) returns associated setup, all full-behavior
-sources/identities, revision and delivery results only after finding the existing
-project. Existing service calls and project records are unchanged.
-
-A later explicit handoff request uses the exact same path:
+From an approved ATHBA checkout on gpurack:
 
 ~~~bash
-cd /srv/ATHBA
 /srv/ATHBA/.venv/bin/python -B -m scripts.run_approved_project_campaign \
   --test-fixture --project-id EXISTING_MONGO_TEST_PROJECT_ID \
   --state-root /srv/ATHBA/state/approved-project-setup \
-  --evidence-root /srv/ATHBA/qualification-evidence/approved-project-live-UNIQUE_TIMESTAMP \
-  --prepare --enable-live
+  --evidence-root /srv/ATHBA/qualification-evidence/project-preflight-UNIQUE_TIMESTAMP
 ~~~
 
-This command is intentionally blocked at the currently unsupported shared-BDE
-boundary. It is not a runnable three-behavior model campaign and cannot export
-interaction diagnostics, reserve resources, or claim model cleanup. Enabling
-those operations requires a separately authorized compatible BDE seam. No
-acceptance authority is copied or reconstructed to work around that limitation.
-Interrupted outer records are retained for inspection, never blindly replayed;
-automatic recovery of a partially progressed frozen BDE is not implemented here.
+Default operation checks approval, the existing backend project and specification,
+then writes one timestamped report. It does not prepare environments/branches or
+dispatch work. Add `--prepare` to prepare/reuse the approved environment and
+dependency-ready delivery branches, without model execution. Each blocked
+dependency is reported independently.
+
+Only an explicit `--enable-live` requests `dispatch_ready` through the standard
+service path. It can be combined with `--prepare`. Independent deliveries are
+offered together under the configured dispatch concurrency; one failed branch
+does not stop another. This command is **not executed by implementation/tests**.
+It does not submit or promote any branch into application main, and does not
+automatically integrate prerequisites or repeatedly retry waiting work.
+
+Exit codes: 0 means the requested preflight/preparation succeeded or all requested
+branches completed; 2 means prerequisites/waiting/blocking; 1 means invalid
+authority, a branch failure or an unexpected failure. A completed branch is not an
+integrated application. The report leaves interaction count unavailable after
+live dispatch rather than claiming zero.
+
+## Standard service operations
+
+`compose_project_setup(ProjectSetupCompositionRequest(...))` exposes:
+`setup`, `deliveries: TeamDeliveryService`, `records`, and `management: TeamServices`.
+Supply the existing ProjectsService and pinned approval; the fixture loader is
+not a production approval mechanism.
+
+The following is a service API outline, not an automatically executed campaign:
+
+~~~python
+from core.delivery_management.domain import ManagementRequest, MergeKind, MergeStatus
+from core.delivery_management.store import RecordIdentity
+from core.project_setup.delivery import DeliveryRequest
+
+await services.setup.prepare(handoff)
+requests = tuple(DeliveryRequest(handoff, b.id) for b in handoff.decision.behaviors)
+
+# Preparation does not invoke BDE. Independent ready branches may be prepared
+# in any display order; an unintegrated declared prerequisite reports waiting.
+branch = await services.deliveries.prepare(requests[0])
+
+# Explicit execution: existing inner REQ/frontier TDD, Gatekeeper, late Naming
+# and Refactoring all use the delivery worktree/branch, never application main.
+results = await services.deliveries.dispatch_ready(requests)
+historical = await services.deliveries.dispatch(requests[0])
+resumed = await services.deliveries.resume(requests[0])
+
+request = ManagementRequest(project_id, delivery_id, actor_reference)
+sync = services.deliveries.synchronize(request)
+operation = services.deliveries.submit(request)
+# submit first synchronizes accepted main, then prepares/validates integration.
+# A deferred/failed sync returns that outcome instead of an integration.
+
+if operation.kind == MergeKind.INTEGRATION and operation.status == MergeStatus.VALIDATED:
+    key = RecordIdentity(project_id, operation.id)
+    approval = services.management.merges.approve(key, actor_reference)
+    published = services.management.merges.promote(key, approval)
+
+view = services.deliveries.inspect(project_id)
+~~~
+
+`dispatch` returns recorded completed results without replay. `resume` is an
+explicit bounded continuation under the same identities/attempt history; it does
+not reinterpret legacy sequential shared-checkout authority. Legacy PR73 records
+with `active_delivery`/sequential delivery results require explicit compatibility
+review. Existing single-behavior callers keep their default composition.
+
+`synchronize` pins main and delivery revisions and validates a separate ordinary
+merge candidate. While active work owns the branch, it records a deferred request.
+The BDE processes it at a quiescent accepted-REQ checkpoint, without resetting
+attempts or changing historical acceptance. Unsafe/incomplete evidence blocks
+synchronization rather than importing changes under an active frontier.
+
+Integration is separate management authority. Approval names exact main,
+delivery and candidate SHAs plus evidence. Main advancing invalidates that
+candidate/approval. Conflicts, failing combined regression and missing/changed
+accepted tests leave main unchanged. No ours/theirs resolution or semantic merge
+agent is used.
+
+Inspect `view` and `services.management.records.merge(RecordIdentity(project_id,
+operation_id))` for exact candidate, conflicts and history. A later explicitly
+supplied resolution commit is revalidated through
+`services.management.merges.validate_resolution(key, exact_resolution_sha)`;
+passing validation still requires exact approval/promotion. Interrupted
+publication is inspected/reconciled with `services.management.merges.recover(key)`.
+A delivery promotion can be reconciled through
+`services.deliveries.recover_delivery(RecordIdentity(project_id, delivery_id))`.
+Recovery refuses newer authority and does not roll it back.
+
+The existing `ProjectsService(setup_root=STATE_ROOT / "projects")` method
+`get_development_setup(project_id)` exposes associated setup plus
+`delivery_management` only after resolving the existing frontend project.
+No parallel dashboard or authentication product is introduced.
+
+## Evidence and limits
+
+Completed contributions retain original source identities, accepted test
+origins, active supersessions, post-Naming test hashes and unresolved assurance.
+Synchronization uses explicitly qualified completed-REQ checkpoint evidence;
+it does not manufacture final Gatekeeper or post-behavior completion. Merge
+validation preserves accepted identities/hashes from both sides, runs configured
+build/full regression and verifies required test nodes actually execute.
+
+Toolchain preparation remains controlled and read-only: Python, Rust, TypeScript,
+JavaScript, HTML/CSS and .NET profiles retain their existing supported/blocked
+capabilities. This change adds no language engine. Python is the existing concrete
+BDE composition. Linked worktrees isolate Git indexes/working files; they are not
+an operating-system security sandbox.
+
+Mongo remains unconfigured on the rack. Real frontend-backed verification is
+therefore blocked before provisioning; controlled injected-storage tests do not
+prove Mongo persistence. The public RackAI linked-worktree runtime path has not
+been exercised by a live reservation/model run in this assignment. Disposable-Git
+and controlled existing-gateway proofs are identified separately from live
+qualification. No deployment, automatic integration, live campaign or infrastructure
+provisioning is implied.

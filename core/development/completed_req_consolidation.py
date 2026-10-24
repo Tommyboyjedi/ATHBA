@@ -20,7 +20,7 @@ from core.development.consolidation_reasoning import (
 )
 from core.development.consolidation_submission import ConsolidationProtocolFailure, ConsolidationSubmission
 from core.development.consolidation_validation import ConsolidationValidation, ConsolidationValidationInput
-from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.strict_tdd_feature_domain import StrictTddFeatureState
 from core.development.test_material import TestMaterialAdapter, TestSourceRequest
 
@@ -34,7 +34,7 @@ class ConsolidationDependencies:
     tests: TestMaterialAdapter
     git: ConsolidationGit
     validation: ConsolidationValidation
-    environment: ProjectEnvironmentService
+    environment: PreparedProjectEnvironment
 
 
 class CompletedReqConsolidation:

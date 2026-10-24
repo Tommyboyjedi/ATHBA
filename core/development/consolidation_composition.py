@@ -17,7 +17,7 @@ from core.development.microcycle_domain import LanguageTestAdapter
 from core.development.production_reduction import ProductionChangeReducer, ProductionReductionDependencies
 from core.development.production_reduction_acceptance import CompletionReductionVerifier
 from core.development.production_reduction_syntax import ProductionReductionAdapter
-from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.test_material import TestMaterialAdapter
 from core.execution.reasoning_gateway import ReasoningGateway
 
@@ -26,7 +26,7 @@ from core.execution.reasoning_gateway import ReasoningGateway
 class ConsolidationCompositionRequest:
     state_root: Path
     repository_root: Path
-    environment: ProjectEnvironmentService
+    environment: PreparedProjectEnvironment
     adapter: LanguageTestAdapter
     syntax: ProductionReductionAdapter
     tests: TestMaterialAdapter

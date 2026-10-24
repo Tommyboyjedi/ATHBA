@@ -253,8 +253,8 @@ def _project_paths(root: Path, project_id: str) -> ProjectWorkspacePaths:
 
 def _file_plan(request: WorkspacePreparation) -> _FilePlan:
     controlled = request.profile.files
-    production = tuple(path for item in request.decision.behaviors for path in item.production_paths)
-    tests = tuple(path for item in request.decision.behaviors for path in item.test_paths)
+    production = tuple(dict.fromkeys(path for item in request.decision.behaviors for path in item.production_paths))
+    tests = tuple(dict.fromkeys(path for item in request.decision.behaviors for path in item.test_paths))
     names = tuple(item.path for item in controlled)
     if len(names) != len(set(names)):
         raise ValueError("profile repeats a scaffold file")

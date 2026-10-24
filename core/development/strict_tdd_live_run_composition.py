@@ -7,6 +7,8 @@ from subprocess import run
 
 from core.datastore.repos.microcycle_state_repo import MicrocycleStateRepo
 from core.datastore.repos.scenario_draft_state_repo import ScenarioDraftStateRepo
+from core.development.project_environment_port import PreparedProjectEnvironment
+from core.development.feature_management_checkpoint import FeatureManagementCheckpoint, management_resume_available
 from core.development.python_pytest_preflight import PythonProbePreflightError, PythonPytestPreflight
 from core.development.microcycle_revision_store import MicrocycleRevisionRepository
 from core.development.strict_tdd_feature_composition import (
@@ -59,6 +61,9 @@ class StrictTddLiveRunCompositionRequest:
     configuration: StrictTddLiveRunConfiguration
     reasoning_gateway: ReasoningGateway | None = None
     execution_gateway: WorkUnitExecutionGateway | None = None
+    prepared_environment: PreparedProjectEnvironment | None = None
+    scenario_namespace: str | None = None
+    management_checkpoint: FeatureManagementCheckpoint | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +129,9 @@ class StrictTddLiveRunCompositionFactory:
                 config.workload_id,
                 reasoning,
                 execution,
+                prepared_environment=request.prepared_environment,
+                scenario_namespace=request.scenario_namespace,
+                management_checkpoint=request.management_checkpoint,
             )
         )
         lifecycle = StrictTddLifecycleEventRepository(config.state_root / "lifecycle-events")
@@ -142,6 +150,8 @@ class StrictTddLiveRunCompositionFactory:
                 StrictTddRunEvidenceSnapshotCollector(evidence),
                 StrictTddRunReportWriter(config.evidence_root),
                 reservation,
+                lambda project_id: management_resume_available(request.management_checkpoint,
+                    feature.application.states.load(project_id)),
             )
         )
         return StrictTddLiveRunComposition(

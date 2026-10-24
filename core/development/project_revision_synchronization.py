@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from core.development.project_environment import DevelopmentProject, ProjectEnvironmentService
+from core.development.project_environment import DevelopmentProject
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.project_environment_git import AncestryCheckRequest, CanonicalRefRequest, WorktreeSynchronisationRequest
 
 
@@ -13,7 +14,7 @@ from core.development.project_environment_git import AncestryCheckRequest, Canon
 class TrustedProjectRevisionSynchronizer:
     """Persist a lifecycle-promoted canonical SHA without performing another ref mutation."""
 
-    environment: ProjectEnvironmentService
+    environment: PreparedProjectEnvironment
 
     def synchronize(self, project_id: str, revision: str) -> DevelopmentProject:
         project = self._project(project_id)

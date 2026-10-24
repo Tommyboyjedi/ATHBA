@@ -105,6 +105,7 @@ class StrictTddFeatureState:
     reconciliation_history: tuple[dict[str, object], ...] = ()
     evidence_consolidations: tuple[SupersessionRecord, ...] = ()
     consolidation_checks: tuple[str, ...] = ()
+    delivery_identity: str | None = None
 
     def __post_init__(self) -> None:
         _text(self.project_id, "project id")
@@ -160,6 +161,7 @@ class StrictTddFeatureState:
             tuple(dict(item) for item in payload.get("reconciliation_history", ())),
             tuple(SupersessionRecord.from_dict(dict(item)) for item in payload.get("evidence_consolidations", ())),
             tuple(str(item) for item in payload.get("consolidation_checks", ())),
+            payload.get("delivery_identity"),
         )
 
 

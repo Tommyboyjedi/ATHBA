@@ -89,4 +89,14 @@ class ProjectsService:
         if project is None or self.setup_records is None:
             return None
         record = self.setup_records.load(str(project.id))
-        return record.to_dict() if record is not None else None
+        if record is None:
+            return None
+        from core.delivery_management.inspection import ProjectDeliveryView
+        from core.delivery_management.store import ManagementStore
+        from core.development.project_environment import ProjectEnvironmentService
+
+        result = record.to_dict()
+        result["delivery_management"] = ProjectDeliveryView(
+            ManagementStore(self.setup_records.root),
+            ProjectEnvironmentService(self.setup_records.root)).inspect(str(project.id))
+        return result

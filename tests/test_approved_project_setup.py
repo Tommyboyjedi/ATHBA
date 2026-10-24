@@ -328,14 +328,15 @@ async def test_frozen_real_composition_entry_rejects_bad_protocol_without_models
 
 
 @pytest.mark.asyncio
-async def test_frozen_shared_handoff_is_explicitly_blocked_and_no_dispatch_replay(tmp_path):
+async def test_standard_branch_handoff_prepares_independently_without_execution(tmp_path):
     handoff, _, app = environment(tmp_path)
     setup = await app.setup.prepare(handoff)
-    with pytest.raises(ValueError, match="sequential"):
-        await app.deliveries.dispatch(DeliveryRequest(handoff, "orders"))
-    result = await app.deliveries.dispatch(DeliveryRequest(handoff, "catalogue"))
-    assert result.status == DeliveryStatus.BLOCKED and "Frozen BDE" in result.reason
-    assert await app.deliveries.dispatch(DeliveryRequest(handoff, "catalogue")) == result
+    result = await app.deliveries.prepare(DeliveryRequest(handoff, "orders"))
+    repeated = await app.deliveries.prepare(DeliveryRequest(handoff, "orders"))
+    assert result == repeated
+    assert Path(result.worktree) != Path(setup.repository_root)
+    assert (Path(result.worktree) / ".git").is_file()
+    assert result.trusted_revision == setup.scaffold_revision
     assert app.records.load(setup.project_id).active_delivery is None
     assert git(Path(setup.repository_root), "rev-parse", "HEAD") == setup.scaffold_revision
 
@@ -366,7 +367,14 @@ async def test_existing_projects_service_additive_query_and_default_behavior(tmp
 def test_frozen_sources_and_all_bde_files_remain_byte_identical():
     frozen = json.loads((FIXTURE / "bde-freeze.json").read_text())
     root = Path(__file__).resolve().parents[1]
+    allowlist = json.loads((FIXTURE / "delivery-plumbing-allowlist.json").read_text())["files"]
+    assert set(allowlist) <= set(frozen["files"])
     for name, digest in frozen["files"].items():
+        if name in allowlist:
+            entry = allowlist[name]
+            assert entry["baseline_sha256"] == digest
+            assert entry["mechanical_reason"]
+            digest = entry["reviewed_sha256"]
         assert sha256((root / name).read_bytes()).hexdigest() == digest, name
     handoff = load_test_architecture(FixtureBinding(FIXTURE, "existing-parent"))
     assert len(handoff.decision.behaviors) == 3

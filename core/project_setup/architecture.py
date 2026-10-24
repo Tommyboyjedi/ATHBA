@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from enum import Enum
 from hashlib import sha256
+from graphlib import CycleError, TopologicalSorter
 import json
 from pathlib import PurePosixPath
 
@@ -86,17 +87,15 @@ class ArchitectureDecision:
         ids = [item.id for item in self.behaviors]
         if not ids or len(ids) != len(set(ids)):
             raise ValueError("full behavior identities must be unique")
-        seen: set[str] = set()
-        scopes: set[str] = set()
+        known = set(ids)
         for item in self.behaviors:
-            if not set(item.depends_on) <= seen:
-                raise ValueError("behavior dependencies must precede the delivery")
-            paths = set((*item.production_paths, *item.test_paths))
-            if any(a == b or PurePosixPath(a) in PurePosixPath(b).parents
-                   or PurePosixPath(b) in PurePosixPath(a).parents for a in scopes for b in paths):
-                raise ValueError("initial full-behavior scopes must be disjoint")
-            scopes.update(paths)
-            seen.add(item.id)
+            if (set(item.depends_on) - known or item.id in item.depends_on
+                    or len(item.depends_on) != len(set(item.depends_on))):
+                raise ValueError("behavior dependencies require distinct known other behaviors")
+        try:
+            tuple(TopologicalSorter({item.id: item.depends_on for item in self.behaviors}).static_order())
+        except CycleError as error:
+            raise ValueError("behavior dependency graph must be acyclic") from error
         if self.repository_policy == RepositoryPolicy.EXISTING_APPROVED and self.existing_repository is None:
             raise ValueError("existing repository requires explicit revision authority")
 

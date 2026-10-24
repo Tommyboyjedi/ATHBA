@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from core.execution.rack_ai_reservation import RackAiReservation
 from core.execution.rack_ai_reservation_state import ReservationBinding
@@ -59,6 +59,7 @@ class StrictTddRunControllerDependencies:
     snapshots: StrictTddRunEvidenceSnapshotCollector
     reports: StrictTddRunReportWriter
     reservation: RackAiReservation | None = None
+    management_resume: Callable[[str], bool] | None = None
 
 
 class StrictTddRunController:
@@ -66,6 +67,7 @@ class StrictTddRunController:
 
     def __init__(self, dependencies: StrictTddRunControllerDependencies):
         self.reservation = dependencies.reservation
+        self.management_resume = dependencies.management_resume
         self.application = dependencies.application
         self.states = dependencies.states
         self.lifecycle = dependencies.lifecycle
@@ -108,7 +110,8 @@ class StrictTddRunController:
         if state.transition_in_flight is not None:
             access = self.states.load_reservation(request.run_id)
             resumable = access is not None and (access.waiting_service is not None or access.pending_workspace is not None)
-            if not resumable and not reconciliation_resume_available(self.application.states.load(request.project_id)):
+            management = self.management_resume is not None and self.management_resume(request.project_id)
+            if not resumable and not management and not reconciliation_resume_available(self.application.states.load(request.project_id)):
                 return _recover_required(self, request, state, context)
             state = replace(state, status=StrictTddRunStatus.RUNNING, reason=None)
 

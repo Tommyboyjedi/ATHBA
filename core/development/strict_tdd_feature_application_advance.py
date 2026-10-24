@@ -17,6 +17,7 @@ from core.development.project_environment import DevelopmentProject
 from core.development.behavior_contract_coordinator import ContractPlanningRequest
 from core.development.specification_assessment import GatekeeperStateRequest
 from core.development.specification_atomization import ChecklistAtomizationFailure
+from core.development.feature_management_checkpoint import management_checkpoint
 from core.development.strict_tdd_feature_application import (
     FeatureProjectPreparation,
     FeatureReconciliationRequest,
@@ -52,6 +53,8 @@ async def advance(
     project_load = service.prepare_project(FeatureProjectPreparation(request.project_id, tuple(request.production_paths)))
     project = project_load.project
     state = service.states.load(request.project_id)
+    if state is not None and state.delivery_identity != service.scenario_namespace:
+        raise ValueError("persisted feature delivery identity requires explicit compatibility review")
     if state is None:
         state = StrictTddFeatureState(
             request.project_id,
@@ -60,6 +63,7 @@ async def advance(
             canonical_ref=f"refs/heads/{project.default_ref}",
             canonical_development_base=project.trusted_base_sha,
             behavioral_entry_revision=project.trusted_base_sha,
+            delivery_identity=service.scenario_namespace,
         )
         service.states.save(state)
         disposition = ProjectTransitionDisposition.CREATED if project_load.created else ProjectTransitionDisposition.LOADED
@@ -84,6 +88,11 @@ async def advance(
             invoked = service.consolidation.dependencies.reasoning.invocation_count > calls_before
             return _result_for(FeatureTransitionKind.CONSOLIDATION_CHECKED,
                 consolidated, project, reasoning=invoked)
+    synchronized = await management_checkpoint(service.management_checkpoint, (service.environment, state))
+    if synchronized != state:
+        service.states.save(synchronized)
+        state = synchronized
+        project = service.environment.repo.load(request.project_id) or project
     contract = BehaviorContract.from_dict(dict(state.contract_payload or {}), load_options=None)
     behavior = _next_behavior(state, contract)
     if state.current_scenario_id is not None and behavior is not None:
@@ -138,6 +147,7 @@ async def _persist_contract(
         canonical_ref=f"refs/heads/{project.default_ref}",
         canonical_development_base=project.trusted_base_sha,
             behavioral_entry_revision=project.trusted_base_sha,
+            delivery_identity=service.scenario_namespace,
     )
     service.states.save(state)
     return _result_for(FeatureTransitionKind.CONTRACT_PERSISTED, state, project, reasoning=True)
@@ -175,7 +185,7 @@ def _select_behavior(
     project: DevelopmentProject,
     behavior_ref: str,
 ) -> FeatureAdvanceResult:
-    scenario_id = f"{state.project_id}--{behavior_ref}"
+    scenario_id = f"{service.scenario_namespace or state.project_id}--{behavior_ref}"
     selected = replace(state, current_scenario_id=scenario_id)
     service.states.save(selected)
     return _result_for(FeatureTransitionKind.BEHAVIOR_SELECTED, selected, project, behavior_ref=behavior_ref)

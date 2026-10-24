@@ -13,7 +13,7 @@ from core.development.microcycle_revision_git import (
     MicrocycleGitClient, RevisionAncestryRequest, RevisionResolveRequest,
 )
 from core.development.project_revision_synchronization import TrustedProjectRevisionSynchronizer
-from core.development.project_environment import ProjectEnvironmentService
+from core.development.project_environment_port import PreparedProjectEnvironment
 from core.development.specification_revision_snapshot import GitSpecificationSnapshot
 
 GIT_TIMEOUT_SECONDS = 15
@@ -60,7 +60,7 @@ class PostBehaviorGit:
 
 @dataclass(frozen=True)
 class PostBehaviorPromotion:
-    environment: ProjectEnvironmentService
+    environment: PreparedProjectEnvironment
     git: PostBehaviorGit
 
     async def promote_candidate(self, state: PostBehaviorState) -> tuple[str, ...]:
