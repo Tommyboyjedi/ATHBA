@@ -176,6 +176,15 @@ def test_conflict_and_explicit_resolution_use_the_same_combined_acceptance_pipel
     assert result.returncode == 1
     (supplied / "common.py").write_text('"""first and second comments"""\ndef value():\n    return 2\n')
     resolution = commit(supplied, "explicit controlled conflict resolution")
+    sync_conflict = fixture.service.request_sync(ManagementRequest("application", "second", "controlled-manager"))
+    assert sync_conflict.status == MergeStatus.CONFLICT
+    key = RecordIdentity("application", "second")
+    fixture.store.update_delivery((key, lambda value: replace(value, phase=DeliveryPhase.BLOCKED)))
+    deferred = fixture.service.validate_resolution(RecordIdentity("application", sync_conflict.id), resolution)
+    assert deferred.status == MergeStatus.DEFERRED
+    assert fixture.store.merge(RecordIdentity("application", sync_conflict.id)) == sync_conflict
+    assert git(GitCommand(Path(second.worktree), ("rev-parse", "HEAD"))) == second.trusted_revision
+    fixture.store.update_delivery((key, lambda value: replace(value, phase=DeliveryPhase.COMPLETE)))
     (supplied / "unrelated.py").write_text("UNREQUESTED = True\n")
     unrelated = commit(supplied, "unattributed addition must not enter through resolution")
     rejected = fixture.service.validate_resolution(RecordIdentity("application", conflict.id), unrelated)
@@ -282,3 +291,39 @@ def test_long_merge_validation_does_not_hold_the_application_integration_lock(tm
         finally:
             release.set()
         assert pending.result(timeout=30).status == MergeStatus.VALIDATED
+
+
+def test_clean_fork_blocked_or_failed_delivery_cannot_sync_over_unresolved_work(tmp_path):
+    fixture = managed(tmp_path)
+    fixture.delivery(ControlledObservation("accepted"))
+    records = []
+    for phase in (DeliveryPhase.BLOCKED, DeliveryPhase.FAILED):
+        name = "unfinished-" + phase.value
+        root = tmp_path / "branches" / name
+        branch_ref = "refs/heads/delivery/" + name
+        GitWorkspaces().prepare(BranchWorkspace(fixture.repository, root, branch_ref,
+            fixture.base_revision, tmp_path / "branches", "refs/heads/release"))
+        requirement = "Controlled unfinished observation."
+        behavior = FullBehavior(name, requirement, sha256(requirement.encode()).hexdigest(),
+            ("common.py",), (f"tests/test_{name}.py",))
+        state = tmp_path / "state" / name
+        unresolved = state / "controlled-unresolved-invocation.json"
+        write_json_atomically(unresolved, {"work_id": name, "pending": True, "base_revision": fixture.base_revision})
+        record = TeamDelivery(name, "application", behavior, "controlled-architecture",
+            1, "controlled-specification", 1, branch_ref, str(root), str(state),
+            fixture.base_revision, fixture.base_revision, fixture.base_revision, phase=phase,
+            evidence_refs=(str(unresolved),))
+        fixture.store.save_delivery(record)
+        records.append((record, unresolved, unresolved.read_bytes()))
+    integrated = fixture.publish(fixture.prepare("accepted"))
+    assert integrated.status == MergeStatus.PUBLISHED
+    for record, unresolved, original in records:
+        result = fixture.service.request_sync(ManagementRequest("application", record.id, "controlled-manager"))
+        assert result.status == MergeStatus.DEFERRED
+        current = fixture.store.delivery(RecordIdentity("application", record.id))
+        assert current.phase == record.phase
+        assert current.pending_sync_revision == integrated.candidate_revision
+        assert current.trusted_revision == fixture.base_revision
+        assert git(GitCommand(Path(record.worktree), ("rev-parse", "HEAD"))) == fixture.base_revision
+        assert unresolved.read_bytes() == original
+        assert not (fixture.store.directory("application") / "trials" / result.id).exists()

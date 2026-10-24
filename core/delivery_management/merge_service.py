@@ -19,6 +19,9 @@ from core.delivery_management.store import RecordIdentity
 from core.delivery_management.validation import IntegrationValidationRequest
 
 
+PUBLIC_SYNCHRONIZATION_PHASES = frozenset({DeliveryPhase.READY, DeliveryPhase.COMPLETE})
+
+
 def required_delivery(dependencies: MergeDependencies, identity: RecordIdentity) -> TeamDelivery:
     value = dependencies.store.delivery(identity)
     if value is None:
@@ -50,7 +53,7 @@ def clear_pending_sync(dependencies: MergeDependencies, operation: MergeRecord) 
 
 def pending_sync_update(dependencies: MergeDependencies, request: tuple[TeamDelivery, bool]) -> TeamDelivery:
     delivery, active_only = request
-    if active_only and delivery.phase not in {DeliveryPhase.RUNNING, DeliveryPhase.WAITING}:
+    if active_only and delivery.phase in PUBLIC_SYNCHRONIZATION_PHASES:
         return delivery
     parent = dependencies.parentenv.repo.load(delivery.project_id)
     if parent is None:
@@ -278,9 +281,12 @@ class MergeManagement:
     def prepare(self, request: ManagementRequest, kind: MergeKind) -> MergeRecord:
         deps = self.dependencies
         delivery = required_delivery(deps, RecordIdentity(request.project_id, request.delivery_id))
-        if kind == MergeKind.SYNCHRONIZATION and delivery.phase in {DeliveryPhase.RUNNING, DeliveryPhase.WAITING}:
+        if kind == MergeKind.SYNCHRONIZATION and delivery.phase not in PUBLIC_SYNCHRONIZATION_PHASES:
             return self._deferred(request)
         with deps.store.locked((request.project_id, "worker-" + request.delivery_id)):
+            current = required_delivery(deps, RecordIdentity(request.project_id, request.delivery_id))
+            if kind == MergeKind.SYNCHRONIZATION and current.phase not in PUBLIC_SYNCHRONIZATION_PHASES:
+                return self._deferred(request)
             return self._prepare((request, kind))
 
     def request_sync(self, request: ManagementRequest) -> MergeRecord:
@@ -342,11 +348,11 @@ class MergeManagement:
         identity = RecordIdentity(request.project_id, request.delivery_id)
         delivery = deps.store.update_delivery((identity,
             lambda value: pending_sync_update(deps, (value, True))))
-        if delivery.phase not in {DeliveryPhase.RUNNING, DeliveryPhase.WAITING}:
+        if delivery.phase in PUBLIC_SYNCHRONIZATION_PHASES:
             return self.prepare(request, MergeKind.SYNCHRONIZATION)
         operation = MergeRecord(uuid4().hex, request.project_id, request.delivery_id, MergeKind.SYNCHRONIZATION,
             delivery.pending_sync_revision or parent.trusted_base_sha, delivery.trusted_revision, status=MergeStatus.DEFERRED,
-            reason="delivery is active; synchronization waits for a quiescent accepted-REQ checkpoint")
+            reason="delivery is not publicly quiescent; synchronization waits for an owned accepted-REQ checkpoint")
         deps.store.save_merge(operation)
         return operation
 
@@ -448,6 +454,10 @@ class ResolutionManagement:
         if operation is None or operation.status not in {MergeStatus.CONFLICT, MergeStatus.FAILED}:
             raise ValueError("explicit resolution requires a retained conflict or failed candidate")
         with deps.store.locked((identity.project_id, "worker-" + operation.delivery_id)):
+            delivery = required_delivery(deps, RecordIdentity(identity.project_id, operation.delivery_id))
+            if operation.kind == MergeKind.SYNCHRONIZATION and delivery.phase not in PUBLIC_SYNCHRONIZATION_PHASES:
+                return MergeManagement(deps)._deferred(ManagementRequest(
+                    identity.project_id, operation.delivery_id, "management-conflict-resolution"))
             with deps.store.locked((identity.project_id, "integration")):
                 current = deps.store.merge(identity)
                 if current != operation:
