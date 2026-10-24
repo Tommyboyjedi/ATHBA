@@ -10,7 +10,7 @@ import fcntl
 from core.atomic_json_file import read_json_file, write_json_atomically
 from core.filesystem_policy import resolve_identifier_path
 from core.project_setup.commands import CommandResult, ToolObservation
-from core.project_setup.architecture import FullBehavior
+from core.project_setup.architecture import FullBehavior, content_hash
 
 
 class SetupStatus(str, Enum):
@@ -123,6 +123,18 @@ class ProjectSetupRepository:
 
     def save(self, record: ProjectSetupRecord) -> None:
         write_json_atomically(self.path(record.project_id), record.to_dict())
+
+    def archive_failure(self, record: ProjectSetupRecord) -> None:
+        if record.status != SetupStatus.FAILED:
+            return
+        directory = self.path(record.project_id).parent / "setup-failures"
+        if directory.is_symlink():
+            raise ValueError("setup failure history cannot be a symlink")
+        path = directory / (content_hash(record.to_dict()) + ".json")
+        if path.is_symlink():
+            raise ValueError("setup failure evidence cannot be a symlink")
+        if not path.exists():
+            write_json_atomically(path, record.to_dict())
 
     @contextmanager
     def locked(self, project_id: str):

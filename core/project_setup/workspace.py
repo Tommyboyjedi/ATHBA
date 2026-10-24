@@ -1,8 +1,9 @@
 """Prepare one approved project's bounded scaffold without executing BDE or models."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
+from hashlib import sha256
 import subprocess
 import tempfile
 
@@ -17,7 +18,13 @@ from core.development.project_environment_state import (
 )
 from core.development.project_environment_store import ProjectEnvironmentRepo
 from core.filesystem_policy import resolve_identifier_path, resolve_relative_path
-from core.project_setup.architecture import ArchitectureDecision, RepositoryPolicy, validate_scope
+from core.project_setup.architecture import (
+    ArchitectureApproval, ArchitectureDecision, RepositoryPolicy, content_hash, validate_scope,
+)
+from core.project_setup.progress import (
+    SetupProgress, SetupProgressJournal, SetupProgressVerifier, SetupWork,
+)
+from core.project_setup.recovery import HistoricalSetupContext, HistoricalSetupEvidence, HistoricalSetupRecovery
 from core.project_setup.commands import CommandResult, SetupCommand, SetupCommandRunner
 from core.project_setup.profile_domain import ProfileKind, ResolvedSetupProfile, SetupFile
 
@@ -60,6 +67,20 @@ class _Seed:
     created: bool
 
 
+@dataclass(frozen=True)
+class WorkspaceRecovery:
+    preparation: WorkspacePreparation
+    approval: ArchitectureApproval
+    evidence: HistoricalSetupEvidence
+
+
+@dataclass(frozen=True)
+class _SetupCheckpoint:
+    journal: SetupProgressJournal
+    progress: SetupProgress
+    seed: _Seed
+
+
 class WorkspacePreparationError(Exception):
     """Preserve failed setup command evidence without advancing trusted state."""
 
@@ -85,14 +106,17 @@ class ProjectSetupWorkspace:
                 raise ValueError("prepared project runtime conflicts with approved profile")
             _require_existing_files(context, plan)
             return PreparedWorkspace(project, ())
-        seed = self.authority.seed(context)
-        _validate_files(context, plan)
-        if seed is None:
-            revision = self.authority.git.initialize(context.paths)
-            seed = _Seed(revision, "main", True)
+        checkpoint = _owned_seed(context, self.authority)
+        seed = checkpoint.seed
         _write_files(context, plan)
+        progress = replace(checkpoint.progress, files_written=True)
+        SetupProgressVerifier(self.authority.run, request.profile.generated_paths).verify(progress)
+        checkpoint.journal.save(progress)
         commands = _smoke_commands(context, self.runner)
-        revision = self.authority.scaffold_revision(context, seed)
+        revision = progress.scaffold_revision or self.authority.scaffold_revision(context, seed)
+        progress = replace(progress, scaffold_revision=revision)
+        SetupProgressVerifier(self.authority.run, request.profile.generated_paths).verify(progress)
+        checkpoint.journal.save(progress)
         project = DevelopmentProject(
             project_id=request.decision.project_id,
             repository_root=str(context.paths.repository_root),
@@ -104,12 +128,26 @@ class ProjectSetupWorkspace:
             workspace_lifetime=EnvironmentLifetime.PROJECT_PERSISTENT.value,
         )
         canonical = f"refs/heads/{seed.default_ref}"
-        if revision != seed.revision:
+        if self.authority.git.canonical_revision(CanonicalRefRequest(
+                context.paths.repository_root, canonical)) != revision:
             self.authority.git.promote(RefPromotionRequest(
                 context.paths.repository_root, canonical, seed.revision, revision))
         self.authority.verify_project(project)
         self.repo.save(project)
         return PreparedWorkspace(project, commands)
+
+    def recover(self, request: WorkspaceRecovery) -> None:
+        context = _context(self.root, request.preparation)
+        if self.repo.load(context.request.decision.project_id) is not None:
+            raise ValueError("historical recovery cannot replace an accepted environment")
+        work = _setup_work(context, self.authority)
+        journal = SetupProgressJournal(context.paths.project_root)
+        if journal.load() is not None:
+            raise ValueError("setup already has progress authority; use normal preparation")
+        verifier = SetupProgressVerifier(self.authority.run, request.preparation.profile.generated_paths)
+        record = HistoricalSetupRecovery(verifier).verify(
+            HistoricalSetupContext(work, request.approval), request.evidence)
+        journal.save(record)
 
     def verify(self, project_id: str) -> DevelopmentProject:
         project = self.repo.load(project_id)
@@ -221,6 +259,49 @@ class _WorkspaceGitAuthority:
             raise subprocess.CalledProcessError(result.returncode or 1, result.argv,
                                                 output=result.stdout, stderr=result.stderr)
         return result.stdout
+
+
+def _setup_work(context: _WorkspaceContext, authority: _WorkspaceGitAuthority) -> SetupWork:
+    decision = context.request.decision
+    plan = _file_plan(context.request)
+    files = {item.path: sha256(item.content.encode()).hexdigest() for item in plan.files}
+    existing = decision.existing_repository
+    controlled = {item.path for item in context.request.profile.files}
+    if existing is not None:
+        for path in plan.production_paths:
+            if path not in controlled and authority.run(
+                    context.paths.repository_root, "ls-tree", existing.trusted_revision, "--", path).strip():
+                content = authority.run(context.paths.repository_root, "show", existing.trusted_revision + ":" + path)
+                files[path] = sha256(content.encode()).hexdigest()
+    return SetupWork(decision.project_id,
+        content_hash({"project": decision.project_id, "architecture": decision.digest}),
+        decision.digest, decision.specification_sha256, str(context.paths.repository_root),
+        content_hash(asdict(context.request.profile)), content_hash(asdict(context.runtime)), files, plan.test_paths)
+
+
+def _owned_seed(context: _WorkspaceContext, authority: _WorkspaceGitAuthority) -> _SetupCheckpoint:
+    journal = SetupProgressJournal(context.paths.project_root)
+    progress = journal.load()
+    seed = authority.seed(context) if progress is None else None
+    work = _setup_work(context, authority)
+    verifier = SetupProgressVerifier(authority.run, context.request.profile.generated_paths)
+    if progress is None:
+        _validate_files(context, _file_plan(context.request))
+        progress = journal.start(work)
+    else:
+        if progress.work != work:
+            raise ValueError("setup progress authority differs from approved setup")
+        verifier.verify(progress)
+        seed = None if progress.seed_revision is None else _Seed(
+            progress.seed_revision, progress.canonical_ref.removeprefix("refs/heads/"), progress.created)
+    if seed is None:
+        revision = authority.git.initialize(context.paths)
+        seed = _Seed(revision, "main", True)
+    if progress.seed_revision is None:
+        progress = verifier.snapshot(replace(progress, seed_revision=seed.revision,
+            canonical_ref="refs/heads/" + seed.default_ref, created=seed.created))
+        journal.save(progress)
+    return _SetupCheckpoint(journal, progress, seed)
 
 
 def _context(root: Path, request: WorkspacePreparation) -> _WorkspaceContext:

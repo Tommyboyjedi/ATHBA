@@ -8,8 +8,10 @@ from core.dataclasses.project import Project
 from core.project_setup.architecture import ApprovedArchitecture, PinnedArchitectureApproval, content_hash
 from core.project_setup.commands import SetupCommandRunner
 from core.project_setup.profiles import SetupProfileResolver
+from core.project_setup.profile_domain import ResolvedSetupProfile
+from core.project_setup.recovery import HistoricalSetupEvidence
 from core.project_setup.records import ProjectSetupRecord, ProjectSetupRepository, SetupStatus
-from core.project_setup.workspace import ProjectSetupWorkspace, WorkspacePreparation
+from core.project_setup.workspace import ProjectSetupWorkspace, WorkspacePreparation, WorkspaceRecovery
 
 
 SHARED_BDE_BLOCKER = (
@@ -41,19 +43,13 @@ class ApprovedProjectSetup:
     async def prepare(self, handoff: ApprovedArchitecture) -> ProjectSetupRecord:
         deps = self.dependencies
         decision = handoff.decision
-        deps.approvals.require(handoff)
-        project = await deps.projects.get_project_by_id(decision.project_id)
-        if project is None or str(project.id) != decision.project_id:
-            raise ValueError("setup requires the existing user-facing project")
-        spec = await deps.projects.get_latest_spec(decision.project_id)
-        if (spec is None or spec.get("version") != decision.specification_version
-                or content_hash(spec.get("content")) != decision.specification_sha256):
-            raise ValueError("approved specification version/hash does not match the existing project")
-        profile = deps.profiles.resolve(decision.profile)
+        profile = await self._approved_profile(handoff)
         with deps.records.locked(decision.project_id):
             existing = deps.records.load(decision.project_id)
             if existing and existing.architecture_sha256 != decision.digest:
                 raise ValueError("incompatible approved architecture; existing setup was not changed")
+            if existing is not None:
+                deps.records.archive_failure(existing)
             record = existing or ProjectSetupRecord(
                 decision.project_id, decision.digest, decision.specification_sha256,
                 profile.id, profile.technologies, SetupStatus.BLOCKED,
@@ -96,3 +92,31 @@ class ApprovedProjectSetup:
             )
             deps.records.save(ready)
             return ready
+
+
+    async def recover(self, handoff: ApprovedArchitecture, evidence: HistoricalSetupEvidence) -> ProjectSetupRecord:
+        deps = self.dependencies
+        profile = await self._approved_profile(handoff)
+        with deps.records.locked(handoff.decision.project_id):
+            current = deps.records.load(handoff.decision.project_id)
+            if (current is None or current.status != SetupStatus.FAILED
+                    or current.architecture_sha256 != handoff.decision.digest
+                    or current.environment_verified or current.scaffold_revision is not None
+                    or current.last_accepted_revision is not None or current.deliveries or current.active_delivery):
+                raise ValueError("historical recovery requires this exact failed, undelivered setup")
+            deps.records.archive_failure(current)
+            deps.workspace.recover(WorkspaceRecovery(
+                WorkspacePreparation(handoff.decision, profile), handoff.approval, evidence))
+        return await self.prepare(handoff)
+
+    async def _approved_profile(self, handoff: ApprovedArchitecture) -> ResolvedSetupProfile:
+        deps, decision = self.dependencies, handoff.decision
+        deps.approvals.require(handoff)
+        project = await deps.projects.get_project_by_id(decision.project_id)
+        if project is None or str(project.id) != decision.project_id:
+            raise ValueError("setup requires the existing user-facing project")
+        spec = await deps.projects.get_latest_spec(decision.project_id)
+        if (spec is None or spec.get("version") != decision.specification_version
+                or content_hash(spec.get("content")) != decision.specification_sha256):
+            raise ValueError("approved specification version/hash does not match the existing project")
+        return deps.profiles.resolve(decision.profile)
