@@ -1,0 +1,39 @@
+Implement a standalone OrderRegister that records supplied order totals and
+tracks whether each order has been dispatched.
+
+A newly created register contains no orders. order_count() returns the number
+of registered orders.
+
+create_order(order_id, total_price) creates an order with the supplied identifier
+and total price. A newly created order has status "pending".
+
+order_total(order_id) returns the total price supplied when the order was created.
+order_status(order_id) returns either "pending" or "dispatched".
+
+dispatch_order(order_id) changes an existing pending order to "dispatched".
+Dispatching an already dispatched order leaves it dispatched. Dispatching an
+order must not change its total, the order count or any other order.
+
+Creating an order with an identifier that already exists raises ValueError.
+The existing order and all other register contents remain unchanged.
+
+Querying the total or status of an unknown order, or attempting to dispatch an
+unknown order, raises KeyError and leaves the register unchanged.
+
+Reading order totals, statuses or the order count does not change the register.
+Separate OrderRegister instances hold independent state.
+
+For this behavior, valid order identifiers are non-empty strings and valid total
+prices are non-negative integers representing minor currency units. Zero is a
+valid total. Other input types or values are outside the specified input domain;
+do not invent additional validation or exception requirements for them.
+
+For example, create_order("order-001", 500) creates one pending order with total
+500. Creating "order-002" with total 200 makes the count 2. Dispatching "order-001"
+changes only its status: its total remains 500, the count remains 2, and
+"order-002" remains pending with total 200.
+
+The register is standalone, dependency-free and in memory. It accepts supplied
+order identifiers and totals. It does not calculate basket totals, retrieve
+catalogue products, generate identifiers, process payments or contact external
+services.

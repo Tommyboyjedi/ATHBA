@@ -1,0 +1,76 @@
+{
+  "schema": "fixture/v1",
+  "fixture_id": "order-management-python-v1",
+  "fixture_only": true,
+  "application_kind": "standalone-python-components",
+  "specification_version": 1,
+  "approval": {
+    "label": "TEST_FIXTURE",
+    "state": "approved",
+    "identity": "fixture:order-management-python-v1",
+    "binding_conflicts_resolved": true
+  },
+  "profile_selection": {
+    "name": "python",
+    "technologies": [
+      "python"
+    ],
+    "execution_context": "library",
+    "dependency_policy": "managed_read_only",
+    "tools": [
+      {
+        "kind": "python",
+        "executable": "/srv/ATHBA/.venv/bin/python",
+        "version": "3.14.4"
+      },
+      {
+        "kind": "pytest",
+        "executable": "/srv/ATHBA/.venv/bin/python",
+        "version": "8.4.2"
+      }
+    ]
+  },
+  "behaviors": [
+    {
+      "id": "catalogue",
+      "source_file": "product_catalogue.txt",
+      "source_sha256": "db57cf111cff9565a0cd8647e42b17be48829b392f6dd440a3611a54c4f682ba",
+      "production_paths": [
+        "product_catalogue.py"
+      ],
+      "test_paths": [
+        "tests/test_product_catalogue.py"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "basket",
+      "source_file": "shopping_basket.txt",
+      "source_sha256": "501d1e616dce6a724cab9ba23d1d316e21f621c9e8ccbb2b16ede60e7ab3e931",
+      "production_paths": [
+        "shopping_basket.py"
+      ],
+      "test_paths": [
+        "tests/test_shopping_basket.py"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "orders",
+      "source_file": "order_register.txt",
+      "source_sha256": "011f1329316cf36601e63d4fd1a1ba8663f914292a7744736c0388c8fbc1b50a",
+      "production_paths": [
+        "order_register.py"
+      ],
+      "test_paths": [
+        "tests/test_order_register.py"
+      ],
+      "depends_on": []
+    }
+  ],
+  "delivery_order": [
+    "catalogue",
+    "basket",
+    "orders"
+  ]
+}
