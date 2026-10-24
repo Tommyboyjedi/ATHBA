@@ -8,7 +8,11 @@ from core.services.session_service import SessionService
 
 
 class ProjectsService:
-    def __init__(self):
+    def __init__(self, setup_root=None):
+        from core.project_setup.records import ProjectSetupRepository
+        from pathlib import Path
+
+        self.setup_records = ProjectSetupRepository(Path(setup_root)) if setup_root is not None else None
         self.project_repo = ProjectRepo()
         self.ticket_repo = TicketRepo()
         self.code_repo = CodeRepo()
@@ -78,3 +82,11 @@ class ProjectsService:
             return None
         project.name = new_name
         return await self.project_repo.update(project)
+
+    async def get_development_setup(self, project_id: str) -> dict | None:
+        """Read associated setup state without provisioning or changing the project."""
+        project = await self.get_project_by_id(project_id)
+        if project is None or self.setup_records is None:
+            return None
+        record = self.setup_records.load(str(project.id))
+        return record.to_dict() if record is not None else None

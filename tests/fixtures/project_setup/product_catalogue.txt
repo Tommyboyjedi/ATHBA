@@ -1,0 +1,33 @@
+Implement a standalone ProductCatalogue for registering products and retrieving
+their names and prices.
+
+A newly created catalogue contains no products. product_count() returns the
+number of distinct product identifiers currently registered.
+
+register_product(sku, name, price) registers a product under the supplied sku.
+product_name(sku) returns that product's registered name.
+product_price(sku) returns that product's registered price.
+
+Registering an already registered sku replaces that product's name and price
+without increasing the product count. It must not change other registered
+products.
+
+Looking up the name or price of an unknown sku raises KeyError and leaves the
+catalogue unchanged.
+
+Reading a product's name, price or the product count does not change the
+catalogue. Separate ProductCatalogue instances hold independent state.
+
+For this behavior, valid skus and names are non-empty strings and valid prices
+are non-negative integers representing minor currency units. Zero is a valid
+price. Other input types or values are outside the specified input domain;
+do not invent validation or exception requirements for them.
+
+For example, registering ("bread", "Bread", 300) and ("milk", "Milk", 200)
+produces a product count of 2. Looking up bread returns name "Bread" and price
+300; looking up milk returns name "Milk" and price 200. Registering
+("bread", "Wholemeal bread", 350) afterward keeps the count at 2, updates
+bread's name and price, and leaves milk unchanged.
+
+The catalogue is standalone, dependency-free and in memory. It does not call
+a basket, order register, network service, filesystem storage or database.
