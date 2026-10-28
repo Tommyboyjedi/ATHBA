@@ -390,7 +390,7 @@ class _SourceClauseValidationIssue:
         )
 
 
-class _SourceClauseValidationError(ValueError):
+class _SourceClauseValidationError(Exception):
     def __init__(self, issue: _SourceClauseValidationIssue):
         self.issue = issue
         super().__init__(issue.message)
@@ -418,7 +418,7 @@ class _SourceClauseSplitFormatRepairRequest:
     validation_error: str
 
 
-class _SourceClauseSplitFormatError(ValueError):
+class _SourceClauseSplitFormatError(Exception):
     """The split reply is not structurally decodable; one format repair is allowed."""
 
 
@@ -553,7 +553,7 @@ class RequirementClausePlanner:
                             repaired_split_response,
                         )
                         split = _decode_source_clause_split(repaired_split_response)
-                    except ValueError as format_repair_error:
+                    except (_SourceClauseSplitFormatError, ValueError) as format_repair_error:
                         attempts[-1] = replace(
                             attempts[-1],
                             validation_error=str(format_repair_error),
