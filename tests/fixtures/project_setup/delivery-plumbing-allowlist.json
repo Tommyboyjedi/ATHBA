@@ -75,6 +75,11 @@
       "baseline_sha256": "18b441f3a1925dd85cdc19adb1962fc438f1c78c67382582e0b2dbc537d640bd",
       "mechanical_reason": "Optional default-off recovery admission only for exact durable published management synchronization receipts; legacy unknown in-flight work still fails closed.",
       "reviewed_sha256": "a7a46c78425dba6047c9ccba42f5f0c489bcf64faee226d8ca5386c85309a2d0"
+    },
+    "core/execution/rack_ai_public_workspace.py": {
+      "baseline_sha256": "889c09bf9395a113cf2db3c052485a54cd91a9772d8a8bf600405e1938dcd882",
+      "reviewed_sha256": "dbf55fbd266a36bf4ea15ddc4a710c169fbceababbbd9bdbe63aab2874fc4d5b",
+      "mechanical_reason": "Always serialize the known repository root through the public RackAI handoff; RackAI retains static/dynamic authorization."
     }
   }
 }
