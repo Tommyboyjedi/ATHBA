@@ -28,8 +28,11 @@ from core.development.behavior_contract_coordinator import (
     SemanticReviewRequest,
     SeniorReviewer,
     WorkUnitBuildRequest,
+    _SourceClauseSplitProgress,
+    _SourceClauseValidationIssue,
     _assess_accepted_red,
     _first_executable_gap,
+    _repaired_source_clause_locations,
 )
 from core.development.failure_progression import (
     FAILURE_ACTIONS,
@@ -185,6 +188,77 @@ def source_clause_payload():
              "source_quote": "Reject duplicate resource ids, duplicate reservation ids, reservations for unknown resources, cancellation of unknown reservations, zero or negative quantities, non-positive resource capacities, and reservations exceeding remaining capacity with ValueError.",
              "subject": "Reject"},
         ]
+    }
+
+def product_catalogue_requirement_text() -> str:
+    return (
+        "Build an in-memory ProductCatalogue. "
+        "Looking up the name or price of an unknown sku raises KeyError and leaves the catalogue unchanged."
+    )
+
+
+def product_catalogue_invalid_clause() -> dict[str, object]:
+    source_quote = (
+        "Looking up the name or price of an unknown sku raises KeyError "
+        "and leaves the catalogue unchanged."
+    )
+    return {
+        "ref": "PC-1",
+        "text": "Unknown sku name or price lookup raises KeyError and leaves the catalogue unchanged.",
+        "kind": "error_behavior",
+        "evidence_kind": "test",
+        "source_quote": source_quote,
+        "subject": source_quote,
+        "obligation_type": "error_behavior",
+    }
+
+
+def product_catalogue_split_children() -> list[dict[str, object]]:
+    source_quote = product_catalogue_invalid_clause()["source_quote"]
+    return [
+        {
+            "text": "Unknown sku name or price lookup raises KeyError.",
+            "kind": "behavior",
+            "evidence_kind": "test",
+            "source_quote": source_quote,
+            "subject": "raises KeyError",
+            "obligation_type": "error_behavior",
+        },
+        {
+            "text": "Unknown sku lookup leaves the catalogue unchanged.",
+            "kind": "invariant",
+            "evidence_kind": "test",
+            "source_quote": source_quote,
+            "subject": "leaves the catalogue unchanged",
+            "obligation_type": "invariant",
+        },
+    ]
+
+
+def product_catalogue_split_response(children: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        "disposition": "split",
+        "rationale": "The error and state obligations are independently observable.",
+        "coverage_rationale": "The children retain the parent observations.",
+        "children": children,
+    }
+
+
+def product_catalogue_unaffected_clause() -> dict[str, object]:
+    return {
+        "ref": "PC-2",
+        "text": "A ProductCatalogue is available.",
+        "kind": "behavior",
+        "evidence_kind": "test",
+        "source_quote": "Build an in-memory ProductCatalogue.",
+        "subject": "Build an in-memory ProductCatalogue",
+    }
+
+
+def targeted_clause_repair(clause: dict[str, object]) -> dict[str, object]:
+    return {
+        field: clause[field]
+        for field in ("text", "kind", "evidence_kind", "subject", "obligation_type")
     }
 
 
@@ -628,6 +702,442 @@ async def test_duplicate_source_clause_refs_are_rejected():
         await planner.create_clauses(project_id="reservation-book", requirement_text=requirement_text())
 
     assert "duplicate source clause refs" in excinfo.value.attempts[0].validation_error
+
+@pytest.mark.asyncio
+async def test_source_clause_planner_repairs_distinct_errors_sequentially():
+    base = {
+        "ref": "SRC-1",
+        "text": "A resource can be added with a unique id.",
+        "kind": "invariant",
+        "evidence_kind": "test",
+        "source_quote": "Clients can add resources",
+        "subject": "add resources",
+        "obligation_type": "invariant",
+    }
+    invalid_evidence = {**base, "evidence_kind": "invariant"}
+    invalid_classification = {**base, "obligation_type": "observable_behavior"}
+    gateway = FakeReasoningGateway([
+        {"clauses": [invalid_evidence]},
+        targeted_clause_repair(invalid_classification),
+        targeted_clause_repair(base),
+    ])
+
+    result = await RequirementClausePlanner(gateway).plan_clauses(
+        project_id="reservation-book",
+        requirement_text=requirement_text(),
+    )
+
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_source_requirement_clauses",
+        "athba_source_requirement_clauses_repair",
+        "athba_source_requirement_clauses_repair",
+    ]
+    assert len(result.attempts) == 3
+    assert result.attempts[0].validation_rule != result.attempts[1].validation_rule
+
+
+@pytest.mark.asyncio
+async def test_source_clause_planner_has_no_global_distinct_error_correction_limit():
+    base = {
+        "ref": "SRC-1",
+        "text": "A resource can be added with a unique id.",
+        "kind": "invariant",
+        "evidence_kind": "test",
+        "source_quote": "Clients can add resources",
+        "subject": "add resources",
+        "obligation_type": "invariant",
+    }
+    invalid_kind = {**base, "kind": "error_behavior", "obligation_type": "error_behavior"}
+    invalid_evidence = {**base, "evidence_kind": "invariant"}
+    invalid_classification = {**base, "obligation_type": "observable_behavior"}
+    missing_grounding = {**base, "subject": "not grounded in the source passage"}
+    gateway = FakeReasoningGateway([
+        {"clauses": [invalid_kind]},
+        targeted_clause_repair(invalid_evidence),
+        targeted_clause_repair(invalid_classification),
+        targeted_clause_repair(missing_grounding),
+        targeted_clause_repair(base),
+    ])
+
+    result = await RequirementClausePlanner(gateway).plan_clauses(
+        project_id="reservation-book",
+        requirement_text=requirement_text(),
+    )
+
+    assert len(gateway.requests) == 5
+    assert len(result.attempts) == 5
+    assert all(request.purpose.endswith("_repair") for request in gateway.requests[1:])
+
+
+@pytest.mark.asyncio
+async def test_source_clause_planner_splits_uncorrected_product_catalogue_clause():
+    parent = product_catalogue_invalid_clause()
+    unaffected = product_catalogue_unaffected_clause()
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent, unaffected]},
+        targeted_clause_repair(parent),
+        product_catalogue_split_response(product_catalogue_split_children()),
+    ])
+
+    result = await RequirementClausePlanner(gateway).plan_clauses(
+        project_id="product-catalogue",
+        requirement_text=product_catalogue_requirement_text(),
+    )
+
+    assert [clause.ref for clause in result.clauses] == ["PC-1-S001", "PC-1-S002", "PC-2"]
+    assert [clause.source_quote for clause in result.clauses[:2]] == [parent["source_quote"]] * 2
+    assert result.clauses[-1] == SourceRequirementClause.from_dict(unaffected)
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_source_requirement_clauses",
+        "athba_source_requirement_clauses_repair",
+        "athba_source_requirement_clause_split",
+    ]
+    split_prompt = json.loads(gateway.requests[-1].prompt)
+    assert split_prompt["offending_clause"] == parent
+    assert split_prompt["offending_source_passage"] == parent["source_quote"]
+
+
+@pytest.mark.asyncio
+async def test_source_clause_planner_repairs_a_split_child():
+    parent = product_catalogue_invalid_clause()
+    children = product_catalogue_split_children()
+    invalid_child = {**children[0], "kind": "error_behavior"}
+    split_children = [invalid_child, children[1]]
+    repaired = targeted_clause_repair(children[0])
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        product_catalogue_split_response(split_children),
+        repaired,
+    ])
+
+    result = await RequirementClausePlanner(gateway).plan_clauses(
+        project_id="product-catalogue",
+        requirement_text=product_catalogue_requirement_text(),
+    )
+
+    assert [clause.ref for clause in result.clauses] == ["PC-1-S001", "PC-1-S002"]
+    assert [request.purpose for request in gateway.requests][-2:] == [
+        "athba_source_requirement_clause_split",
+        "athba_source_requirement_clauses_repair",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_clause_planner_recursively_splits_an_uncorrected_child():
+    parent = product_catalogue_invalid_clause()
+    children = product_catalogue_split_children()
+    invalid_child = {**children[0], "kind": "error_behavior"}
+    initial_split = product_catalogue_split_response([invalid_child, children[1]])
+    child_draft = targeted_clause_repair(invalid_child)
+    nested_children = [
+        {
+            "text": "Unknown sku name lookup raises KeyError.",
+            "kind": "behavior",
+            "evidence_kind": "test",
+            "source_quote": parent["source_quote"],
+            "subject": "raises KeyError",
+            "obligation_type": "error_behavior",
+        },
+        {
+            "text": "Unknown sku price lookup raises KeyError.",
+            "kind": "behavior",
+            "evidence_kind": "test",
+            "source_quote": parent["source_quote"],
+            "subject": "raises KeyError",
+            "obligation_type": "error_behavior",
+        },
+    ]
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        initial_split,
+        child_draft,
+        product_catalogue_split_response(nested_children),
+    ])
+
+    result = await RequirementClausePlanner(gateway).plan_clauses(
+        project_id="product-catalogue",
+        requirement_text=product_catalogue_requirement_text(),
+    )
+
+    assert [clause.ref for clause in result.clauses] == [
+        "PC-1-S001-S001",
+        "PC-1-S001-S002",
+        "PC-1-S002",
+    ]
+    assert len(gateway.requests) == 5
+    assert gateway.requests[-1].purpose == "athba_source_requirement_clause_split"
+
+
+@pytest.mark.asyncio
+async def test_source_clause_planner_stops_when_split_is_not_produced():
+    parent = product_catalogue_invalid_clause()
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        {"disposition": "not_produced", "rationale": "The source clause cannot be narrowed."},
+    ])
+
+    with pytest.raises(SourceClausePlanningFailure, match="source clause split not produced") as caught:
+        await RequirementClausePlanner(gateway).create_clauses(
+            project_id="product-catalogue",
+            requirement_text=product_catalogue_requirement_text(),
+        )
+
+    assert len(gateway.requests) == 3
+    assert caught.value.terminal_reason is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("split_response", "reason"),
+    [
+        (
+            {"disposition": "not_produced", "rationale": "The source clause cannot be narrowed."},
+            "source clause split not produced",
+        ),
+        (
+            product_catalogue_split_response([
+                {key: value for key, value in product_catalogue_invalid_clause().items() if key != "ref"},
+                product_catalogue_split_children()[1],
+            ]),
+            "identical to its parent",
+        ),
+        (
+            product_catalogue_split_response([
+                product_catalogue_split_children()[0],
+                product_catalogue_split_children()[0],
+            ]),
+            "duplicate children",
+        ),
+        (
+            product_catalogue_split_response([
+                {
+                    **product_catalogue_split_children()[0],
+                    "text": "Unknown sku name or price lookup raises KeyError and leaves the catalogue unchanged repeatedly.",
+                },
+                product_catalogue_split_children()[1],
+            ]),
+            "introduces wording",
+        ),
+    ],
+)
+async def test_source_clause_planner_stops_on_nonprogressing_split(split_response, reason):
+    parent = product_catalogue_invalid_clause()
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        split_response,
+    ])
+
+    with pytest.raises(SourceClausePlanningFailure, match=reason):
+        await RequirementClausePlanner(gateway).create_clauses(
+            project_id="product-catalogue",
+            requirement_text=product_catalogue_requirement_text(),
+        )
+
+    assert len(gateway.requests) == 3
+
+@pytest.mark.asyncio
+async def test_targeted_source_clause_repair_rejects_full_list_output():
+    parent = product_catalogue_invalid_clause()
+    unaffected = product_catalogue_unaffected_clause()
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent, unaffected]},
+        {"clauses": [parent, {**unaffected, "text": "A different catalogue behavior."}]},
+    ])
+
+    with pytest.raises(SourceClausePlanningFailure, match="exactly one mutable clause object") as caught:
+        await RequirementClausePlanner(gateway).create_clauses(
+            project_id="product-catalogue",
+            requirement_text=product_catalogue_requirement_text(),
+        )
+
+    assert len(gateway.requests) == 2
+    assert caught.value.attempts[-1].validation_location == "clause-slot:1"
+    assert caught.value.terminal_reason is not None
+
+
+@pytest.mark.asyncio
+async def test_targeted_source_clause_repair_preserves_siblings_and_omits_them_from_prompt():
+    parent = product_catalogue_invalid_clause()
+    unaffected = product_catalogue_unaffected_clause()
+    corrected = {**parent, "kind": "behavior"}
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent, unaffected]},
+        targeted_clause_repair(corrected),
+    ])
+
+    result = await RequirementClausePlanner(gateway).plan_clauses(
+        project_id="product-catalogue",
+        requirement_text=product_catalogue_requirement_text(),
+    )
+
+    assert result.clauses[0].kind == "behavior"
+    assert result.clauses[1] == SourceRequirementClause.from_dict(unaffected)
+    repair_prompt = json.loads(gateway.requests[1].prompt)
+    assert repair_prompt["offending_clause"] == parent
+    assert repair_prompt["retained_source_passage"] == parent["source_quote"]
+    assert repair_prompt["stable_clause_location"] == "clause-slot:1"
+    assert "invalid_source_clause_draft" not in repair_prompt
+    assert "requirement_text" not in repair_prompt
+    assert "PC-2" not in gateway.requests[1].prompt
+    assert "ref" not in repair_prompt["required_json_schema"]
+    assert "source_quote" not in repair_prompt["required_json_schema"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("authority_field", ["ref", "source_quote"])
+async def test_targeted_source_clause_repair_rejects_authority_mutation(authority_field):
+    parent = product_catalogue_invalid_clause()
+    corrected = {**parent, "kind": "behavior"}
+    hostile = {**targeted_clause_repair(corrected), authority_field: "mutated-authority"}
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        hostile,
+    ])
+
+    with pytest.raises(SourceClausePlanningFailure, match="stable clause identity or source authority"):
+        await RequirementClausePlanner(gateway).plan_clauses(
+            project_id="product-catalogue",
+            requirement_text=product_catalogue_requirement_text(),
+        )
+
+    assert len(gateway.requests) == 2
+
+
+def test_source_clause_sibling_defence_rejects_full_response_mutation():
+    parent = product_catalogue_invalid_clause()
+    unaffected = product_catalogue_unaffected_clause()
+    changed_unaffected = {**unaffected, "text": "A different catalogue behavior."}
+    issue = _SourceClauseValidationIssue(
+        "invalid parent",
+        "clause-slot:1",
+        "test-rule",
+        parent,
+        0,
+    )
+
+    with pytest.raises(ValueError, match="changed an unaffected clause"):
+        _repaired_source_clause_locations(
+            json.dumps({"clauses": [parent, changed_unaffected]}),
+            json.dumps({"clauses": [parent, unaffected]}),
+            ("clause-slot:1", "clause-slot:2"),
+            issue,
+            _SourceClauseSplitProgress(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_source_clause_split_repairs_one_malformed_json_response_without_semantic_replan():
+    parent = product_catalogue_invalid_clause()
+    children = product_catalogue_split_children()
+    malformed = "```json\n" + json.dumps(product_catalogue_split_response(children)) + "\n```"
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        malformed,
+        product_catalogue_split_response(children),
+    ])
+
+    result = await RequirementClausePlanner(gateway).plan_clauses(
+        project_id="product-catalogue",
+        requirement_text=product_catalogue_requirement_text(),
+    )
+
+    assert [clause.ref for clause in result.clauses] == ["PC-1-S001", "PC-1-S002"]
+    assert [request.purpose for request in gateway.requests] == [
+        "athba_source_requirement_clauses",
+        "athba_source_requirement_clauses_repair",
+        "athba_source_requirement_clause_split",
+        "athba_source_requirement_clause_split_format_repair",
+    ]
+    assert [attempt.stage for attempt in result.attempts] == [
+        "initial",
+        "repair",
+        "split",
+        "split_format_repair",
+    ]
+    repair_prompt = json.loads(gateway.requests[-1].prompt)
+    assert repair_prompt["invalid_split_response"] == malformed
+    assert "format-only repair" in repair_prompt["format_repair_rules"][0]
+    assert repair_prompt["required_json_schema"]["children"]
+
+
+@pytest.mark.asyncio
+async def test_source_clause_split_fails_closed_after_second_malformed_format_response():
+    parent = product_catalogue_invalid_clause()
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        "not valid json",
+        "still not valid json",
+    ])
+
+    with pytest.raises(SourceClausePlanningFailure, match="split format repair failed") as caught:
+        await RequirementClausePlanner(gateway).plan_clauses(
+            project_id="product-catalogue",
+            requirement_text=product_catalogue_requirement_text(),
+        )
+
+    assert len(gateway.requests) == 4
+    assert caught.value.attempts[-2].stage == "split"
+    assert caught.value.attempts[-1].stage == "split_format_repair"
+    assert caught.value.attempts[-2].validation_error == "source clause split response was not valid JSON"
+    assert caught.value.attempts[-1].validation_error == "source clause split response was not valid JSON"
+
+
+@pytest.mark.asyncio
+async def test_source_clause_split_format_repair_rejects_semantic_child_mutation():
+    parent = product_catalogue_invalid_clause()
+    children = product_catalogue_split_children()
+    malformed = product_catalogue_split_response(children)
+    malformed.pop("coverage_rationale")
+    changed_children = [
+        {**children[0], "text": "A changed error obligation."},
+        children[1],
+    ]
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        malformed,
+        product_catalogue_split_response(changed_children),
+    ])
+
+    with pytest.raises(SourceClausePlanningFailure, match="changed the original children"):
+        await RequirementClausePlanner(gateway).plan_clauses(
+            project_id="product-catalogue",
+            requirement_text=product_catalogue_requirement_text(),
+        )
+
+    assert [request.purpose for request in gateway.requests][-1] == (
+        "athba_source_requirement_clause_split_format_repair"
+    )
+    assert len(gateway.requests) == 4
+
+
+@pytest.mark.asyncio
+async def test_source_clause_split_semantic_not_produced_contradiction_does_not_trigger_format_repair():
+    parent = product_catalogue_invalid_clause()
+    gateway = FakeReasoningGateway([
+        {"clauses": [parent]},
+        targeted_clause_repair(parent),
+        {
+            "disposition": "not_produced",
+            "rationale": "No split is possible.",
+            "children": product_catalogue_split_children(),
+        },
+    ])
+
+    with pytest.raises(SourceClausePlanningFailure, match="not_produced source clause split cannot contain children"):
+        await RequirementClausePlanner(gateway).plan_clauses(
+            project_id="product-catalogue",
+            requirement_text=product_catalogue_requirement_text(),
+        )
+
+    assert len(gateway.requests) == 3
+    assert all(request.purpose != "athba_source_requirement_clause_split_format_repair" for request in gateway.requests)
 
 
 @pytest.mark.asyncio

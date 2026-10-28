@@ -8,7 +8,9 @@ import re
 import subprocess
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path, PurePosixPath
+from traceback import extract_tb
 from typing import Protocol, cast
 
 from core.development.behavior_replan_domain import (
@@ -88,7 +90,7 @@ from core.development.policy_scope_violation import (
 from core.development.red_acceptance import RedAcceptanceDependencies, RedAcceptanceRequest, RedAcceptanceResult, RedAcceptanceService, RedBehaviorVerifier, fail_closed_red_acceptance_result, fallback_red_acceptance_result
 from core.development.work_unit import AcceptanceContract, DevelopmentWorkUnit, WorkUnitStatus
 from core.execution.rack_ai_contract import RepositoryBinding
-from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest
+from core.execution.reasoning_gateway import ReasoningGateway, ReasoningRequest, ReasoningResult
 from core.execution.work_unit_gateway import WorkUnitExecutionGateway
 
 
@@ -323,13 +325,18 @@ class GitTesterRepositoryMaterialProvider:
         return result.stdout
 
 
-MAX_SOURCE_CLAUSE_SUBMISSIONS = 2
+MAX_SOURCE_CLAUSE_SPLIT_DEPTH = 16
+MAX_SOURCE_CLAUSE_SPLITS = 256
+MAX_SOURCE_CLAUSE_CHILDREN = 32
 
 
 @dataclass(frozen=True)
 class SourceClausePlanningAttempt:
     response: str
     validation_error: str | None = None
+    stage: str = "initial"
+    validation_location: str | None = None
+    validation_rule: str | None = None
 
 
 @dataclass(frozen=True)
@@ -339,11 +346,96 @@ class SourceClausePlanningResult:
 
 
 class SourceClausePlanningFailure(Exception):
-    def __init__(self, attempts: tuple[SourceClausePlanningAttempt, ...]):
-        if len(attempts) != MAX_SOURCE_CLAUSE_SUBMISSIONS:
-            raise ValueError("source clause planning failure requires both bounded attempts")
+    def __init__(
+        self,
+        attempts: tuple[SourceClausePlanningAttempt, ...],
+        terminal_reason: str | None = None,
+    ):
+        if not attempts:
+            raise ValueError("source clause planning failure requires at least one attempt")
         self.attempts = attempts
-        super().__init__("source requirement clause planning failed after bounded schema repair")
+        self.terminal_reason = terminal_reason
+        detail = "" if terminal_reason is None else f": {terminal_reason}"
+        super().__init__("source requirement clause planning failed after bounded schema repair" + detail)
+
+
+@dataclass(frozen=True)
+class _SourceClauseValidationIssue:
+    message: str
+    location: str
+    rule: str
+    raw_clause: dict[str, object] | None = None
+    clause_index: int | None = None
+
+    @property
+    def identity(self) -> tuple[str, str]:
+        return self.location, self.rule
+
+    @property
+    def can_target_repair(self) -> bool:
+        if self.raw_clause is None or self.clause_index is None:
+            return False
+        return all(
+            isinstance(value := self.raw_clause.get(field), str) and value.strip()
+            for field in ("ref", "source_quote")
+        )
+
+    @property
+    def can_split(self) -> bool:
+        if self.raw_clause is None or self.clause_index is None:
+            return False
+        return all(
+            isinstance(value := self.raw_clause.get(field), str) and value.strip()
+            for field in ("ref", "text", "source_quote", "subject")
+        )
+
+
+class _SourceClauseValidationError(ValueError):
+    def __init__(self, issue: _SourceClauseValidationIssue):
+        self.issue = issue
+        super().__init__(issue.message)
+
+
+@dataclass(frozen=True)
+class _SourceClauseRepairRequest:
+    project_id: str
+    requirement_text: str
+    invalid_response: str
+    issue: _SourceClauseValidationIssue
+
+
+@dataclass(frozen=True)
+class _SourceClauseSplitRequest:
+    project_id: str
+    requirement_text: str
+    issue: _SourceClauseValidationIssue
+
+
+@dataclass(frozen=True)
+class _SourceClauseSplitFormatRepairRequest:
+    request: _SourceClauseSplitRequest
+    invalid_response: str
+    validation_error: str
+
+
+class _SourceClauseSplitFormatError(ValueError):
+    """The split reply is not structurally decodable; one format repair is allowed."""
+
+
+@dataclass(frozen=True)
+class _SourceClauseSplitResponse:
+    disposition: str
+    rationale: str
+    children: tuple[dict[str, object], ...] = ()
+    coverage_rationale: str = ""
+
+
+@dataclass
+class _SourceClauseSplitProgress:
+    split_count: int = 0
+    structures: set[str] = field(default_factory=set)
+    ancestors_by_location: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    assigned_child_authority: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 class RequirementClausePlanner:
@@ -363,38 +455,645 @@ class RequirementClausePlanner:
             requires_large_context=False,
         )
         result = await self.gateway.reason(reasoning_request)
-        try:
-            clauses = _decode_source_clauses(result.text)
-            validate_planned_clauses(clauses, requirement_text)
-            validate_clause_signatures(requirement_text, tuple(clause.text for clause in clauses))
-        except (ValueError, KeyError, TypeError) as error:
-            initial_attempt = SourceClausePlanningAttempt(result.text, str(error))
-            repair_request = ReasoningRequest(
-                purpose="athba_source_requirement_clauses_repair",
-                prompt=_source_clause_repair_prompt(
+        response = result.text
+        locations = _source_clause_locations(response)
+        attempts = [SourceClausePlanningAttempt(response, stage="initial")]
+        corrected_errors: set[tuple[str, str]] = set()
+        split_progress = _SourceClauseSplitProgress()
+        while True:
+            try:
+                clauses = _validated_source_clause_response(response, requirement_text, locations)
+            except _SourceClauseValidationError as error:
+                issue = error.issue
+                attempts[-1] = replace(
+                    attempts[-1],
+                    validation_error=issue.message,
+                    validation_location=issue.location,
+                    validation_rule=issue.rule,
+                )
+                if issue.identity not in corrected_errors:
+                    corrected_errors.add(issue.identity)
+                    invalid_response = response
+                    repair_response = await self._repair_clauses(
+                        _SourceClauseRepairRequest(
+                            project_id=project_id,
+                            requirement_text=requirement_text,
+                            invalid_response=invalid_response,
+                            issue=issue,
+                        )
+                    )
+                    attempts.append(SourceClausePlanningAttempt(repair_response, stage="repair"))
+                    try:
+                        response = _apply_source_clause_repair(
+                            previous_response=invalid_response,
+                            issue=issue,
+                            repair_response=repair_response,
+                        )
+                        locations = _repaired_source_clause_locations(
+                            response,
+                            invalid_response,
+                            locations,
+                            issue,
+                            split_progress,
+                        )
+                    except ValueError as repair_error:
+                        attempts[-1] = replace(
+                            attempts[-1],
+                            validation_error=str(repair_error),
+                            validation_location=issue.location,
+                            validation_rule=issue.rule,
+                        )
+                        raise SourceClausePlanningFailure(
+                            tuple(attempts),
+                            f"source clause repair failed: {repair_error}",
+                        ) from repair_error
+                    continue
+                if not issue.can_split:
+                    raise SourceClausePlanningFailure(
+                        tuple(attempts),
+                        _unresolved_source_clause_error_reason(issue),
+                    ) from error
+                split_request = _SourceClauseSplitRequest(
                     project_id=project_id,
                     requirement_text=requirement_text,
-                    invalid_response=result.text,
-                    validation_error=str(error),
-                ),
-                project_id=project_id,
-                requires_large_context=False,
+                    issue=issue,
+                )
+                split_result = await self._split_clause(split_request)
+                attempts.append(
+                    SourceClausePlanningAttempt(
+                        split_result.text,
+                        stage="split",
+                        validation_error=issue.message,
+                        validation_location=issue.location,
+                        validation_rule=issue.rule,
+                    )
+                )
+                try:
+                    split = _decode_source_clause_split(split_result.text)
+                except _SourceClauseSplitFormatError as format_error:
+                    attempts[-1] = replace(attempts[-1], validation_error=str(format_error))
+                    repaired_split_response = await self._repair_split_format(
+                        _SourceClauseSplitFormatRepairRequest(
+                            request=split_request,
+                            invalid_response=split_result.text,
+                            validation_error=str(format_error),
+                        )
+                    )
+                    attempts.append(
+                        SourceClausePlanningAttempt(
+                            repaired_split_response,
+                            stage="split_format_repair",
+                            validation_location=issue.location,
+                            validation_rule=issue.rule,
+                        )
+                    )
+                    try:
+                        _validate_source_clause_split_format_repair(
+                            split_result.text,
+                            repaired_split_response,
+                        )
+                        split = _decode_source_clause_split(repaired_split_response)
+                    except ValueError as format_repair_error:
+                        attempts[-1] = replace(
+                            attempts[-1],
+                            validation_error=str(format_repair_error),
+                        )
+                        raise SourceClausePlanningFailure(
+                            tuple(attempts),
+                            f"source clause split format repair failed: {format_repair_error}",
+                        ) from format_repair_error
+                except ValueError as split_decode_error:
+                    attempts[-1] = replace(attempts[-1], validation_error=str(split_decode_error))
+                    raise SourceClausePlanningFailure(
+                        tuple(attempts),
+                        f"source clause split failed: {split_decode_error}",
+                    ) from split_decode_error
+                try:
+                    response, locations = _replace_invalid_clause_with_split(
+                        response,
+                        issue,
+                        split,
+                        split_progress,
+                        locations,
+                    )
+                except ValueError as split_error:
+                    attempts[-1] = replace(attempts[-1], validation_error=str(split_error))
+                    raise SourceClausePlanningFailure(
+                        tuple(attempts),
+                        f"source clause split failed: {split_error}",
+                    ) from split_error
+                continue
+            return SourceClausePlanningResult(clauses, tuple(attempts))
+
+    async def _repair_clauses(self, repair: _SourceClauseRepairRequest) -> str:
+        if repair.issue.can_target_repair:
+            prompt = _source_clause_targeted_repair_prompt(
+                project_id=repair.project_id,
+                issue=repair.issue,
             )
-            repaired = await self.gateway.reason(repair_request)
-            try:
-                clauses = _decode_source_clauses(repaired.text)
-                validate_planned_clauses(clauses, requirement_text)
-                validate_clause_signatures(requirement_text, tuple(clause.text for clause in clauses))
-            except (ValueError, KeyError, TypeError) as repair_error:
-                raise SourceClausePlanningFailure((
-                    initial_attempt,
-                    SourceClausePlanningAttempt(repaired.text, str(repair_error)),
-                )) from repair_error
-            return SourceClausePlanningResult(
-                clauses,
-                (initial_attempt, SourceClausePlanningAttempt(repaired.text)),
+        else:
+            prompt = _source_clause_repair_prompt(
+                project_id=repair.project_id,
+                requirement_text=repair.requirement_text,
+                invalid_response=repair.invalid_response,
+                validation_error=repair.issue.message,
             )
-        return SourceClausePlanningResult(clauses, (SourceClausePlanningAttempt(result.text),))
+        repair_request = ReasoningRequest(
+            purpose="athba_source_requirement_clauses_repair",
+            prompt=prompt,
+            project_id=repair.project_id,
+            requires_large_context=False,
+        )
+        return (await self.gateway.reason(repair_request)).text
+
+    async def _split_clause(self, request: _SourceClauseSplitRequest) -> ReasoningResult:
+        split_request = ReasoningRequest(
+            purpose="athba_source_requirement_clause_split",
+            prompt=_source_clause_split_prompt(
+                project_id=request.project_id,
+                requirement_text=request.requirement_text,
+                offending_clause=request.issue.raw_clause or {},
+                validation_error=request.issue.message,
+            ),
+            project_id=request.project_id,
+            requires_large_context=False,
+        )
+        return await self.gateway.reason(split_request)
+
+    async def _repair_split_format(
+        self,
+        repair: _SourceClauseSplitFormatRepairRequest,
+    ) -> str:
+        format_repair_request = ReasoningRequest(
+            purpose="athba_source_requirement_clause_split_format_repair",
+            prompt=_source_clause_split_format_repair_prompt(
+                request=repair.request,
+                invalid_response=repair.invalid_response,
+                validation_error=repair.validation_error,
+            ),
+            project_id=repair.request.project_id,
+            requires_large_context=False,
+        )
+        return (await self.gateway.reason(format_repair_request)).text
+
+
+def _validated_source_clause_response(
+    response: str,
+    requirement_text: str,
+    locations: tuple[str, ...],
+) -> list[SourceRequirementClause]:
+    entries = _raw_source_clause_entries(response)
+    try:
+        clauses = _decode_source_clauses(response)
+    except (ValueError, KeyError, TypeError) as error:
+        raise _SourceClauseValidationError(_decode_validation_issue(entries, locations, error)) from error
+    try:
+        validate_planned_clauses(clauses, requirement_text)
+    except (ValueError, KeyError, TypeError) as error:
+        issue = _planned_clause_validation_issue(entries, clauses, requirement_text, locations, error)
+        raise _SourceClauseValidationError(issue) from error
+    try:
+        validate_clause_signatures(requirement_text, tuple(clause.text for clause in clauses))
+    except (ValueError, KeyError, TypeError) as error:
+        issue = _signature_validation_issue(requirement_text, clauses, error)
+        raise _SourceClauseValidationError(issue) from error
+    return clauses
+
+
+def _raw_source_clause_entries(response: str) -> tuple[dict[str, object] | None, ...]:
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(payload, dict) or not isinstance(payload.get("clauses"), list):
+        return ()
+    return tuple(
+        None if not isinstance(item, dict) else dict(item)
+        for item in payload["clauses"]
+    )
+
+def _source_clause_locations(response: str) -> tuple[str, ...]:
+    return tuple(
+        f"clause-slot:{index}"
+        for index, _ in enumerate(_raw_source_clause_entries(response), 1)
+    )
+
+
+def _repaired_source_clause_locations(
+    response: str,
+    previous_response: str,
+    previous: tuple[str, ...],
+    issue: _SourceClauseValidationIssue,
+    progress: _SourceClauseSplitProgress,
+) -> tuple[str, ...]:
+    if issue.clause_index is None:
+        return _source_clause_locations(response)
+    previous_entries = _raw_source_clause_entries(previous_response)
+    current_entries = _raw_source_clause_entries(response)
+    if len(current_entries) != len(previous_entries):
+        raise ValueError("source clause repair changed the clause count outside the offending clause")
+    if issue.clause_index >= len(current_entries):
+        raise ValueError("source clause repair removed the offending clause")
+    if any(
+        current != previous_entry
+        for index, (current, previous_entry) in enumerate(zip(current_entries, previous_entries))
+        if index != issue.clause_index
+    ):
+        raise ValueError("source clause repair changed an unaffected clause")
+    assigned = progress.assigned_child_authority.get(issue.location)
+    current = current_entries[issue.clause_index]
+    if assigned is not None and (
+        not isinstance(current, dict)
+        or current.get("ref") != assigned[0]
+        or current.get("source_quote") != assigned[1]
+    ):
+        raise ValueError("source clause repair changed ATHBA-assigned child identity or source authority")
+    return previous
+
+
+def _apply_source_clause_repair(
+    *,
+    previous_response: str,
+    issue: _SourceClauseValidationIssue,
+    repair_response: str,
+) -> str:
+    if not issue.can_target_repair:
+        return repair_response
+    replacement = _decode_targeted_source_clause_repair(repair_response)
+    entries = list(_raw_source_clause_entries(previous_response))
+    if (
+        issue.clause_index is None
+        or issue.clause_index >= len(entries)
+        or entries[issue.clause_index] != issue.raw_clause
+    ):
+        raise ValueError("source clause repair target changed before replacement")
+    target = entries[issue.clause_index]
+    if target is None:
+        raise ValueError("source clause repair requires an identifiable offending clause")
+    entries[issue.clause_index] = {**target, **replacement}
+    return json.dumps({"clauses": entries}, sort_keys=True)
+
+
+def _decode_targeted_source_clause_repair(response: str) -> dict[str, object]:
+    payload = _json_object(response, label="targeted source clause repair")
+    if "ref" in payload or "source_quote" in payload:
+        raise ValueError("targeted source clause repair cannot alter stable clause identity or source authority")
+    required_fields = {"text", "kind", "evidence_kind", "subject"}
+    allowed_fields = required_fields | {"obligation_type"}
+    if not required_fields.issubset(payload) or set(payload) - allowed_fields:
+        raise ValueError("targeted source clause repair must return exactly one mutable clause object")
+    if any(
+        not isinstance(value := payload.get(field), str) or not value.strip()
+        for field in required_fields
+    ):
+        raise ValueError("targeted source clause repair fields must be non-empty strings")
+    if "obligation_type" in payload and not isinstance(payload["obligation_type"], str):
+        raise ValueError("targeted source clause repair obligation_type must be a string")
+    return dict(payload)
+
+
+def _source_clause_location_at(locations: tuple[str, ...], index: int) -> str:
+    return locations[index] if index < len(locations) else f"clause-slot:{index + 1}"
+
+
+def _decode_validation_issue(
+    entries: tuple[dict[str, object] | None, ...],
+    locations: tuple[str, ...],
+    error: Exception,
+) -> _SourceClauseValidationIssue:
+    for index, entry in enumerate(entries):
+        if entry is None:
+            return _source_clause_validation_issue(
+                error,
+                None,
+                index,
+                location=_source_clause_location_at(locations, index),
+            )
+        try:
+            SourceRequirementClause.from_dict(entry)
+        except (ValueError, KeyError, TypeError) as clause_error:
+            return _source_clause_validation_issue(
+                clause_error,
+                entry,
+                index,
+                message=str(error),
+                location=_source_clause_location_at(locations, index),
+            )
+    return _source_clause_validation_issue(error)
+
+
+def _planned_clause_validation_issue(
+    entries: tuple[dict[str, object] | None, ...],
+    clauses: list[SourceRequirementClause],
+    requirement_text: str,
+    locations: tuple[str, ...],
+    error: Exception,
+) -> _SourceClauseValidationIssue:
+    for index, clause in enumerate(clauses):
+        try:
+            validate_planned_clauses([clause], requirement_text)
+        except (ValueError, KeyError, TypeError) as clause_error:
+            entry = entries[index] if index < len(entries) else clause.to_dict()
+            return _source_clause_validation_issue(
+                clause_error,
+                entry,
+                index,
+                message=str(error),
+                location=_source_clause_location_at(locations, index),
+            )
+    return _source_clause_validation_issue(error)
+
+
+def _signature_validation_issue(
+    requirement_text: str,
+    clauses: list[SourceRequirementClause],
+    error: Exception,
+) -> _SourceClauseValidationIssue:
+    location = "document"
+    try:
+        for signature in required_signatures(requirement_text):
+            if not any(signature.source_quote in clause.text for clause in clauses):
+                digest = sha256(signature.source_quote.encode()).hexdigest()[:16]
+                location = f"source-signature:{digest}"
+                break
+    except (ValueError, KeyError, TypeError):
+        pass
+    return _source_clause_validation_issue(error, location=location)
+
+
+def _source_clause_validation_issue(
+    error: Exception,
+    entry: dict[str, object] | None = None,
+    index: int | None = None,
+    location: str | None = None,
+    message: str | None = None,
+) -> _SourceClauseValidationIssue:
+    location = location or _source_clause_location(entry, index)
+    detail = str(error) if message is None else message
+    rule = _source_clause_validation_rule(error)
+    return _SourceClauseValidationIssue(
+        detail,
+        location,
+        rule,
+        entry,
+        index,
+    )
+
+
+def _source_clause_location(entry: dict[str, object] | None, index: int | None) -> str:
+    return "document" if index is None else f"clause-slot:{index + 1}"
+
+
+def _source_clause_validation_rule(
+    error: Exception,
+) -> str:
+    chain = _exception_chain(error)
+    field = _source_clause_error_field(" ".join(str(candidate) for candidate in chain))
+    for candidate in reversed(chain):
+        frames = extract_tb(candidate.__traceback__)
+        for frame in reversed(frames):
+            if "/core/" in frame.filename.replace("\\", "/"):
+                origin = f"{Path(frame.filename).stem}:{frame.name}:{frame.lineno}"
+                return f"{origin}:{field}"
+    return f"{type(error).__name__}:{field}"
+
+
+def _exception_chain(error: Exception) -> tuple[Exception, ...]:
+    chain: list[Exception] = []
+    current: Exception | None = error
+    while current is not None and current not in chain:
+        chain.append(current)
+        next_error = current.__cause__ or current.__context__
+        current = next_error if isinstance(next_error, Exception) else None
+    return tuple(chain)
+
+
+def _unresolved_source_clause_error_reason(issue: _SourceClauseValidationIssue) -> str:
+    return (
+        "behavior validator argument unresolved after its one correction "
+        f"at {issue.location} rule {issue.rule}"
+    )
+
+
+def _replace_invalid_clause_with_split(
+    response: str,
+    issue: _SourceClauseValidationIssue,
+    split: _SourceClauseSplitResponse,
+    progress: _SourceClauseSplitProgress,
+    locations: tuple[str, ...],
+) -> tuple[str, tuple[str, ...]]:
+    if split.disposition == "not_produced":
+        raise ValueError(f"source clause split not produced: {split.rationale}")
+    if issue.raw_clause is None or issue.clause_index is None:
+        raise ValueError("source clause split requires an identifiable offending clause")
+    entries = list(_raw_source_clause_entries(response))
+    if issue.clause_index >= len(entries) or entries[issue.clause_index] != issue.raw_clause:
+        raise ValueError("source clause split parent changed before replacement")
+    children = _source_clause_split_children(issue.raw_clause, split)
+    child_locations = tuple(
+        f"{issue.location}/S{index:03d}" for index in range(1, len(children) + 1)
+    )
+    _validate_source_clause_split(
+        issue.raw_clause,
+        children,
+        entries,
+        progress,
+        issue.location,
+        child_locations,
+    )
+    entries[issue.clause_index:issue.clause_index + 1] = children
+    next_locations = locations[:issue.clause_index] + child_locations + locations[issue.clause_index + 1:]
+    return json.dumps({"clauses": entries}, sort_keys=True), next_locations
+
+
+def _decode_source_clause_split(response: str) -> _SourceClauseSplitResponse:
+    try:
+        payload = _json_object(response, label="source clause split")
+    except ValueError as error:
+        raise _SourceClauseSplitFormatError(str(error)) from error
+    disposition = payload.get("disposition")
+    rationale = payload.get("rationale")
+    if disposition not in {"split", "not_produced"} or not isinstance(rationale, str) or not rationale.strip():
+        raise _SourceClauseSplitFormatError("source clause split requires a disposition and rationale")
+    if disposition == "not_produced":
+        if payload.get("children") not in (None, []):
+            raise ValueError("not_produced source clause split cannot contain children")
+        return _SourceClauseSplitResponse(disposition, rationale)
+    coverage = payload.get("coverage_rationale")
+    children = payload.get("children")
+    if not isinstance(coverage, str) or not coverage.strip() or not isinstance(children, list):
+        raise _SourceClauseSplitFormatError("source clause split requires coverage rationale and children")
+    if not 2 <= len(children) <= MAX_SOURCE_CLAUSE_CHILDREN:
+        raise ValueError("source clause split child count outside configured safety budget")
+    return _SourceClauseSplitResponse(
+        disposition,
+        rationale,
+        tuple(_source_clause_split_child(item) for item in children),
+        coverage,
+    )
+
+def _source_clause_split_child(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise _SourceClauseSplitFormatError("source clause split children must be objects")
+    child = dict(value)
+    allowed = {"text", "kind", "evidence_kind", "source_quote", "subject", "obligation_type"}
+    if set(child) - allowed:
+        raise _SourceClauseSplitFormatError("source clause split children cannot assign refs or unknown fields")
+    return child
+
+
+@dataclass(frozen=True)
+class _RecoveredSourceClauseSplit:
+    disposition: str
+    children: tuple[tuple[str, ...], ...] | None
+
+
+def _recover_source_clause_split(response: str) -> _RecoveredSourceClauseSplit | None:
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    disposition = payload.get("disposition")
+    if disposition not in {"split", "not_produced"}:
+        return None
+    children = payload.get("children")
+    if not isinstance(children, list) or not all(isinstance(child, dict) for child in children):
+        return _RecoveredSourceClauseSplit(disposition, None)
+    fields = ("text", "kind", "evidence_kind", "source_quote", "subject", "obligation_type")
+    return _RecoveredSourceClauseSplit(
+        disposition,
+        tuple(
+            tuple(
+                json.dumps(child.get(field), sort_keys=True, separators=(",", ":"))
+                for field in fields
+            )
+            for child in children
+        ),
+    )
+
+
+def _validate_source_clause_split_format_repair(
+    invalid_response: str,
+    repaired_response: str,
+) -> None:
+    original = _recover_source_clause_split(invalid_response)
+    if original is None:
+        return
+    repaired = _recover_source_clause_split(repaired_response)
+    if repaired is None or repaired.disposition != original.disposition:
+        raise ValueError("source clause split format repair changed the original disposition")
+    if original.children is not None and repaired.children != original.children:
+        raise ValueError("source clause split format repair changed the original children")
+
+
+def _source_clause_split_children(
+    parent: dict[str, object],
+    split: _SourceClauseSplitResponse,
+) -> list[dict[str, object]]:
+    parent_ref = parent.get("ref")
+    if not isinstance(parent_ref, str) or not parent_ref.strip():
+        raise ValueError("source clause split parent requires a ref")
+    return [
+        {"ref": f"{parent_ref}-S{index:03d}", **child}
+        for index, child in enumerate(split.children, 1)
+    ]
+
+
+def _validate_source_clause_split(
+    parent: dict[str, object],
+    children: list[dict[str, object]],
+    entries: list[dict[str, object] | None],
+    progress: _SourceClauseSplitProgress,
+    parent_location: str,
+    child_locations: tuple[str, ...],
+) -> None:
+    parent_ref = str(parent["ref"])
+    ancestors = progress.ancestors_by_location.get(parent_location, ())
+    if progress.split_count >= MAX_SOURCE_CLAUSE_SPLITS:
+        raise ValueError("source clause split safety budget exhausted")
+    if len(ancestors) >= MAX_SOURCE_CLAUSE_SPLIT_DEPTH:
+        raise ValueError("source clause split depth exhausted")
+    parent_shape = _source_clause_shape(parent)
+    child_shapes = tuple(_source_clause_shape(child) for child in children)
+    if parent_shape in child_shapes:
+        raise ValueError("source clause split contains a child identical to its parent")
+    if len(set(child_shapes)) != len(child_shapes):
+        raise ValueError("source clause split contains duplicate children")
+    if set(child_shapes).intersection(ancestors):
+        raise ValueError("source clause split contains a child repeating an ancestor")
+    structure = sha256(json.dumps((parent_shape, sorted(child_shapes))).encode()).hexdigest()
+    if structure in progress.structures:
+        raise ValueError("source clause split repeats a prior split structure")
+    _validate_split_source_authority(parent, children)
+    _validate_split_progress(parent, children)
+    _validate_split_refs(parent_ref, children, entries)
+    progress.split_count += 1
+    progress.structures.add(structure)
+    child_ancestors = ancestors + (parent_shape,)
+    for location, child in zip(child_locations, children):
+        progress.ancestors_by_location[location] = child_ancestors
+        progress.assigned_child_authority[location] = (str(child["ref"]), str(child["source_quote"]))
+
+
+def _validate_split_source_authority(
+    parent: dict[str, object],
+    children: list[dict[str, object]],
+) -> None:
+    parent_quote = _normalized_source_clause_text(parent.get("source_quote"))
+    if not parent_quote:
+        raise ValueError("source clause split parent requires a source passage")
+    if any(_normalized_source_clause_text(child.get("source_quote")) != parent_quote for child in children):
+        raise ValueError("source clause split children must retain the parent source passage")
+
+
+def _validate_split_progress(
+    parent: dict[str, object],
+    children: list[dict[str, object]],
+) -> None:
+    parent_terms = _source_clause_terms(parent)
+    child_terms = [_source_clause_terms(child) for child in children]
+    if not parent_terms or not parent_terms.issubset(set().union(*child_terms)):
+        raise ValueError("source clause split does not preserve the parent obligation wording")
+    if any(not terms.issubset(parent_terms) for terms in child_terms):
+        raise ValueError("source clause split introduces wording outside the parent obligation")
+    if any(parent_terms.issubset(terms) for terms in child_terms):
+        raise ValueError("source clause split contains a child that reproduces the parent obligation")
+
+
+def _validate_split_refs(
+    parent_ref: str,
+    children: list[dict[str, object]],
+    entries: list[dict[str, object] | None],
+) -> None:
+    expected = [f"{parent_ref}-S{index:03d}" for index in range(1, len(children) + 1)]
+    if [str(child["ref"]) for child in children] != expected:
+        raise ValueError("source clause split child refs are not deterministic")
+    existing = {
+        str(entry["ref"])
+        for entry in entries
+        if entry is not None and isinstance(entry.get("ref"), str)
+    }
+    existing.discard(parent_ref)
+    if existing.intersection(expected):
+        raise ValueError("source clause split child ref collides with an existing clause")
+
+
+def _source_clause_shape(clause: dict[str, object]) -> str:
+    fields = ("text", "kind", "evidence_kind", "source_quote", "subject", "obligation_type")
+    content = [_normalized_source_clause_text(clause.get(field)) for field in fields]
+    return sha256(json.dumps(content).encode()).hexdigest()
+
+
+def _source_clause_terms(clause: dict[str, object]) -> set[str]:
+    ignored = {"a", "an", "and", "or", "of", "the", "to"}
+    text = str(clause.get("text", ""))
+    return set(re.findall(r"\w+", text.casefold())) - ignored
+
+
+def _normalized_source_clause_text(value: object) -> str:
+    return " ".join(re.findall(r"\w+", str(value).casefold()))
 
 
 class BehaviorContractPlanner:
@@ -1922,6 +2621,135 @@ def _source_clause_repair_prompt(
         indent=2,
         sort_keys=True,
     )
+
+
+def _source_clause_targeted_repair_prompt(
+    *,
+    project_id: str,
+    issue: _SourceClauseValidationIssue,
+) -> str:
+    if issue.raw_clause is None:
+        raise ValueError("targeted source clause repair requires an offending clause")
+    return json.dumps(
+        {
+            "instruction": "Repair only the identified ATHBA PR16 source requirement clause. Return exactly one corrected clause object as raw JSON only.",
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+                "return exactly one corrected clause object, not a clauses list or wrapper",
+                "do not include ref or source_quote; ATHBA retains stable identity and source authority",
+            ],
+            "project_id": project_id,
+            "stable_clause_location": issue.location,
+            "offending_clause": issue.raw_clause,
+            "retained_source_passage": issue.raw_clause["source_quote"],
+            "validation_error": issue.message,
+            "required_json_schema": _source_clause_targeted_repair_schema(),
+            "rules": _source_clause_rules(),
+            "repair_rules": [
+                "correct only the reported validation error for this one clause",
+                "preserve the clause's original meaning and source grounding",
+                "do not invent requirements to satisfy validation",
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+def _source_clause_split_prompt(
+    *,
+    project_id: str,
+    requirement_text: str,
+    offending_clause: dict[str, object],
+    validation_error: str,
+) -> str:
+    return json.dumps(
+        {
+            "instruction": "Decompose only the offending source clause into smaller source-grounded clauses. Return raw JSON only.",
+            "project_id": project_id,
+            "requirement_text": requirement_text,
+            "offending_source_passage": offending_clause.get("source_quote", ""),
+            "offending_clause": offending_clause,
+            "validation_error": validation_error,
+            "required_json_schema": _source_clause_split_schema(),
+            "rules": [
+                "return either disposition split or not_produced",
+                "a split must contain at least two smaller distinct children",
+                "preserve the complete parent obligation without inventing behavior, errors, restrictions or capabilities",
+                "preserve explicit error and state-preservation requirements in the children",
+                "retain the parent source passage on every child",
+                "do not assign child refs; ATHBA assigns deterministic refs",
+                "not_produced must explain why meaningful decomposition is unavailable",
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _source_clause_split_format_repair_prompt(
+    *,
+    request: _SourceClauseSplitRequest,
+    invalid_response: str,
+    validation_error: str,
+) -> str:
+    issue = request.issue
+    return json.dumps(
+        {
+            "instruction": "Correct only the JSON/schema format of this source-clause split response. Return raw JSON only.",
+            "output_rules": [
+                "return raw JSON only",
+                "do not wrap the JSON in Markdown",
+                "do not use code fences",
+                "do not add commentary before or after the JSON",
+            ],
+            "project_id": request.project_id,
+            "requirement_text": request.requirement_text,
+            "offending_source_passage": (issue.raw_clause or {}).get("source_quote", ""),
+            "offending_clause": issue.raw_clause or {},
+            "source_clause_validation_error": issue.message,
+            "invalid_split_response": invalid_response,
+            "format_validation_error": validation_error,
+            "required_json_schema": _source_clause_split_schema(),
+            "format_repair_rules": [
+                "this is format-only repair; do not semantically replan or decompose",
+                "do not add, remove, merge, or change child obligations",
+                "preserve the original disposition, child count, child fields, source grounding, and meanings",
+                "do not assign child refs; ATHBA assigns deterministic refs",
+            ],
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+def _source_clause_targeted_repair_schema() -> dict[str, object]:
+    return {
+        "text": "string",
+        "kind": "behavior|validation|invariant|constraint|quality",
+        "evidence_kind": "test|mechanical|review",
+        "subject": "a grounded source subject",
+        "obligation_type": "observable_behavior|precondition|error_behavior|invariant|mechanical_assurance|non_persistence_assurance|naming",
+    }
+
+
+def _source_clause_split_schema() -> dict[str, object]:
+    return {
+        "disposition": "split|not_produced",
+        "rationale": "string",
+        "coverage_rationale": "string required for split",
+        "children": [
+            {
+                "text": "string",
+                "kind": "behavior|validation|invariant|constraint|quality",
+                "evidence_kind": "test|mechanical|review",
+                "source_quote": "the exact parent source passage",
+                "subject": "a grounded source subject",
+                "obligation_type": "optional classification",
+            }
+        ],
+    }
 
 
 def _source_clause_output_rules() -> list[str]:
