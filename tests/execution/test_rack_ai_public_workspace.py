@@ -285,8 +285,16 @@ def test_successful_public_workspace_result_reaches_validation_and_uses_public_p
     assert "context_window" not in workspace["requirements"]
     assert "max_input_tokens" not in workspace["requirements"]
     assert "max_output_tokens" not in workspace["requirements"]
-    assert workspace["repository"]["registered_root"] == str(root)
-    assert "root" not in workspace["repository"]
+    assert workspace["repository"] == {
+        "id": "repo",
+        "root": str(root),
+        "base_ref": "main",
+        "base_sha": revision,
+    }
+    assert result.execution_provenance == {"repository_root": str(root)}
+    record = port.reservation.workspace_submission("submission")
+    assert record is not None
+    assert record["repository_root"] == str(root)
     assert submit["request"]["service"] == "local-coder"
 
 
@@ -310,9 +318,20 @@ def test_successful_public_workspace_result_reaches_validation_and_uses_public_p
     assert wait_enter["elapsed_seconds"] == 0.0
 
 
-def test_dynamic_athba_project_repository_is_submitted_as_root(tmp_path, monkeypatch):
-    root, revision = _git_repo(tmp_path)
-    monkeypatch.setattr(public_workspace, "ATHBA_DYNAMIC_PROJECTS_ROOT", str(tmp_path))
+def test_approved_project_delivery_worktree_is_submitted_as_root(tmp_path):
+    projects = (
+        tmp_path
+        / "srv"
+        / "ATHBA"
+        / "state"
+        / "approved-project-setup"
+        / "projects"
+        / "basket"
+        / "delivery-management"
+        / "worktrees"
+    )
+    projects.mkdir(parents=True)
+    root, revision = _git_repo(projects)
     runtime = PublicRuntime(tmp_path)
     port = _port(tmp_path, runtime)
     work_id = _work_id(port)

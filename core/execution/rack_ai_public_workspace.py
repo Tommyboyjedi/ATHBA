@@ -25,7 +25,6 @@ from core.filesystem_policy import resolve_identifier_path
 
 PUBLIC_WORK_CONTRACT_VERSION = "1.4.0"
 _REQUIRED_PUBLIC_WORK_OPERATIONS = frozenset({"inspect_work_execution", "get_work_artifact"})
-ATHBA_DYNAMIC_PROJECTS_ROOT = "/srv/ATHBA/state/projects"
 _ACCEPTED_REPLAY_SAFETY = frozenset({"closed_inspection_only"})
 
 
@@ -568,18 +567,11 @@ def _repository_payload(request: WorkspaceExecutionRequest) -> dict[str, object]
         "base_sha": request.repository.base_sha,
     }
     root = request.repository.registered_root
-    if _is_dynamic_repository_root(root):
+    if root is not None:
         repository["root"] = root
-    else:
-        repository["registered_root"] = root
     return repository
 
 
-def _is_dynamic_repository_root(root: str | None) -> bool:
-    if root is None:
-        return False
-    dynamic = ATHBA_DYNAMIC_PROJECTS_ROOT.rstrip("/")
-    return root == dynamic or root.startswith(dynamic + "/")
 
 
 def _attempt_accepted(attempt: dict[str, object], outcome: dict[str, object], workspace: object) -> bool:
